@@ -33,7 +33,7 @@ setup'acido = withSC3 $ \fd -> do
     ,("aohat",hat),("aoacid",return acid),("aofx",return fx)
     ,("aoacid2",return acid2)]
   patchNode (nodify acidNd) fd
-  
+
 ------------------------------------------------------------------------------
 -- Synthdefs
 
@@ -151,9 +151,9 @@ acid =
       shp2 = env [0, 70.0, 0.8, 0.8] [0.001, 0.8, 0]
              (map EnvNum [-4, -4, -4]) (-1) 1
       ptc0 = lag ("pitch"@@50) (0.12 * (1 - trig gt 0.001) * gt)
-      gt = "gate"@@1 
+      gt = "gate"@@1
   in  out ("out"@@0) $ dup sig0
-      
+
 acid2 :: UGen
 acid2 =
   let sig0 = sig1 * env1
@@ -167,9 +167,9 @@ acid2 =
              (map EnvNum [-4, -4, -4]) (-1) 1
       ptc0 = lag ("pitch"@@50) (0.12 * (1 - trig gt 0.001) * gt)
       gt = toggleFF (gt'+ tDelay gt' (0.25 * "delta"@@0.1))
-      gt' = "t_gate"@@1 
+      gt' = "t_gate"@@1
   in  out ("out"@@0) $ dup sig0
-      
+
 fx :: UGen
 fx =
   let sig0 = limiter sig1 1.0 0.02
@@ -185,29 +185,32 @@ fx =
       gt = 1 - trig ("gate"@@1) 0.01
   in  replaceOut ("outBus"@@0) sig0
 
+dup :: UGen -> UGen
+dup ug = mce2 ug ug
+
 ------------------------------------------------------------------------------
 -- Nodes
 
 acidNd :: Nd
-acidNd = 
+acidNd =
   grp 0
     [ grp 1
       [ syn' aoid "aoacid2" []]
     , grp 2
       [ syn "fx" [] ]]
-    
+
 aoid = 1000
-    
+
 ------------------------------------------------------------------------------
 -- Patterns
-  
+
 type Sco = [(String,[Double])]
 
 bseq :: Sco
 bseq =
   [ ("t_gate", [1,1,1,1, 1,1,1,1, 0,1,0,1, 1,1,1,0])
   , ("delta",  [1,1,0,2, 1,1,0,0, 2,0,2,0, 1,2,0,4])
-  , ("pitch",  
+  , ("pitch",
      map (+38) [-24,-12,0,-12, 0,-12,10,12, 0,7,-7,0, -11,1,13,15])]
 
 dseq0 :: Sco
@@ -246,12 +249,12 @@ durs = replicate 16 (60/(bpm*4))
 bpm = 130
 bar = (60/130) * 4
 
-setB = 
+setB =
   leptseq =<< bundle' bar 0 [l_update "bseq" (mkB bseq)]
 
 setD dsq = withLept $ \fd -> do
   send fd =<< bundle' bar 0 [l_update "dseq" (pforever (mkD dsq))]
-  
+
 replaceD old new pat = withLept $ \fd -> do
   send fd =<< bundle' bar 0
     [l_free old, l_new new (mkD pat)]
@@ -260,15 +263,15 @@ mkB sco =
   pforever . pnset aoid .
   map (second (pforever . pconcat . map pdouble)) $
   ("dur", durs) : sco
-      
+
 mkD scos = ppar (map f scos) where
   ds = map pdouble
-  f (n,as) = 
+  f (n,as) =
     pforever $ psnew ("ao"++n) Nothing AddToTail 1
     [("dur", pconcat $ ds durs)
     ,("amp", pconcat $ ds $ map (*0.25) as)]
-    
-    
+
+
 {-
 
 withSC3 $ flip send $ dumpOSC HexPrinter
@@ -280,7 +283,7 @@ playE $ ppar [mkB bseq, mkD dseq3]
 
 setup'acido
 
-addB 
+addB
 addBR =<< newStdGen
 
 setD dseq0
@@ -295,5 +298,5 @@ replaceD "dseq2" "dseq3" dseq3
 replaceD "dseq1" "dseq0" dseq0
 
 -}
-    
+
 -- RIP.

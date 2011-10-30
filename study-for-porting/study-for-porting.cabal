@@ -24,6 +24,7 @@ Library
     Sound.Study.Porting.SPE
   build-depends:
     base >= 2.0 && < 5.0,
+    containers -any,
     filepath -any,
     hsc3 >= 0.10,
     hsc3-lepton >= 0.0.6,

@@ -17,7 +17,7 @@ module Sound.Study.ForNoisesAndFilters.B001 where
 import Sound.OpenSoundControl
 import Sound.SC3
 import Sound.SC3.ID
-import Sound.SC3.Lepton
+import Sound.SC3.Lepton hiding (limiter)
 
 setup fd = do
   mapM_ (\(n,u) -> loadSynthdef n u fd)
@@ -77,6 +77,10 @@ rgGraph =
           ,"a_l2":<=4,"a_r2":<=5
           ,"a_l3":<=8,"a_r3":<=9
           ,"mamp":=0.8]]]
+
+  where
+    grp = Group
+    syn = Synth
 
 tr001 = mrg [d, out ("out"@@0) t] where
   t = impulse kr ("freq"@@8) 0
@@ -175,11 +179,11 @@ hit002 = mrg [replaceOut ("lout"@@0) low
   mid = midi * mide * 10 * tExpRand 'm' 0.5 1 trm
   mide = envGen kr trm 1 0 300e-3 DoNothing $
          env [0,0,1,0] [0,edgem,1-edgem] [EnvNum (-13)] (-1) 0
-  edgem = index durb (tiRand 'm' 0 4 trm)
+  edgem = index durb (tIRand 'm' 0 4 trm)
   high = highi * highe * 8 * tExpRand 'h' 0.8 1 trh
   highe = envGen kr trh 1 0 300e-3 DoNothing $
           env [0,0,1,0] [0,edgeh,1-edgeh] [EnvNum (-13)] (-1) 0
-  edgeh = index durb (tiRand 'h' 0 4 trm)
+  edgeh = index durb (tIRand 'h' 0 4 trm)
   trl = mix $ coinGate 'l' 0.9375 $ pulseDivider tin 64 (mce [0,32,34])
   trm = mix $ pulseDivider tin 16 (mce [0,3,6,8,12])
   trh = coinGate 'h' 0.75 $ pulseDivider tin 1 0
@@ -229,7 +233,7 @@ cmb001 = replaceOut ("out"@@0) o where
 cmb002 = replaceOut ("out"@@0) o where
   o = sum [mkO 'z' 230e-3, mkO 'y' 330e-3, mkO 'x' 120e-3]
   mkO j dt = combL i 0.5 (1/f) 0.25 where
-    f = lag2 (index freqB (tiRand j 0 plen tr)) dt
+    f = lag2 (index freqB (tIRand j 0 plen tr)) dt
   freqB = asLocalBuf 'a' fs
   fs = map (midiCPS . (+48)) ps
   plen = constant $ length ps
@@ -305,10 +309,6 @@ mix001 = replaceOut ("out"@@0) o where
 fadeOutEnv = envGen kr 1 1 0 1 {- RemoveSynth -} DoNothing $
              -- env [0,1,1,0] [0,226,5] [EnvCub] (-1) 0
              env [0,1,1,1] [0,226,5] [EnvCub] (-1) 0
-
--- Better to add these 2 functions to lepton.
-grp = Group
-syn = Synth
 
 w = withSC3
 prn = printRootNode

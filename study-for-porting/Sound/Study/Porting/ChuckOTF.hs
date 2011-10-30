@@ -26,7 +26,7 @@ import Sound.SC3.Lepton
 otfperc :: UGen
 otfperc = out ("out"@@0) sig where
   sig = pan2 (pb * ("amp"@@0.3)) ("pan"@@0) 1
-  pb = playBuf 1 ("bnum"@@0) 1 1 0 NoLoop RemoveSynth
+  pb = playBuf 1 AR ("bnum"@@0) 1 1 0 NoLoop RemoveSynth
 
 otfsine :: UGen
 otfsine = out ("out"@@0) sig where
