@@ -1,0 +1,31 @@
+name:           study-for-porting
+version:        0.0.1
+synopsis:       Studying with rewriting pieces
+author:         8c6794b6
+maintainer:     8c6794b6@gmail.com
+cabal-version:  >= 1.6
+build-type:     Simple
+license:        BSD3
+license-file:   LICENSE
+category:       Sound
+stability:      experimental
+description:
+  Porting sound compositions written in other languages.
+  In other words, cover, remix, or tribute.
+
+Library
+  ghc-options:
+    -Wall
+    -fno-warn-unused-do-bind 
+    -fno-warn-missing-signatures
+  exposed-modules:
+    Sound.Study.Porting.AcidOtophilia
+    Sound.Study.Porting.ChuckOTF
+    Sound.Study.Porting.SPE
+  build-depends:
+    base >= 2.0 && < 5.0,
+    filepath -any,
+    hsc3 >= 0.10,
+    hsc3-lepton >= 0.0.6,
+    hosc >= 0.10,
+    random -any
