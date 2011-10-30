@@ -1,0 +1,36 @@
+Name:                bogus
+Version:             0.0.1
+Synopsis:            bogus compositions
+Description:         bogus, quux, and blob compositions
+License:             BSD3
+License-file:        LICENSE
+Author:              8c6794b6
+Maintainer:          8c6794b6@gmail.com
+Category:            Sound
+Build-type:          Simple
+
+Cabal-version:       >=1.2
+
+Executable bogus
+  ghc-options:
+    -Wall
+    -fno-warn-unused-do-bind
+    -threaded
+  main-is:
+    bogus.hs
+  build-depends:
+    cmdargs >= 0.6.4
+
+Library
+  ghc-options:
+    -Wall
+    -fno-warn-unused-do-bind
+  exposed-modules:
+    Sound.Bogus.EndOfSummer
+    Sound.Bogus.Huh
+  build-depends:
+    base >= 2.0 && < 5.0,
+    hosc -any,
+    hsc3 -any,
+    hsc3-lepton >= 0.0.6,
+    random -any
