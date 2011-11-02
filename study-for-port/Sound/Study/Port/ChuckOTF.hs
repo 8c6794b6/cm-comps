@@ -11,7 +11,7 @@ Port of /on-the-fly synchronization (concurrent)/ chuck example
 by Perry and Ge, from: <http://chuck.cs.princeton.edu/doc/examples/> .
 
 -}
-module Sound.Study.Porting.ChuckOTF where
+module Sound.Study.Port.ChuckOTF where
 
 import System.FilePath ((</>))
 

@@ -10,7 +10,7 @@ Portability : non-portable (NoMonomorphismRestriction)
 Port of acid otophilia example found in SuperCollider help file.
 
 -}
-module Sound.Study.Porting.AcidOtophilia where
+module Sound.Study.Port.AcidOtophilia where
 
 import Control.Arrow (second)
 import System.Random
