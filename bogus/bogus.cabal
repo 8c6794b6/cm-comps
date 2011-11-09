@@ -26,6 +26,7 @@ Library
     -Wall
     -fno-warn-unused-do-bind
   exposed-modules:
+    Sound.Bogus.Birth
     Sound.Bogus.EndOfSummer
     Sound.Bogus.Huh
   build-depends:
