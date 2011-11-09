@@ -84,6 +84,7 @@ bth03 =
       sig = pan2 oss (linLin (lfNoise2 'p' KR (1/59)) (-1) 1 (-0.3) 0.3) 1
   in  out ("out"@@0) $ clip2 (sig*0.14) 1 * 0.3
 
+-- | Percussive mixed sound of FM and high pass noise.
 bth04 :: UGen
 bth04 =
   let sig = (no1+so1) * aenv * amp
@@ -108,6 +109,41 @@ bth04 =
       midx = "midx"@@1.25
       dur = "dur"@@1
       pan = "pan"@@0
+  in  out ("out"@@0) (pan2 sig pan 1)
+
+-- | Percussive noise sound.
+bth05 :: UGen
+bth05 =
+  let sig = foldl' (+) 0 [nz1, nz2, nz3, o1] * amp
+
+      nz1 = flt1 (whiteNoise 'ε' AR) * ae1
+      flt1 x = resonz x freq1 0.05
+      ae1 = envGen KR 1 1 0 dur RemoveSynth (envPerc 1e-3 1)
+      freq1 = "freq1"@@1327
+
+      nz2 = flt2 (whiteNoise 'δ' AR) * ae2
+      flt2 x = rhpf x freq2 0.2
+      ae2 =
+        decay2 (dust 'd' KR 32) 1e-3 0.4 *
+        decay (impulse KR 1 0) 1
+      freq2 = "freq2"@@8000
+
+      nz3 = flt3 (whiteNoise 'ι' AR) * ae3
+      flt3 x = rlpf x freq3 0.04
+      ae3 = envGen KR 1 1 0 (dur*0.8) DoNothing (envPerc 1e-3 1)
+      freq3 = "freq3"@@8000
+
+      o1 = pulse AR (ofreq*120) 0.5 * ae4
+      ofreq =
+        envGen KR 1 1 0 (dur*0.8) DoNothing (env [1,0.25] [1] [EnvCos] (-1) 0)
+      ae4 =
+        envGen KR 1 1 0 dur DoNothing
+        (env [0,1,0] [1e-4,999e-4] [EnvCub] (-1) 0)
+
+      amp = "amp"@@0.1
+      dur = "dur"@@1
+      pan = "pan"@@0
+
   in  out ("out"@@0) (pan2 sig pan 1)
 
 ------------------------------------------------------------------------------

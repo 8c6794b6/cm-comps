@@ -96,7 +96,6 @@ fib_plain n
 -- | Unit duration.
 dt :: Word64
 dt = 380 * 10 ^ (6::Word64)
--- dt = 160 * 10 ^ (6::Word64)
 
 -- | Make sound with given Int, and pause for one beat.
 tone :: Int -> SC3 ()
@@ -149,11 +148,10 @@ mkMsg ticks n
         , ("out",6)
         , ("pan",1 - (fromIntegral (n `mod` 6) * (2/5))) ]
     sp2 =
-      s_new "bth04" (-1) AddToTail 1
-        [ ("mfreq", 4.2)
-        , ("freq", 443.317)
-        , ("amp", 0.9 + (n'*0.1))
-        , ("dur", 0.1)
+      s_new "bth05" (-1) AddToTail 1
+        [ ("freq", 443.317)
+        , ("amp", 0.4 + (n'*0.02))
+        , ("dur", 0.2)
         , ("out", 6)
         , ("pan", 0.24) ]
     sp3 =
