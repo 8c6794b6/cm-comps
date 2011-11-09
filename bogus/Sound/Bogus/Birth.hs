@@ -1,4 +1,5 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE FlexibleContexts #-}
 {-|
 Module      : $Header$
 CopyRight   : (c) 8c6794b6
@@ -31,10 +32,12 @@ main = do
     patchNode (nodify birthNd) fd
   n <- runSC3 (fib 13)
   n `seq` withSC3 $ \fd -> do
-    send fd $ n_set 1001 [("val",0.1),("dur",16)]
-    threadDelay (14 * 10 ^ (6 :: Int))
-    send fd $ n_set 1000 [("val",0),("dur",2)]
-    threadDelay (2 * 10 ^ (6 :: Int))
+    send fd $ n_set 1001 [("val",0.1),("dur",3)]
+    threadDelay (3 * 10 ^ (6 :: Int))
+    send fd $ n_set 1001 [("val",1e-4),("dur",10)]
+    threadDelay (10 * 10 ^ (6 :: Int))
+    send fd $ n_set 1000 [("val",0),("dur",4.75)]
+    threadDelay (5 * 10 ^ (6 :: Int))
     reset fd
 
 load_ugens :: Transport t => t -> IO ()
@@ -58,8 +61,8 @@ birthNd =
         syn "bthmst"
           [ "out"*=0
           , "in1"*=2, "in1_amp"*<-prmv in1_amp "out"
-          , "in2"*=4, "in2_amp"*= 0.2
-          , "in3"*=6, "in3_amp"*= 0.2 ]
+          , "in2"*=4, "in2_amp"*= 0.3
+          , "in3"*=6, "in3_amp"*= 0.3 ]
   in  grp 0
         [ grp 1 [ in1_amp, edur ]
         , grp 2 [ bth03Nd ]
@@ -78,9 +81,22 @@ fib n
     tone n
     return $ a + b
 
+fib_plain :: (Monad m, MonadState Int m, MonadIO m) => Int -> m Int
+fib_plain n
+  | n == 0    = modify (+1) >> return 1
+  | n == 1    = modify (+1) >> return 1
+  | otherwise = do
+    a <- fib_plain (n-2)
+    b <- fib_plain (n-1)
+    i <- get
+    liftIO $ print i
+    put (i+1)
+    return $ a + b
+
 -- | Unit duration.
 dt :: Word64
 dt = 380 * 10 ^ (6::Word64)
+-- dt = 160 * 10 ^ (6::Word64)
 
 -- | Make sound with given Int, and pause for one beat.
 tone :: Int -> SC3 ()
@@ -100,12 +116,11 @@ mkMsg ticks n
     nid <- newNid
     return (nid, [s_new "rest" nid AddToTail 1 []])
   | otherwise = do
-    -- liftIO $ print ticks
     nid <- newNid
     let os = case ticks of
           _ | ticks == 50  -> [scream]
             | ticks == 151 -> [edur]
-            | ticks >= 300 -> [sperc]
+            | ticks >= 300 -> mkperc ticks
             | otherwise    -> []
     return (nid,msg nid:os)
   where
@@ -116,12 +131,38 @@ mkMsg ticks n
         , ("dur", n' * 1.2)
         , ("out", 4)
         , ("pan", 0.5 - (fromIntegral (n `mod` 4) * (1/3))) ]
-    scream = n_set 1000 [("val",0.8),("dur",48)]
+    scream = n_set 1000 [("val",1),("dur",48)]
     edur = n_set 1001 [("val",1e-3),("dur",24)]
-    sperc =
-      s_new "bth01" (-1) AddToTail 2
-        [ ("freq", 40.013**n')
-        , ("amp",0.4)
+    mkperc t
+      | t >= 400 && (t `mod` 8 == 0) = [sp1,sp2]
+      | t >= 512 && t < 640 && (t `mod` 8 == 4) = [sp1,sp3]
+      | t >= 578 && (t `mod` 8 == 4)            = [sp1,sp2,sp3]
+      | t >= 612 && t < 688 && (t `mod` 8 == 2) = [sp1,sp2]
+      | t >= 688                                = [sp1,sp2]
+      | otherwise                               = [sp1]
+    sp1 =
+      s_new "bth04" (-1) AddToTail 2
+        [ ("mfreq", ((n' * 110) + (n'*18.32)))
+        , ("freq", n' * 1180)
+        , ("amp",0.7)
+        , ("dur",0.08 + (n'*0.01))
         , ("out",6)
-        , ("pan",0.5) ]
+        , ("pan",1 - (fromIntegral (n `mod` 6) * (2/5))) ]
+    sp2 =
+      s_new "bth04" (-1) AddToTail 1
+        [ ("mfreq", 4.2)
+        , ("freq", 443.317)
+        , ("amp", 0.9 + (n'*0.1))
+        , ("dur", 0.1)
+        , ("out", 6)
+        , ("pan", 0.24) ]
+    sp3 =
+      s_new "bth04" (-1) AddToTail 1
+        [ ("mfreq", 9.232)
+        , ("freq", 2840.1923)
+        , ("edgey",0.9)
+        , ("amp", 0.8 + (n'*0.1))
+        , ("dur", 0.8)
+        , ("out", 6)
+        , ("pan", (-0.1)) ]
     n' = fromIntegral n

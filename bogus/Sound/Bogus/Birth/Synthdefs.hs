@@ -16,7 +16,7 @@ import Data.List (foldl')
 import Language.Haskell.Extract
 import Sound.SC3
 import Sound.SC3.ID
-import Sound.SC3.Lepton
+import Sound.SC3.Lepton hiding (limiter)
 
 -- | List of pair of UGens and its name.
 ugs :: [(String, UGen)]
@@ -48,7 +48,6 @@ bth02 =
       amp = "amp"@@0.2
       aev = envGen KR 1 1 0 dur RemoveSynth ashp
       ashp = envPerc 2e-2 1
-      -- pan = "pan"@@0
       pan = lfdNoise3 'φ' KR (1/13) * 0.5
       dur = "dur"@@1
       dtl = rand 'α' 0 1e-2
@@ -63,12 +62,10 @@ bth03 =
       dense' = 12.5
       dmf' = 3.7
       dmi' = 7
-      -- edur = mouseX KR 1e-4 1 Exponential 0.1
       edur = "edur"@@1e-3
-      -- edur = 0.006
       mkO i =
-        let f = lag (tExpRand i 4000 20000 tick * clip (lfdNoise3 i KR 0.75) 0 1)
-                (tExpRand i 0.25 4 tick)
+        let f = lag (tExpRand i 4000 24000 tick * clip (lfdNoise3 i KR 0.75) 0 1)
+                (tExpRand i 0.125 3 tick)
             a = envGen KR tick vc 0 edur DoNothing
                 (env [1e-9,1e-9,1,1e-9] [0,1-edgy,edgy] [EnvNum ecrv] (-1) 0)
             p = rand i (-pi) pi
@@ -76,21 +73,42 @@ bth03 =
             l = delayC o 1e-2 (rand (-i) 0 1e-2 * dtn)
             r = delayC o 1e-2 (rand i 0 1e-2 * dtn)
         in  mce2 l r
-        -- in  sinOsc AR f p * a
-      tick = impulse KR ampf 0 -- + dust 'd' KR (ampf/2)
-      dtn = 1 -- sinOsc KR (lfdNoise3 'j' KR (1/33)) 0 * 0.5 + 0.5
-      -- ecrv = linLin (lfdNoise3 'c' KR 0.125) (-1) 1 (-12) 12
+      tick = impulse KR ampf 0
+      dtn = 1
       -- ecrv = lfdNoise3 'c' KR 0.125 * 12
       ecrv = 0.995
       edgy = 0.9999
-      -- edgey = clip (lfdNoise1 'e' KR 0.125) 0 1
-      -- edgey = linLin (lfdNoise3 'g' KR 0.06125) (-1) 1 0 1
-      -- tick = dust 'd' KR ampf
+      -- edgy = clip (lfdNoise1 'e' KR 0.125) 0 1
       vc = 1
-      oss = foldl' (\acc i -> acc + mkO i) 0 $ [1000..1015::Int]
-      -- sig = oss
+      oss = foldl' (\acc i -> acc + mkO i) 0 $ [1000..1031::Int]
       sig = pan2 oss (linLin (lfNoise2 'p' KR (1/59)) (-1) 1 (-0.3) 0.3) 1
   in  out ("out"@@0) $ clip2 (sig*0.14) 1 * 0.3
+
+bth04 :: UGen
+bth04 =
+  let sig = (no1+so1) * aenv * amp
+      so1 = sinOsc AR (frq + (frq * sinOsc KR (mfrq*fltq) 0 * midx)) 0
+      no1 = rhpf (whiteNoise 'ζ' AR) fltf fltq * 0.5
+      fltf =
+        envGen KR 1 1 0 dur DoNothing (envPerc 1e-1 1) * frq
+      fltq =
+        envGen KR 1 1 0 dur DoNothing
+        (env [0,1,0.2,0.8,0] [t1,t2,t3,t4] [EnvNum (-9)] (-1) 0)
+      t1 = rand 't' 1e-3 1e-2
+      t2 = rand 'u' 1e-3 1e-1
+      t3 = rand 'v' 1e-3 1e-1
+      t4 = rand 'w' 1e-3 1e-1
+      aenv =
+        envGen KR 1 1 0 dur RemoveSynth
+        (env [0,1,0] [edgey,1-edgey] [EnvCub] (-1) 0)
+      edgey = "edgey"@@1e-3
+      amp = "amp"@@0.3
+      frq = "freq"@@1300
+      mfrq = "mfreq"@@12
+      midx = "midx"@@1.25
+      dur = "dur"@@1
+      pan = "pan"@@0
+  in  out ("out"@@0) (pan2 sig pan 1)
 
 ------------------------------------------------------------------------------
 -- Effects
@@ -99,8 +117,8 @@ bth03 =
 bthmst :: UGen
 bthmst =
   let mkIn key = in' 2 AR (key@@0) * ((key++"_amp")@@0.3)
-      sig = foldl' (+) 0 [mkIn "in1", mkIn "in2", mkIn "in3"]
-  in  replaceOut ("out"@@0) sig
+      sig = rhpf (foldl' (+) 0 [mkIn "in1", mkIn "in2", mkIn "in3"]) 10 0.4
+  in  replaceOut ("out"@@0) (limiter sig 1 1)
 
 ------------------------------------------------------------------------------
 -- Controls
