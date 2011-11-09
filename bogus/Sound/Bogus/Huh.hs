@@ -10,10 +10,17 @@ Main entry point for /huh/.
 -}
 module Sound.Bogus.Huh where
 
+import Control.Exception (bracket_)
+
+import Sound.SC3
+import Sound.SC3.Lepton
+
 import Sound.Bogus.Huh.Patterns
 import Sound.Bogus.Huh.Nodes
 import Sound.Bogus.Huh.Synthdefs
 
 huh :: IO ()
-huh = undefined
-
+huh = withSC3 $ \fd -> bracket_
+  (reset fd >> setupHuh fd >> patchNode (nodify n0) fd)
+  (reset fd)
+  (play fd $ toL allP)

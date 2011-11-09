@@ -11,7 +11,7 @@ Scratch for /huh/ composition.
 Rewrite using pattern instead of demand ugens.
 
 -}
-module Scratch.Huh where
+module Sound.Bogus.Huh.Synthdefs where
 
 import Control.Concurrent
 import Control.Exception
@@ -24,28 +24,6 @@ import Sound.SC3.ID
 import Sound.SC3.Lepton
 
 import qualified Data.ByteString.Lazy.Char8 as LC8
-
--- main :: IO ()
--- main = withSC3 goHuh
-
--- goHuh :: Transport t => t -> IO ()
--- goHuh fd =
---   bracket_
---     (setupHuh fd >> patchNode n0 fd)
---     (reset fd)
---     (play fd $ toR allP)
-
--- goHuh' :: IO ()
--- goHuh'= do
---   withSC3 $ \fd -> reset fd >> patchNode n0 fd
---   withLept $ \fd -> do
---     msg <- bundle' 1 0
---       [ l_new "huh1" huh1P, l_new "huh2" huh2P, l_new "huh3" huh3P
---       , l_new "kik" kikP, l_new "snr" snrP, l_new "hat" hatP
---       , l_new "pu" puP, l_new "bell" bellP
---       , l_new "drn1" drn1P, l_new "drn2" drn2P
---       ]
---     send fd msg
 
 -- writeHuh = writeScore [] n0 (ptakeT 180 allP)
 
@@ -86,60 +64,8 @@ huhdefs =
   ,("cf2mix", cf2mix)
   ,("cf2mixm", cf2mixm)
   ,("cf2mst", cf2mst)
+  ,("cflfnz", cflfnz)
   ]
-
-n0 :: SCNode
-n0 =
-  g 0
-    [g 1
-     [g 10
-      [s 1000 "lfsin" []
-      ,s 1001 "cf2drn"
-       ["out":=20,"gate":=1, "amp":=0]
-      ,s 1002 "cf2drn"
-       ["out":=22,"gate":=1, "amp":=0]]
-     ]
-    ,g 2
-     [s 2000 "cf2rev" -- huh1
-      ["out":=10,"a_in":<=10,"dlyt":=0.2,"dcyt":=4.8,"mix":=0.85]
-     ,s 2001 "cf2rev" -- snr
-      ["out":=14,"a_in":<=14,"dlyt":=0.02,"dcyt":=0.8,"mix":=0.85]
-     ,s 2002 "cf2dly" -- bell
-      ["out":=18,"a_in":<=18,"maxdt":=0.8]
-     ]
-    ,g 8
-     [s 8000 "cf2mix" -- huh1
-      ["out":=0,"a_in":<=10,"amp":=1.8,"pan":=0]
-     ,s 8001 "cf2mix" -- huh2
-      ["out":=0,"a_in":<=11,"amp":=1.4,"pan":=(-0.8)]
-     ,s 8002 "cf2mix" -- huh3
-      ["out":=0,"a_in":<=12,"amp":=1.4,"pan":=0.8]
-     ,s 8003 "cf2mix" -- kik
-      ["out":=0,"a_in":<=13,"amp":=0.8,"pan":=0.03]
-     ,s 8004 "cf2mix" -- snr
-      ["out":=0,"a_in":<=14,"amp":=0.55,"pan":=(-0.1)]
-     ,s 8005 "cf2mix" -- hat
-      ["out":=0,"a_in":<=15,"amp":=0.1,"pan":=(-0.2)]
-     ,s 8006 "cf2mixm" -- pu right
-      ["out":=0,"a_in":<=16,"amp":=1]
-     ,s 8007 "cf2mixm" -- pu left
-      ["out":=1,"a_in":<=17,"amp":=1]
-     ,s 8008 "cf2mix"  -- bell
-      ["out":=0,"a_in":<=18,"amp":=0.8,"pan":=0.1]
-     ,s 8009 "cf2mix" -- drn 1
-      ["out":=0,"a_in":<=20,"amp":=0.9,"pan":=(-0.25)]
-     ,s 8010 "cf2mix" -- drn 2
-      ["out":=0,"a_in":<=22,"amp":=0.9,"pan":=0.25]
-     ]
-    ,g 9
-     [s 9000 "cf2mst"
-      ["out_l":=0, "out_r":=1, "amp":=1]]]
-  where
-    g = Group
-    s = Synth
-
--- shwP =
---   undefined
 
 ------------------------------------------------------------------------------
 -- Control synths
@@ -148,6 +74,11 @@ n0 =
 lfsin :: UGen
 lfsin =
   out ("out"@@100) $ sinOsc KR ("freq"@@1) 0 * ("mul"@@1) + ("add"@@0)
+
+cflfnz :: UGen
+cflfnz =
+  let freq = ("freq"@@0.3) * (sinOsc KR ("mfreq"@@1) 0 * 0.5 + 0.5)
+  in  out ("out"@@101) $ lfdNoise1 'z' KR freq
 
 ------------------------------------------------------------------------------
 -- Source synths
@@ -242,6 +173,7 @@ cf2pu' tick = mrg [out ("out"@@0) sig, d] where
   mkR x = rand x 0.001 0.05
   freq = "freq"@@0 `lag` 0.6
   ampe = decay2 tick 5e-4 950e-3
+  -- amp = "amp"@@0.3
   amp = "amp"@@0.3
   bw = lfdNoise3 'b' KR 0.1123 * 0.48 + 0.5
   d = detectSilence' ampe 0.01 1 RemoveSynth
@@ -257,8 +189,8 @@ cf2bell' tick freq amp = mrg [out ("out"@@0) (sig * amp), d] where
   rs1 = map mkR [(1::Int)..8]
   rs2 = map mkR [(1001::Int)..1008]
   mkR x = expRand x 1e-4 150e-3
-  nz = pinkNoise 'p' AR
-  aenv = decay2 tick 50e-3 1
+  aenv = decay2 tick 50e-3 1 * ampm
+  ampm = sinOsc KR (tExpRand 'z' tick 1e-4 3041.21327) (pi/2) * 0.5 + 0.5
   d = detectSilence' aenv 0.01 1 RemoveSynth
 
 cf2shw :: UGen

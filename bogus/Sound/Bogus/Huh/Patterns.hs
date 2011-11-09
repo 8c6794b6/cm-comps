@@ -10,20 +10,12 @@ Portability : portable
 Huh patterns.
 
 -}
-module Sound.Bogus.Huh2.Patterns where
+module Sound.Bogus.Huh.Patterns where
 
 import Sound.SC3
 import Sound.SC3.Lepton
--- import Sound.Huh (n0)
 
--- main :: IO ()
--- main = withSC3 runHuh
-
--- runHuh fd = do
---   reset fd
---   patchNode n0 fd
---   play fd $ toL allP
-
+bpm :: Double
 bpm = 295
 
 allP = ppar
@@ -41,7 +33,7 @@ i = pint
 mkSN def out key pat = mkSN' def out [(key,pat)]
 mkSN2 def out key pat = mkSN' def out [("t_trig", pforever (d 1)),(key,pat)]
 mkSN' def out kvs =
-  psnew def Nothing AddToTail 10
+  psnew def Nothing AddToTail 3
   ([("dur", pforever (d (60/bpm))),("out", pforever (d out))] ++ kvs)
 
 ------------------------------------------------------------------------------
@@ -138,7 +130,7 @@ puPa =
 
 drn1P =
   let f = pmidiCPS . pdouble; z = d 0 in
-  pnset 1001
+  pnset 3001
   [ ("dur", pforever (d (60/bpm)))
   , ("amp", pforever (d 0.3))
   , ("freq",
@@ -156,7 +148,7 @@ drn1P =
 
 drn2P =
   let f = pmidiCPS . pdouble; z = d 0 in
-  pnset 1002
+  pnset 3002
   [ ("dur", pforever (d (60/bpm)))
   , ("amp", pforever (d 0.3))
   , ("freq",
@@ -178,7 +170,8 @@ bellPa =
   [ pseq (i 16) (ds [0,0,0,0])
   , pseq (i 6) (ds [0,0,0,0])
   , pcycle
-    [ pmidiCPS $ prand (i 16) (map pdouble $ replicate 16 0 ++ [79,84,89,91,96])
+    [ pmidiCPS $ prand (i 16) $ map pdouble $
+      replicate 8 0 ++ [65,67,72,77,79,84,89,91,96,103,110]
     , pseq (i 12) (ds [0,0,0,0])]]
 
 ------------------------------------------------------------------------------
