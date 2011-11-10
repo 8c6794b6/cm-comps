@@ -32,8 +32,9 @@ main = do
     patchNode (nodify birthNd) fd
   n <- runSC3 (fib 13)
   n `seq` withSC3 $ \fd -> do
-    send fd $ n_set 1001 [("val",0.1),("dur",3)]
-    threadDelay (3 * 10 ^ (6 :: Int))
+    threadDelay (1 * 10 ^ (6 :: Int))
+    send fd $ n_free [2100]
+    threadDelay (2 * 10 ^ (6 :: Int))
     send fd $ n_set 1001 [("val",1e-4),("dur",10)]
     threadDelay (10 * 10 ^ (6 :: Int))
     send fd $ n_set 1000 [("val",0),("dur",4.75)]
@@ -54,9 +55,15 @@ birthNd =
       edur =
         syn' 1001 "bthlgc"
           ["out"*=101, "val"*=1e-2, "dur"*=1]
+      in1_wet =
+        syn' 1002 "bthlgc"
+          ["out"*=102, "val"*=0, "dur"*=2]
       bth03Nd =
         syn "bth03"
           ["out"*=2, "edur"*<- prmv edur "out"]
+      rev =
+        syn "bthrev"
+          [ "out"*=2, "in"*=2, "wet"*<-prmv in1_wet "out"]
       mst =
         syn "bthmst"
           [ "out"*=0
@@ -64,13 +71,14 @@ birthNd =
           , "in2"*=4, "in2_amp"*= 0.3
           , "in3"*=6, "in3_amp"*= 0.3 ]
   in  grp 0
-        [ grp 1 [ in1_amp, edur ]
+        [ grp 1 [ in1_amp, in1_wet, edur ]
         , grp 2 [ bth03Nd ]
-        , grp 3 [ mst ]]
+        , grp 3 [ rev, mst ]]
 
 ------------------------------------------------------------------------------
 -- Actions
 
+-- | Fibonacci sequence sending message as side effect.
 fib :: Int -> SC3 Int
 fib n
   | n == 0 = tone 0 >> return 1
@@ -79,18 +87,6 @@ fib n
     a <- fib (n-2)
     b <- fib (n-1)
     tone n
-    return $ a + b
-
-fib_plain :: (Monad m, MonadState Int m, MonadIO m) => Int -> m Int
-fib_plain n
-  | n == 0    = modify (+1) >> return 1
-  | n == 1    = modify (+1) >> return 1
-  | otherwise = do
-    a <- fib_plain (n-2)
-    b <- fib_plain (n-1)
-    i <- get
-    liftIO $ print i
-    put (i+1)
     return $ a + b
 
 -- | Unit duration.
@@ -109,16 +105,21 @@ tone n = do
     waitUntil fd "/n_go" nid
 
 -- | Make OSC messages. Pause when second arg is 0.
-mkMsg :: Int -> Int -> IO (Int,[OSC])
+mkMsg ::
+  Int    -- ^ Current number of ticks.
+  -> Int -- ^ N passed from seeding logic (e.g. fibonacci sequence).
+  -> IO (Int,[OSC])
 mkMsg ticks n
   | n == 0    = do
     nid <- newNid
     return (nid, [s_new "rest" nid AddToTail 1 []])
   | otherwise = do
+    -- liftIO $ print ticks
     nid <- newNid
     let os = case ticks of
           _ | ticks == 50  -> [scream]
             | ticks == 151 -> [edur]
+            | ticks == 289 -> [sweeper]
             | ticks >= 300 -> mkperc ticks
             | otherwise    -> []
     return (nid,msg nid:os)
@@ -132,12 +133,14 @@ mkMsg ticks n
         , ("pan", 0.5 - (fromIntegral (n `mod` 4) * (1/3))) ]
     scream = n_set 1000 [("val",1),("dur",48)]
     edur = n_set 1001 [("val",1e-3),("dur",24)]
+    -- `fib 13` has 753 ticks.
     mkperc t
+      | t == 749                                = [sp1,sp2,edur_change,wet]
       | t >= 400 && (t `mod` 8 == 0) = [sp1,sp2]
-      | t >= 512 && t < 640 && (t `mod` 8 == 4) = [sp1,sp3]
-      | t >= 578 && (t `mod` 8 == 4)            = [sp1,sp2,sp3]
-      | t >= 612 && t < 688 && (t `mod` 8 == 2) = [sp1,sp2]
-      | t >= 688                                = [sp1,sp2]
+      | t >= 512 && t < 640 && (t `mod` 8 == 4) = [sp1]
+      | t >= 578 && (t `mod` 8 == 4)            = [sp1,sp2]
+      | t >= 612 && t < 712 && (t `mod` 8 == 2) = [sp1,sp2]
+      | t >= 712                                = [sp1,sp2]
       | otherwise                               = [sp1]
     sp1 =
       s_new "bth04" (-1) AddToTail 2
@@ -149,18 +152,51 @@ mkMsg ticks n
         , ("pan",1 - (fromIntegral (n `mod` 6) * (2/5))) ]
     sp2 =
       s_new "bth05" (-1) AddToTail 1
-        [ ("freq", 443.317)
-        , ("amp", 0.4 + (n'*0.02))
-        , ("dur", 0.2)
+        [ ("freq1", 1080.317 + (n'*3.432))
+        , ("freq2", 2003.982 + (n'*1.991))
+        , ("freq3", 8830.003 + (n'*13.32))
+        , ("amp", 0.18 + (n'*0.02) + (fromIntegral ticks * 0.001))
+        , ("dur", 0.31)
         , ("out", 6)
-        , ("pan", 0.24) ]
-    sp3 =
-      s_new "bth04" (-1) AddToTail 1
-        [ ("mfreq", 9.232)
-        , ("freq", 2840.1923)
-        , ("edgey",0.9)
-        , ("amp", 0.8 + (n'*0.1))
-        , ("dur", 0.8)
-        , ("out", 6)
-        , ("pan", (-0.1)) ]
+        , ("pan", 0.04) ]
+    sweeper =
+      s_new "bth06" 2100 AddToTail 2
+        [("edur",60),("amp",0.8),("out",6)]
+    edur_change =
+      n_set 1001 [("val",0.1),("dur",3)]
+    wet = n_set 1002 [("val",1), ("dur",12)]
     n' = fromIntegral n
+
+------------------------------------------------------------------------------
+-- Misc
+
+fib_plain :: (Monad m, MonadState Int m, MonadIO m) => Int -> m Int
+fib_plain n
+  | n == 0    = modify (+1) >> return 1
+  | n == 1    = modify (+1) >> return 1
+  | otherwise = do
+    a <- fib_plain (n-2)
+    b <- fib_plain (n-1)
+    i <- get
+    liftIO $ print i
+    put (i+1)
+    return $ a + b
+
+bth05_msg :: Double -> Double -> Double -> IO ()
+bth05_msg f1 f2 f3 = withSC3 $ \fd ->
+  send fd $ s_new "bth05" (-1) AddToTail 1
+    [ ("freq1", f1)
+    , ("freq2", f2)
+    , ("freq3", f3)
+    , ("amp", 0.8 + (3*0.02))
+    , ("dur", 0.31)
+    , ("out", 0)
+    , ("pan", 0.24) ]
+
+bthrev_msg :: IO ()
+bthrev_msg = withSC3 $ \fd ->
+  let n = grp 0
+          [ grp 1
+            [ syn "bth03" ["out"*=0]
+            , syn "bthrev" ["in"*=0, "out"*=0 ]]]
+  in  patchNode (nodify n) fd

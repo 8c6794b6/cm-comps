@@ -119,19 +119,19 @@ bth05 =
       nz1 = flt1 (whiteNoise 'ε' AR) * ae1
       flt1 x = resonz x freq1 0.05
       ae1 = envGen KR 1 1 0 dur RemoveSynth (envPerc 1e-3 1)
-      freq1 = "freq1"@@1327
+      freq1 = "freq1"@@1080
 
       nz2 = flt2 (whiteNoise 'δ' AR) * ae2
       flt2 x = rhpf x freq2 0.2
       ae2 =
         decay2 (dust 'd' KR 32) 1e-3 0.4 *
         decay (impulse KR 1 0) 1
-      freq2 = "freq2"@@8000
+      freq2 = "freq2"@@2003
 
       nz3 = flt3 (whiteNoise 'ι' AR) * ae3
       flt3 x = rlpf x freq3 0.04
       ae3 = envGen KR 1 1 0 (dur*0.8) DoNothing (envPerc 1e-3 1)
-      freq3 = "freq3"@@8000
+      freq3 = "freq3"@@8829
 
       o1 = pulse AR (ofreq*120) 0.5 * ae4
       ofreq =
@@ -146,6 +146,25 @@ bth05 =
 
   in  out ("out"@@0) (pan2 sig pan 1)
 
+bth06 :: UGen
+bth06 =
+  let sig = pulse AR frqs pw * amp
+      pw = lfdNoise3 'p' KR (8.3213) * 0.3 + 0.3
+      frqs = mce (map (*frq) partials) * fenv
+      partials = [0.251, 1, 1.321, 2.8829, 5.71832, 7.2813, 11.2109]
+      fenv = envGen KR 1 1 0 edur DoNothing (env [0.25,1] [1] [EnvExp] (-1) 0)
+      frq = "freq"@@162
+      hit =
+        envGen KR tick 1 0 0.5 DoNothing
+        (env [0,1,1,0] [1e-2,0.2,0.15] [EnvCub] (-1) 0)
+      tick = dust 'h' KR 8 + coinGate 'g' 0.25 (impulse KR 8 0)
+      amp = "amp"@@0.3 * hit * squared eenv
+      eenv =
+        envGen KR 1 1 0 edur RemoveSynth (env [0,1] [1] [EnvSin] (-1) 0)
+      edur = "edur"@@32
+      pan = lfdNoise3 'p' KR (1/pi) * 0.4
+  in  out ("out"@@0) (pan2 (mix sig) pan 1)
+
 ------------------------------------------------------------------------------
 -- Effects
 
@@ -155,6 +174,19 @@ bthmst =
   let mkIn key = in' 2 AR (key@@0) * ((key++"_amp")@@0.3)
       sig = rhpf (foldl' (+) 0 [mkIn "in1", mkIn "in2", mkIn "in3"]) 10 0.4
   in  replaceOut ("out"@@0) (limiter sig 1 1)
+
+-- | Reverb with allpass filter.
+bthrev :: UGen
+bthrev =
+  let rev = foldr f insig dts
+      dts =
+        [ 0.00232, 0.00343, 0.0123, 0.0132, 0.0819
+        , 0.12132, 0.24892, 0.2898, 0.3832, 0.4532 ]
+      f x acc = allpassC acc 0.1 x (rand 'd' 1e-4 1e-1)
+      insig = in' 2 AR ("in"@@0)
+      wet = "wet"@@0.5
+      sig = (rev * wet) + (insig * (1-wet))
+  in  replaceOut ("out"@@0) sig
 
 ------------------------------------------------------------------------------
 -- Controls
