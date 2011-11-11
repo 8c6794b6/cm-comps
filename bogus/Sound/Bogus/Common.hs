@@ -27,12 +27,12 @@ newtype SC3 a =
   ( Functor, Applicative, Monad
   , MonadReader UDP, MonadState (Int,Word64), MonadIO)
 
--- | Communicate with default scsynth running on localhost:57110, UDP.
-runSC3 :: SC3 a -> IO a
-runSC3 m = withSC3 $ \fd -> do
+-- | Communicate with given scsynth.
+runSC3 :: SC3 a -> UDP -> IO a
+runSC3 m fd = do
   bracket
     (async fd (notify True) >> return fd)
     (\fd' -> send fd' $ notify False)
     (\fd' -> do
-        t0 <- ntpi
-        runReaderT (evalStateT (unSC3 m) (0,t0+10000)) fd')
+      t0 <- ntpi
+      runReaderT (evalStateT (unSC3 m) (0,t0+10000)) fd')

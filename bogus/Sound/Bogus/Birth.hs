@@ -25,23 +25,21 @@ import Sound.Bogus.Birth.Synthdefs
 import Sound.Bogus.Common
 
 main :: IO ()
-main = do
-  withSC3 $ \fd -> do
-    reset fd
-    load_ugens fd
-    patchNode (nodify birthNd) fd
-  n <- runSC3 (fib 13)
-  n `seq` withSC3 $ \fd -> do
-    send fd $ bundle immediately
-      [ s_new "bth07" (-1) AddToTail 2 [("out",6),("amp",4.8)]
-      , n_set 1001 [("val",1e-1),("dur",1.5)]
-      , n_free [2100] ]
-    threadDelay (3 * 10 ^ (6 :: Int))
-    send fd $ n_set 1001 [("val",1e-4),("dur",10)]
-    threadDelay (10 * 10 ^ (6 :: Int))
-    send fd $ n_set 1000 [("val",0),("dur",4.75)]
-    threadDelay (7 * 10 ^ (6 :: Int))
-    reset fd
+main = withSC3 $ \fd -> do
+  reset fd
+  load_ugens fd
+  patchNode (nodify birthNd) fd
+  n <- runSC3 (fib 13) fd
+  send fd $ bundle immediately
+    [ s_new "bth07" (-1) AddToTail 2 [("out",6),("amp",4.8)]
+    , n_set 1001 [("val",1e-1),("dur",1.5)]
+    , n_free [2100] ]
+  threadDelay (3 * 10 ^ (6 :: Int))
+  send fd $ n_set 1001 [("val",1e-4),("dur",10)]
+  threadDelay (10 * 10 ^ (6 :: Int))
+  send fd $ n_set 1000 [("val",0),("dur",4.75)]
+  threadDelay (7 * 10 ^ (6 :: Int))
+  reset fd
 
 load_ugens :: Transport t => t -> IO ()
 load_ugens fd = mapM_ (send fd . d_recv . uncurry synthdef) ugs
