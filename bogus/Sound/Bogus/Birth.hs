@@ -32,13 +32,15 @@ main = do
     patchNode (nodify birthNd) fd
   n <- runSC3 (fib 13)
   n `seq` withSC3 $ \fd -> do
-    threadDelay (1 * 10 ^ (6 :: Int))
-    send fd $ n_free [2100]
-    threadDelay (2 * 10 ^ (6 :: Int))
+    send fd $ bundle immediately
+      [ s_new "bth07" (-1) AddToTail 2 [("out",6),("amp",4.8)]
+      , n_set 1001 [("val",1e-1),("dur",1.5)]
+      , n_free [2100] ]
+    threadDelay (3 * 10 ^ (6 :: Int))
     send fd $ n_set 1001 [("val",1e-4),("dur",10)]
     threadDelay (10 * 10 ^ (6 :: Int))
     send fd $ n_set 1000 [("val",0),("dur",4.75)]
-    threadDelay (5 * 10 ^ (6 :: Int))
+    threadDelay (7 * 10 ^ (6 :: Int))
     reset fd
 
 load_ugens :: Transport t => t -> IO ()
@@ -68,8 +70,8 @@ birthNd =
         syn "bthmst"
           [ "out"*=0
           , "in1"*=2, "in1_amp"*<-prmv in1_amp "out"
-          , "in2"*=4, "in2_amp"*= 0.3
-          , "in3"*=6, "in3_amp"*= 0.3 ]
+          , "in2"*=4, "in2_amp"*= 0.25
+          , "in3"*=6, "in3_amp"*= 0.25 ]
   in  grp 0
         [ grp 1 [ in1_amp, in1_wet, edur ]
         , grp 2 [ bth03Nd ]
@@ -140,7 +142,7 @@ mkMsg ticks n
       | t >= 512 && t < 640 && (t `mod` 8 == 4) = [sp1]
       | t >= 578 && (t `mod` 8 == 4)            = [sp1,sp2]
       | t >= 612 && t < 712 && (t `mod` 8 == 2) = [sp1,sp2]
-      | t >= 712                                = [sp1,sp2]
+      | t >= 712 && even t                      = [sp1,sp2]
       | otherwise                               = [sp1]
     sp1 =
       s_new "bth04" (-1) AddToTail 2
@@ -155,7 +157,7 @@ mkMsg ticks n
         [ ("freq1", 1080.317 + (n'*3.432))
         , ("freq2", 2003.982 + (n'*1.991))
         , ("freq3", 8830.003 + (n'*13.32))
-        , ("amp", 0.18 + (n'*0.02) + (fromIntegral ticks * 0.001))
+        , ("amp", 0.15 + (n'*0.02) + (fromIntegral ticks * 0.001))
         , ("dur", 0.31)
         , ("out", 6)
         , ("pan", 0.04) ]

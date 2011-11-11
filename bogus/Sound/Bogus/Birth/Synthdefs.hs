@@ -55,14 +55,15 @@ bth02 =
       sig' = mce2 (delayL sig 1e-2 dtl) (delayL sig 1e-2 dtr)
   in  out ("out"@@0) (pan2 sig' pan 1)
 
--- | Screaming gremlin, with granularation.
+-- | Screaming gremlin with granularation.
 bth03 :: UGen
 bth03 =
   let ampf = cubed (clip2 (lfdNoise3 'a' KR dmf' * 0.5 + 0.5) 1 * dmi') + dense'
       dense' = 12.5
       dmf' = 3.7
       dmi' = 7
-      edur = "edur"@@1e-3
+      -- edur = "edur"@@1e-3
+      edur = "edur"@@5e-4
       mkO i =
         let f = lag (tExpRand i 4000 24000 tick * clip (lfdNoise3 i KR 0.75) 0 1)
                 (tExpRand i 0.125 3 tick)
@@ -76,7 +77,8 @@ bth03 =
       tick = impulse KR ampf 0
       dtn = 1
       -- ecrv = lfdNoise3 'c' KR 0.125 * 12
-      ecrv = 0.995
+      -- ecrv = 0.995
+      ecrv = (-13)
       edgy = 0.9999
       -- edgy = clip (lfdNoise1 'e' KR 0.125) 0 1
       vc = 1
@@ -146,6 +148,7 @@ bth05 =
 
   in  out ("out"@@0) (pan2 sig pan 1)
 
+-- | Band width modulated pulse oscillators.
 bth06 :: UGen
 bth06 =
   let sig = pulse AR frqs pw * amp
@@ -165,6 +168,31 @@ bth06 =
       pan = lfdNoise3 'p' KR (1/pi) * 0.4
   in  out ("out"@@0) (pan2 (mix sig) pan 1)
 
+-- | Low frequency percussive hit.
+bth07 :: UGen
+bth07 =
+  let sig = hpf (flt ((o + n) * e) * amp) 30
+      flt x = rev (mce [delayL x 1e-2 14e-4, delayL x 1e-2 3e-4])
+      rev x = foldr f x dts where
+        f dt acc = acc + (combC acc 0.2 dt 3 * 0.125)
+      dts = [0.3218, 0.732, 0.1323, 0.32329, 0.2713]
+      o = sinOsc AR (fe * 60) 0
+      fe =
+        envGen KR 1 1 0 dur DoNothing (env [1,0.5] [1] [EnvSin] (-1) 0)
+      n = rlpf (whiteNoise 'γ' AR) (12000 * q) 0.3
+      q =
+        envGen KR 1 1 0 (dur/18) DoNothing
+        (env [1e-3,1,1e-3] [0.25,0.75] [EnvSin] (-1) 0)
+      dur = "dur"@@16
+      e = envGen KR 1 1 0 dur DoNothing
+        (env [0,1,0] [1e-3, 999e-3] [EnvNum (-12)] (-1) 0)
+      amp = "amp"@@0.5
+      ds = detectSilence sig 0.01 0.2 RemoveSynth
+      pl = envGen KR 1 1 0 (dur/3) DoNothing
+        (env [1,0] [1] [EnvLin] (-1) 0) *
+        lfdNoise3 'p' KR 7.32
+  in  mrg [ds, out ("out"@@0) (pan2 (mix sig) pl 1)]
+
 ------------------------------------------------------------------------------
 -- Effects
 
@@ -173,7 +201,7 @@ bthmst :: UGen
 bthmst =
   let mkIn key = in' 2 AR (key@@0) * ((key++"_amp")@@0.3)
       sig = rhpf (foldl' (+) 0 [mkIn "in1", mkIn "in2", mkIn "in3"]) 10 0.4
-  in  replaceOut ("out"@@0) (limiter sig 1 1)
+  in  replaceOut ("out"@@0) (limiter sig 1 0.1)
 
 -- | Reverb with allpass filter.
 bthrev :: UGen
@@ -202,3 +230,11 @@ bthlgc2 :: UGen
 bthlgc2 =
   let sig = lag2 ("val"@@0) ("dur"@@1)
   in  out ("out"@@0) sig
+
+conv_test :: IO ()
+conv_test =
+  let n = whiteNoise 'a' AR
+      d = decay2 (dust 'd' KR 1) 1e-4 0.5 * c
+      c = sinOsc AR 440 0
+      s = convolution d (dust 'e' KR 8) 2048 * 0.1
+  in  audition $ out 0 (mce2 s s)
