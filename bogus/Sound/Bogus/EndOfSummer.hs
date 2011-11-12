@@ -29,16 +29,4 @@ main = withSC3 $ \fd -> do
 
 setup'eos :: Transport t => t -> IO OSC
 setup'eos fd = do
-  async fd $ bundle immediately $ map (\(n,u) -> d_recv $ synthdef n u)
-    [("cefoo", cefoo)
-    ,("cebar", cebar)
-    ,("cebuzz", cebuzz)
-    ,("cequux", cequux)
-    ,("cehoge", cehoge)
-    ,("cepippo", cepippo)
-    ,("lfsin", lfsin)
-    ,("lftri", lftri)
-    ,("lfnz", lfnz)
-    ,("lftrig", lftrig)
-    ,("lfdust", lfdust)
-    ]
+  async fd $ bundle immediately $ map (\(n,u) -> d_recv $ synthdef n u) ugs

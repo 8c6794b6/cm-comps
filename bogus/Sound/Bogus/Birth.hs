@@ -29,7 +29,7 @@ main = withSC3 $ \fd -> do
   reset fd
   load_ugens fd
   patchNode (nodify birthNd) fd
-  n <- runSC3 (fib 13) fd
+  runSC3 (fib 13) fd
   send fd $ bundle immediately
     [ s_new "bth07" (-1) AddToTail 2 [("out",6),("amp",4.8)]
     , n_set 1001 [("val",1e-1),("dur",1.5)]

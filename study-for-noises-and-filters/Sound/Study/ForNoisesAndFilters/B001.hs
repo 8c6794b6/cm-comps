@@ -77,7 +77,6 @@ rgGraph =
           ,"a_l2":<=4,"a_r2":<=5
           ,"a_l3":<=8,"a_r3":<=9
           ,"mamp":=0.8]]]
-
   where
     grp = Group
     syn = Synth

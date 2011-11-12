@@ -233,8 +233,7 @@ bthlgc2 =
 
 conv_test :: IO ()
 conv_test =
-  let n = whiteNoise 'a' AR
-      d = decay2 (dust 'd' KR 1) 1e-4 0.5 * c
+  let d = decay2 (dust 'd' KR 1) 1e-4 0.5 * c
       c = sinOsc AR 440 0
       s = convolution d (dust 'e' KR 8) 2048 * 0.1
   in  audition $ out 0 (mce2 s s)

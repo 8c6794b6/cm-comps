@@ -27,8 +27,15 @@ Library
     -fno-warn-unused-do-bind
   exposed-modules:
     Sound.Bogus.Birth
+    Sound.Bogus.Birth.Synthdefs
     Sound.Bogus.EndOfSummer
+    Sound.Bogus.EndOfSummer.Synthdefs
     Sound.Bogus.Huh
+    Sound.Bogus.Huh.Patterns
+    Sound.Bogus.Huh.Nodes
+    Sound.Bogus.Huh.Synthdefs
+    Sound.Bogus.ShiveringAir
+    Sound.Bogus.ShiveringAir.Synthdefs
   build-depends:
     base >= 2.0 && < 5.0,
     binary >= 0.5.0,

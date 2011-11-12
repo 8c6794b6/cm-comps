@@ -1,3 +1,4 @@
+{-# LANGUAGE TemplateHaskell #-}
 {-|
 Module      : $Header$
 CopyRight   : (c) 8c6794b6
@@ -11,9 +12,13 @@ Synthdefs for /end of summer/.
 -}
 module Sound.Bogus.EndOfSummer.Synthdefs where
 
+import Language.Haskell.Extract
 import Sound.SC3
 import Sound.SC3.ID
 import Sound.SC3.Lepton
+
+ugs :: [(String, UGen)]
+ugs = $(functionExtractor "^(ce|lf)")
 
 cefoo :: UGen
 cefoo = out ("out"@@0) (pan2 sig 0.2 1) where
