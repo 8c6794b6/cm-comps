@@ -32,7 +32,7 @@ Library
     Sound.Study.ForNoisesAndFilters.B002.Synthdef
   build-depends:
     base >= 2.0 && < 5.0,
-    hosc -any,
-    hsc3 -any,
-    hsc3-lepton >= 0.0.3,
+    hosc >= 0.11 && < 0.12,
+    hsc3 >= 0.11 && < 0.12,
+    hsc3-lepton >= 0.11 && < 0.12,
     random -any

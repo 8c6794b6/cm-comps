@@ -62,6 +62,3 @@ n0 =
     , grp 9
         [ syn "cf2mst"
           ["out_l"*=0, "out_r"*=1, "amp"*=1]]]
-
-    
-
