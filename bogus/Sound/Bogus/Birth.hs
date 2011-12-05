@@ -1,4 +1,4 @@
-{-# LANGUAGE FlexibleContexts #-}
+{-# LANGUAGE FlexibleContexts, MultiParamTypeClasses #-}
 {-|
 Module      : $Header$
 CopyRight   : (c) 8c6794b6
