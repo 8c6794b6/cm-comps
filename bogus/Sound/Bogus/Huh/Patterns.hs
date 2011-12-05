@@ -5,7 +5,7 @@ CopyRight   : (c) 8c6794b6
 License     : BSD3
 Maintainer  : 8c6794b6@gmail.com
 Stability   : unstable
-Portability : portable
+Portability : non-portable
 
 Huh patterns.
 
@@ -23,7 +23,7 @@ allP = ppar
   , kikP, snrP, hatP
   , puP, drn1P, drn2P, bellP ]
 
-------------------------------------------------------------------------------
+-----------------------------------------------------------------------------
 -- Helpers
 
 d = pdouble
@@ -36,34 +36,50 @@ mkSN' def out kvs =
   psnew def Nothing AddToTail 3
   ([("dur", pforever (d (60/bpm))),("out", pforever (d out))] ++ kvs)
 
-------------------------------------------------------------------------------
+-----------------------------------------------------------------------------
 -- huhs
 
-huh1P = pconcat (map (mkSN "cf2huh" 10 "t_trig") [huh1Pa, huh1Pb])
-huh1Pa = pseq (i 4) (map d [0,1,0,0, 1,0,0,1, 0,0,1,0, 1,0,1,0])
-huh1Pb =
-  pcycle
-   [pseq (i 12) (ds [0,1,0,0, 1,0,0,1, 0,0,1,0, 1,0,1,0])
-   ,pseq (i 4)  (ds [0,1,0,1, 1,1,0,0, 0,0,0,1, 1,0,0,1])]
+huh1P = pconcat (map (mkSN "cf2huh" 10 "t_trig") [as, bs]) where
+  as = pseq (i 4) huh1P_a
+  bs =
+    pcycle
+      [ pseq (i 12) huh1P_a
+      , pseq (i 4) huh1P_b
+      ]
 
-huh2P = pconcat (map (mkSN "cf2huh" 11 "t_trig") [huh2Pa, huh2Pb])
-huh2Pa = pseq (i 16) (map d [0,0,0,0])
-huh2Pb =
-  pcycle
-   [ pseq (i 12) (ds [1,0,1,0, 1,0,0,0, 1,0,1,0, 1,0,0,0])
-   , pseq (i 14) (ds [0,0,0,0])
-   , pseq (i 4) (ds [0,1]) ]
+huh1P_a = ds [0,1,0,0, 1,0,0,1, 0,0,1,0, 1,0,1,0]
+huh1P_b = ds [0,1,0,1, 1,1,0,0, 0,0,0,1, 1,0,0,1]
 
-huh3P = pconcat (map (mkSN "cf2huh" 12 "t_trig") [huh3Pa,huh3Pb])
-huh3Pa = pseq (i 16) (ds [0,0,0,0])
-huh3Pb =
-  pcycle
-  [ pseq (i 12) (ds [0,1,0,1, 0,0,0,1, 0,1,0,1, 0,0,0,1])
-  , pseq (i 14) (ds [0,0,0,0])
-  , pseq (i 4) (ds [1,0]) ]
+huh2P = pconcat (map (mkSN "cf2huh" 11 "t_trig") [as, bs]) where
+  as = pseq (i 16) huh2P_a
+  bs =
+    pcycle
+      [ pseq (i 12) huh2P_c
+      , pseq (i 14) huh2P_a
+      , pseq (i 4) huh2P_b
+      ]
 
-------------------------------------------------------------------------------
+huh2P_a = ds [0,0,0,0]
+huh2P_b = ds [0,1]
+huh2P_c = ds [1,0,1,0, 1,0,0,0, 1,0,1,0, 1,0,0,0]
+
+huh3P = pconcat (map (mkSN "cf2huh" 12 "t_trig") [as, bs]) where
+  as = pseq (i 16) huh3P_a
+  bs =
+    pcycle
+      [ pseq (i 12) huh3P_c
+      , pseq (i 14) huh3P_a
+      , pseq (i 4) huh3P_b
+      ]
+
+huh3P_a = ds [0,0,0,0]
+huh3P_b = ds [1,0]
+huh3P_c = ds [0,1,0,1, 1,0,0,0, 0,1,0,1, 0,0,0,1]
+
+-----------------------------------------------------------------------------
 -- Percussive tones
+--
+-- kik
 
 kikP = pconcat (map (mkSN "cf2kik" 13 "t_trig") [kikPa,kikPb])
 kikPa =
@@ -72,12 +88,15 @@ kikPb =
   pcycle
   [ pseq (i 3)
     [ pseq (i 4)
-      [ d 1, d 0, d 0,d 0, d 0.8
-      , d 0, d 0, prand (i 1) (ds [0,0.7,0.8,1])
-      , d 0.9, d 0,d 0,d 0
-      , d 1, d 0,d 0, prand (i 1) (ds [0,0.7,0.8,1])]]
+      [ d 1,   d 0, d 0, d 0
+      , d 0.8, d 0, d 0, prand (i 1) (ds [0,0.7,0.8,1])
+      , d 0.9, d 0, d 0, d 0
+      , d 1,   d 0, d 0, prand (i 1) (ds [0,0.7,0.8,1])]]
   , pseq (i 4)
     (ds [1,0,0,0.7, 1,0,0,1, 0,0.9,0,0.8, 0.9,0,0,1 ])]
+
+-----------------------------------------------------------------------------
+-- snr
 
 snrP = pconcat (map (mkSN "cf2snr" 14 "t_trig") [snrPa,snrPb])
 snrPa =
@@ -85,20 +104,27 @@ snrPa =
   [ pseq (i 56) (ds [0])
   , pconcat (ds [0.8,0.6,0,0.2, 0.2,0.8,0.4,1.0])]
 snrPb =
+  let z = d 0; dr l h = pdrange (d l) (d h) in
   pcycle
-  [ pseq (i 3)
     [ pseq (i 3)
-      [ pseq (i 3) [d 0,d 0,pdrange (d 0.6) (d 1),d 0]
-      , pconcat [d 0,d 0,pdrange (d 0.6) (d 0.8), pdrange (d 0.6) (d 0.8)]]
-    , pconcat [pseq (i 2) [d 0,d 0,pdrange (d 0.6) (d 0.8),d 0]
-              , prand (i 8) [d 0, d 0.5, d 0.75, d 1]]]
-  , pseq (i 3) [ d 0, d 0, d 0, d 0
-               , prand (i 1) [d 0.9, d 1.0], d 0, d 0, d 0
-               , d 0, d 0, d 0, d 0
-               , prand (i 4) (ds [1,0.8,0])]
-  , pconcat [ d 0, d 0, d 0, d 0
-            , prand (i 1) [d 0.9, d 1.0], d 0, d 0, d 0
-            , prand (i 8) (ds [0,0,0,0.5,0.6,0.7,0.8,0.9,1])]]
+      [ pseq (i 3)
+          [ pseq (i 3) [z, z, dr 0.6 1, z]
+          , pconcat    [z, z, dr 0.6 0.8, dr 0.6 0.8]]
+      , pconcat
+          [ pseq (i 2)  [z, z, dr 0.6 0.8, d 0]
+          , prand (i 8) [z, d 0.5, d 0.75, d 1]]]
+    , pseq (i 3)
+        [ z, z, z, z
+        , dr 0.9 1.0, z, z, z
+        , z, z, z, z
+        , prand (i 4) (ds [1,0.8,0])]
+    , pconcat
+        [ z, z, z, z
+        , dr 0.9 1.0, z, z, z
+        , prand (i 8) (ds [0,0,0,0.5,0.6,0.7,0.8,0.9,1])]]
+
+-----------------------------------------------------------------------------
+-- hat
 
 hatP = pconcat (map (mkSN "cf2hat" 15 "t_trig") [hatPa,hatPb])
 hatPa =
@@ -114,7 +140,7 @@ hatPb =
     [ pseq (i 30) (ds [0])
     , pconcat (ds [0.6,0.8]) ]]
 
-------------------------------------------------------------------------------
+-----------------------------------------------------------------------------
 -- Pitched tones
 
 puP = mkSN2 "cf2pu" 16 "freq" (pmidiCPS puPa)
@@ -138,10 +164,10 @@ drn1P =
      [ pseq (i 32) (ds [0])
      , pcycle
        [ pseq (i 3)
-         [ f 72, z, z, z,  z, z, z, z,  z,f 67, z, z,f 65, z, z, z
-         , f 67, z, z, z,  z, z, z, z,  z, z, z, z, f 65, z, z, z
-         , f 60, z, z, z,  z, z, z, z,  z,f 55, z, z, f 65, z, z, z
-         , f 67, pseq (i 15) [z]]
+         [ f 72, z, z, z,  z, z, z, z,  z, f 67, z, z, f 65, z, z, z
+         , f 67, z, z, z,  z, z, z, z,  z, z,    z, z, f 65, z, z, z
+         , f 60, z, z, z,  z, z, z, z,  z, f 55, z, z, f 65, z, z, z
+         , f 67, z, z, z,  z, z, z, z,  z, z,    z, z, z,    z, z, z ]
        , pconcat
          [ f 72, pseq (i 31) [z]
          , f 60, pseq (i 31) [z]]]])]
@@ -156,10 +182,10 @@ drn2P =
      [ pseq (i 32) (ds [0])
      , pcycle
        [ pseq (i 3)
-         [ z, z, f 55,z, z, z, f 60, z,  z, z, z, z,  z,    z, z, z
-         , z, z, z, z,   f 67, z, z, z,  z, z, z, z,  f 60, z, z, z
-         , z, z, z, z,   z, z, f 67, z,  z, z, z, z,  z,    z, z, z
-         , z, z, z, z,   f 60, z, z, z,  z, z, z, z,  z,    z, z, z]
+         [ z, z, f 55, z,  z,    z, f 60, z,  z, z, z, z,  z,    z, z, z
+         , z, z, z,    z,  f 67, z, z,    z,  z, z, z, z,  f 60, z, z, z
+         , z, z, z,    z,  z,    z, f 67, z,  z, z, z, z,  z,    z, z, z
+         , z, z, z,    z,  f 60, z, z,    z,  z, z, z, z,  z,    z, z, z ]
        , pconcat
          [ z, z, f 55,z, pseq (i 28) [z]
          , z, z,    z,z, z, z, f 67, z, pseq (i 24) [z]]]]) ]
@@ -174,7 +200,7 @@ bellPa =
       replicate 16 0 ++ [65,67,72,77,79,84,89,91,96,103,110]
     , pseq (i 12) (ds [0,0,0,0])]]
 
-------------------------------------------------------------------------------
+-----------------------------------------------------------------------------
 -- SE
 
 shwP = undefined
