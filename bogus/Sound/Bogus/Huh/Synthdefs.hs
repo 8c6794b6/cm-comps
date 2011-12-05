@@ -65,20 +65,21 @@ huhdefs =
   ,("cf2mixm", cf2mixm)
   ,("cf2mst", cf2mst)
   ,("cflfnz", cflfnz)
+  ,("cflfsin", cflfsin)
   ]
 
 ------------------------------------------------------------------------------
 -- Control synths
 --
 
-lfsin :: UGen
-lfsin =
+cflfsin :: UGen
+cflfsin =
   out ("out"@@100) $ sinOsc KR ("freq"@@1) 0 * ("mul"@@1) + ("add"@@0)
 
 cflfnz :: UGen
 cflfnz =
   let freq = ("freq"@@0.3) * (sinOsc KR ("mfreq"@@1) 0 * 0.5 + 0.5)
-  in  out ("out"@@101) $ lfdNoise1 'z' KR freq
+  in  out ("out"@@101) $ lfdNoise1 'z' KR freq * ("mul"@@1) + ("add"@@0)
 
 ------------------------------------------------------------------------------
 -- Source synths
@@ -173,8 +174,7 @@ cf2pu' tick = mrg [out ("out"@@0) sig, d] where
   mkR x = rand x 0.001 0.05
   freq = "freq"@@0 `lag` 0.6
   ampe = decay2 tick 5e-4 950e-3
-  -- amp = "amp"@@0.3
-  amp = "amp"@@0.3
+  amp = "amp"@@0
   bw = lfdNoise3 'b' KR 0.1123 * 0.48 + 0.5
   d = detectSilence' ampe 0.01 1 RemoveSynth
 
@@ -200,7 +200,7 @@ cf2shw' tick = out ("out"@@0) (resonz sig freq bw) where
   tamp = decay2 tick 1e-3 1
   freq = el * ("freq"@@8000) + 50
   bw = el * 0.8 + 0.1
-  el = envGen KR ("t_envr"@@0) 1 0 1 RemoveSynth $
+  el = envGen KR ("t_envr"@@0) 1 0 1 DoNothing $
        env [2.5e-2,1,2.5e-2] [25e-3,8.4] [EnvCub] (-1) (-1)
 
 ------------------------------------------------------------------------------
