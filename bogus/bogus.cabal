@@ -8,7 +8,6 @@ Author:              8c6794b6
 Maintainer:          8c6794b6@gmail.com
 Category:            Sound
 Build-type:          Simple
-
 Cabal-version:       >=1.2
 
 Executable bogus
@@ -16,6 +15,7 @@ Executable bogus
     -Wall
     -fno-warn-unused-do-bind
     -threaded
+    -rtsopts
   main-is:
     bogus.hs
   build-depends:
@@ -34,6 +34,7 @@ Library
     Sound.Bogus.Huh.Patterns
     Sound.Bogus.Huh.Nodes
     Sound.Bogus.Huh.Synthdefs
+    Sound.Bogus.LostInTheWoods
     Sound.Bogus.ShiveringAir
     Sound.Bogus.ShiveringAir.Synthdefs
   build-depends:

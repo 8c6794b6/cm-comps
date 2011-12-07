@@ -68,7 +68,7 @@ n0 =
       ["out":=27,"a_in":<=3,"t_trig":<-208]]]
    ,g 50 -- mix
     [s 5000 "b002amps"
-     ["quickNoise":=3,"bosc":=1.1,"slowNoise":=4
+     ["quickNoise":=3.75,"bosc":=1.1,"slowNoise":=4
      ,"hat1":=1,"hat2":=1,"bhit":=0.1]
     ,s 5001 "b002mix1" -- quickNoise
      ["out":=0,"a_in":<=20,"amp":<-800

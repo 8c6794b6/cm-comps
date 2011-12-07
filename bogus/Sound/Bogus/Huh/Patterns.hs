@@ -1,4 +1,5 @@
 {-# LANGUAGE NoMonomorphismRestriction #-}
+{-# OPTIONS_GHC -fno-warn-missing-signatures #-}
 {-|
 Module      : $Header$
 CopyRight   : (c) 8c6794b6

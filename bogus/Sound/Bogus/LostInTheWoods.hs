@@ -1,4 +1,5 @@
 {-# LANGUAGE NoMonomorphismRestriction #-}
+{-# OPTIONS_GHC -fno-warn-missing-signatures #-}
 {-|
 Module      : $Header$
 CopyRight   : (c) 8c6794b6
@@ -17,203 +18,26 @@ import Sound.SC3
 import Sound.SC3.ID
 import Sound.SC3.Lepton
 
--- Motif pattern for frequency
-pspeFreq =
-  let d=pdouble; ds=map pdouble; i=pint in
-  pcycle
-    [pseq (pirange (i 0) (i 1))
-       [pconcat (ds [24,31,36,43,48,55])]
-    ,pseq (pirange (i 2) (i 5))
-       [d 60, prand (i 1) (ds [63,65])
-       ,d 67, prand (i 1) (ds [70,72,74])]
-    ,prand (pirange (i 3) (i 9)) (ds [74,75,77,79,81])]
+-- --------------------------------------------------------------------------
+--
+-- Synthdefs
+--
 
-pspe = psnew "speSynth" Nothing AddToTail 1
-  [("dur", pforever (pdouble 0.13))
-  ,("amp", pforever (pdouble 0.22))
-  ,("freq", pmidiCPS pspeFreq)]
-
--- SPE builder
-mkspe x = let d=pdouble in
-  psnew "speSynth" Nothing AddToTail 1
-  [("dur", pforever (d 0.13)),("amp", pforever (d 0.1)),("freq", x)]
-
-mkspe' t a x = let d=pdouble in
-  psnew "speSynth" Nothing AddToTail 1
-  [("dur", pforever t),("amp", pforever a),("freq", x)]
-
--- Non-unison.
-pspe2 = let x = pmidiCPS pspeFreq in
-  ppar
-  [ mkspe x
-  , mkspe (x *@ pforever (pdouble 0.25))
-  , mkspe (x *@ pforever (pdouble 2))]
-
--- Unison.
-pspe3 =
-  let d=pdouble; m=pmidiCPS pz
-  in  plam tdouble (ppar [mkspe m,mkspe (m *@ d 0.25),mkspe (m *@ d 2)])
-      `papp` pspeFreq
-
--- Inter octave.
-pspe3a =
-  let d=pdouble
-  in  plam tdouble (mkspe (pmidiCPS $ pconcat [pz-@d 12,pz,pz+@d 12]))
-      `papp` pspeFreq
-
--- Inter octave unison with repetation.
-pspe3b =
-  let d=pdouble; i=pint
-  in  plam tdouble
-      (ppar [mkspe' (d 0.13) (d 0.1) (pmidiCPS $ preplicate (i 4) (pz+@d 12))
-            ,mkspe' (d 0.26) (d 0.1) (pmidiCPS $ preplicate (i 2) pz)
-            ,mkspe' (d 0.52) (d 0.1) (pmidiCPS (pz-@d 24))])
-      `papp` pspeFreq
-
-addspe name p = leptseq =<< bundle' (0.13*8) 0 [l_new name p]
-delpat name = leptseq =<< bundle' (0.13*8) 0 [l_free name]
-dumpp = leptseq l_dump
-
-{-
-
-dumpp
-delpat "psw"
-
-addspe "spe" pspe4b
-addspe "spe" pspe2
-addspe "spe" pspe4b
-
-delpat "spe-lo"
-delpat "spe2"
-
-delpat "spe"
-
-addspe "spe-uni" pspe4a
-
-addspe "lll01" lll01
-delpat "lll01"
-
-addspe "psw" psw
-
-delpat "spe-uni"
-
-addspe "spe-non-uni" pspe2
-delpat "spe-non-uni"
-
--}
-
--- Unison.
-pspe4a =
-  let d=pdouble; x=pmidiCPS pz
-  in  plam tdouble
-       (ppar
-        [mkspe x
-        ,mkspe (x *@ d 0.9925)
-        ,mkspe (x *@ d 1.002)])
-       `papp` pspeFreq
-
--- Non-unison.
-pspe4b =
-  let d = pdouble; x=pmidiCPS pspeFreq
-  in  ppar
-      [mkspe x
-      ,mkspe (x *@ pforever (d 0.9925))
-      ,mkspe (x *@ pforever (d 1.002))]
-
-lll01 = let d = pdouble in
-  psnew "rspdef1" Nothing AddToHead 1
-  [("dur", pforever (d 0.2))
-  ,("amp", pforever (d 0.3))
-  ,("pan", pforever $ pdrange (d (-1)) (d 1))
-  ,("freq", pforever $ pdrange (d 100) (d 8000))
-  ,("atk", pforever (d 1e-4))
-  ,("dcy", pforever (d 1))
-  ]
-
-lll02 = let d = pdouble; i=pint in
-  psnew "rspdef1" Nothing AddToHead 1
-  [("dur", pforever (pdrange (d 1e-3) (d 4e-1)))
-  ,("freq", pforever (d 880))
-  ,("atk", pforever (pdrange (d 1e-3) (d 4e-1)))]
-
-psw = pappend set03 (ppar [loop01, loop02, loop03])
-
-psw' =
-  withLept . flip send =<< bundle' 0 0
-  [ l_new "set03" set03
-  , l_new "loop01" loop01
-  , l_new "loop02" loop02
-  , l_new "loop03" loop03 ]
-
-loop01 = let d=pdouble; i=pint in
-  psnew "rspdef1" Nothing AddToHead 1
-  [("dur",  pcycle [preplicate (i 1024) (d (1/41))
-                   ,preplicate (i 512) (d (2/41))
-                   ,preplicate (i 256) (d (4/41))
-                   ,preplicate (i 128) (d (8/41))])
-  ,("freq", pmidiCPS $ pforever $ prand (i 1) $
-            map d [40,41,48,52,55,58,62,67,70,74,79,86,90])
-  ,("pan",  pforever $ pdrange (d (-1)) (d 1))
-  ,("atk",  pforever $ pdrange (d 1e-4) (d 1))
-  ,("dcy",  pforever $ pdrange (d 1e-2) (d 1))
-  ,("amp",  pforever $ pdrange (d 1e-3) (d 1))
-  ,("n_map/fmul", pforever (d 100))]
-
-loop02 = let d=pdouble in
-  psnew "rspdef2" Nothing AddToHead 1
-  [("dur",  pforever $ pdrange (d 1e-1) (d 5e-1))
-  ,("freq", pforever $ pexp $ pdrange (plog (d 110)) (plog (d 11000)))
-  ,("atk",  pforever $ pdrange (d 1e-4) (d 2))
-  ,("dcy",  pforever $ pdrange (d 1e-4) (d 2))
-  ,("amp",  pforever $ pdrange (d 1e-2) (d 1))
-  ,("pan",  pforever $ pdrange (d (-1)) (d 1))
-  ,("q",    pforever $ pdrange (d 1e-3) (d 99e-2))]
-
-loop03 = let d=pdouble in
-  pnset 1003
-  [("dur",    pforever $ pdrange (d 4) (d 32))
-  ,("t_trig", pforever (d 1))]
-
-set03 = psnew "rspdef3" (Just 1003) AddToHead 1 [("dur",pdouble 0.1)]
-
-pfsm002 = pfsm [0]
-  [{- 0 -} (mkfsm02 [0,4,7],    [1,2,3,4])
-  ,{- 1 -} (mkfsm02 [2,5,9],    [3])
-  ,{- 2 -} (mkfsm02 [0,4,9],    [0,1,3,4])
-  ,{- 3 -} (mkfsm02 [2,5,7,-1], [0,4])
-  ,{- 4 -} (mkfsm02 [0,4,9],    [1,2,3])
-  ]
-
-pfinite001 =
-  let i = pint; d = pdouble; ds = map d
-      fs = ds [midiCPS (y+x)| x <- [0,2,4,5,7,9,11], y <- [48,60]]
-  in  psnew "rspdef1" Nothing AddToTail 1
-      [("dur",
-        (prand (i 32)
-         [ d 0.25
-         , pconcat [d 0.125, d 0.125]
-         , pconcat (ds (replicate 4 6.25e-2))]))
-      ,("freq", pmidiCPS $ pforever (prand (i 1) fs))
-      ,("atk", pforever $ prand (i 1) (ds [0.998,0.5,0.002]))
-      ]
-
-mkfsm02 fs =
-  let fs' = concatMap (\x -> map d [x+60,x+72{-,x+84-}]) fs
-      d = pdouble; i = pint
-  in psnew "rspdef1" Nothing AddToTail 1
-     [("dur",  pforever (prand (i 1) (map d [0.125,0.125,0.125])))
-     ,("freq", pmidiCPS $ pforever (prand (i 1) fs'))
-     ,("atk",  pforever $ pdrange (d 1e-4) (d 3e-3))
-     ,("dcy",  pforever $ pdrange (d 1e-1) (d 1))
-     ,("pan",  pforever $ prand (i 1) (map d [-1,-0.5,0,0.5,1]))
-     ,("amp",  preplicate (i 16) (pdrange (d 0.4) (d 0.6)))]
-
+setup_litw :: Transport t => t -> IO ()
+setup_litw fd = mapM_ (async fd . d_recv . uncurry synthdef)
+  [ ("rspdef1", rspdef1)
+  , ("rspdef2", rspdef2)
+  , ("rspdef3", rspdef3)
+  , ("rspdef5", rspdef5)
+  , ("rspctr1", rspctr1)
+  , ("rspctr2", rspctr2)
+  , ("rspmst", rspmst)]
 
 rspdef1 :: UGen
 rspdef1 =
   let phase = rand 'k' 0 pi in
   out 0 $ pan2
-  (fSinOsc AR ("freq"@@440 * ("fmul"@@1 `lag2` 3.5)) phase * 0.3 *
+  (lfCub AR ("freq"@@440 * ("fmul"@@1 `lag2` 3.5)) phase * 0.3 *
    envGen KR ("t_trig"@@1) 1 0 1 RemoveSynth
    (env [0,1,0] [("atk"@@1e-4),("dcy"@@999e-4)] [EnvCub] (-1) 0))
   ("pan"@@0) ("amp"@@1)
@@ -223,7 +47,7 @@ rspdef2 =
   out 0 $ pan2
   (resonz (whiteNoise 'd' AR)
    ("freq"@@1320)
-   (clip ("q"@@0.8 * mouseY KR 0.125 4 Exponential 0.1) 1e-5 9999e-4) * 0.3 *
+   (clip ("q"@@0.8) 1e-5 9999e-4) * 0.3 *
    envGen KR ("t_trig"@@1) 1 0 1 RemoveSynth
    (env [0,1,0] [("atk"@@1e-4),("dcy"@@999e-4)] [EnvSin] (-1) 0))
   ("pan"@@0) ("amp"@@1)
@@ -233,13 +57,154 @@ rspdef3 = out ("out"@@100) (tExpRand 'f' 0.25 4 ("t_trig"@@1))
 
 rspdef4 :: UGen
 rspdef4 = out 0 $
-  lfPar AR ("freq"@@440 `lag` 0.25) 0 * ("amp"@@0.3 `lag3` 0.3)
+  lfPar AR ("freq"@@440 `lag` 0.25) 0 * ("amp"@@0.3 `lag3` ("lagt"@@0.3))
 
--- | Variant of 'rspdef1', using 'in\'' ugen to map frequency factor.
 rspdef5 :: UGen
 rspdef5 =
-  out 0 $ pan2
-  (sinOsc AR ("freq"@@440 * (in' 1 KR ("fmul"@@100) `lag2` 3.5)) 0 *
-   envGen KR ("t_trig"@@1) 0.3 0 1 RemoveSynth
-   (env [0,1,0] [("atk"@@1e-4),("dcy"@@999e-4)] [EnvCub] (-1) 0))
-  ("pan"@@0) ("amp"@@1)
+  let sig = mix (sinOsc AR (mce [ofq,ffq]) pw * amp)
+      pw = lfdNoise3 'p' KR 2 ** 4
+      ofq = "freq"@@332.32 * fq0
+      ffq = "freq"@@332.32 * fq3
+      fq0 = mkfq lfdNoise0
+      fq3 = mkfq lfdNoise3
+      mkfq n = linExp (n 'ε' KR (1/3.13) + 1.01) 0.01 2.01 0.25 32
+      amp = envGen KR tck ("amp"@@0.2) 0 (dur+5e-2) DoNothing shp
+      dur = (1/tfq) * 0.985
+      shp = env [0,1,0] [atk,1-atk] [EnvCub] (-1) 0
+      tck = impulse KR tfq 0
+      tfq = linLin (lfdNoise3 'ω' KR 0.25) (-1) 1 0.25 5.65 ** 2
+      atk = linLin (sinOsc KR (1/37) 0) (-1) 1 1e-3 999e-3
+      pan = sinOsc KR pfm 0 * 0.75
+      pfm = sinOsc KR (1/7.32) 0 * pi + (1/82)
+      rev = foldr apc sig ['a'..'h']
+      apc a b = allpassC b 0.8 (rand a 1e-1 0.8) (rand a 4e-1 4)
+  in  out ("out"@@0) (pan2 rev pan 1)
+
+rspctr1 :: UGen
+rspctr1 =
+  let sig = lfdNoise3 'μ' KR frq * mul + add
+      frq = "freq"@@1
+      mul = "mul"@@1
+      add = "add"@@0
+  in  out ("out"@@0) sig
+
+rspctr2 :: UGen
+rspctr2 =
+  let sig = sinOsc KR ("freq"@@1) ("phase"@@1) * ("mul"@@1) + ("add"@@0)
+  in  out ("out"@@0) sig
+
+rspmst :: UGen
+rspmst =
+  let sig0 = in' 2 AR 0
+      sig1 = rhpf sig0 15 0.01
+  in  replaceOut 0 sig1
+
+-- --------------------------------------------------------------------------
+--
+-- Nodes
+--
+
+litwNd :: Nd
+litwNd =
+  grp 0
+    [ grp 1
+      [ grp 10
+         [ loop01_freq
+         , loop02_freq
+         , loop04_amp
+         , syn' 100004 "rspdef5" ["amp"*=0.1]]
+      , grp 11 [] ]
+    , grp 2
+      [syn "rspmst" []] ]
+
+loop01_freq :: Nd
+loop01_freq =
+  syn' 100001 "rspdef3" ["mul"*=2.1,"add"*=2.1,"freq"*=0.113]
+
+loop02_freq :: Nd
+loop02_freq =
+  syn' 100002 "rspctr1"
+    ["out"*=101,"add"*=0.5,"mul"*=0.5,"freq"*=0.0683]
+
+loop04_amp :: Nd
+loop04_amp =
+  syn' 100003 "rspctr2"
+    ["out"*=102,"add"*=0.2,"mul"*=0.2,"freq"*=0.025
+    ,"phase"*=Dval(-pi/2)]
+
+-- --------------------------------------------------------------------------
+--
+-- Patterns
+--
+
+psw = ppar [loop01, loop02, loop03, loop04]
+
+{-
+psw' =
+  withLept . flip send =<< bundle' 0 0
+  [ l_new "set03" set03
+  , l_new "loop01" loop01
+  , l_new "loop02" loop02
+  , l_new "loop03" loop03 ]
+
+set03 = psnew "rspdef3" (Just 100001) AddToHead 1 [("dur", pdouble 0.1)]
+-}
+
+loop01 =
+  let d = pdouble
+      i = pint
+      fr l h = pforever (pdrange (d l) (d h))
+      pr n v = preplicate (i n) (d v)
+  in  psnew "rspdef1" Nothing AddToHead 11
+        [("dur",
+          pseq (i 2)
+            [ pr 1024 (1/41)
+            , pr 512 (2/41)
+            , pr 256 (4/41)
+            , pr 128 (8/41) ])
+        ,("freq",
+          pmidiCPS $ pforever $ prand (i 1) $
+          map d [40,41,48,52,55,58,62,67,70,74,79,86,90])
+        ,("pan", fr (-1) 1)
+        ,("atk", fr 1e-4 1)
+        ,("dcy", fr 1e-2 1)
+        ,("amp", fr 1e-3 1)
+        ,("n_map/fmul", pforever (d 100))]
+
+loop02 =
+  let d = pdouble
+      fr l h = pforever (pdrange (d l) (d h))
+  in  psnew "rspdef2" Nothing AddToHead 11
+        [("dur",  fr 1e-1 5e-1)
+        ,("freq", pforever $ pexp $ pdrange (plog (d 110)) (plog (d 11000)))
+        ,("atk",  fr 1e-4 2)
+        ,("dcy",  fr 1e-4 2)
+        ,("amp",  fr 1e-2 1)
+        ,("pan",  fr (-1) 1)
+        ,("lagt", pforever $ pexp $ pdrange (plog (d 1e-3)) (plog (d 8)))
+        ,("n_map/q", pforever (d 101)) ]
+
+loop03 = let d = pdouble in
+  pnset 100001
+  [("dur",    pforever $ pdrange (d 4) (d 32))
+  ,("t_trig", pforever (d 1))]
+
+loop04 = let d = pdouble; i = pint in
+  psnew "rspdef1" Nothing AddToHead 1
+  [("dur", {- pforever (d 0.2) -} preplicate (i 1000) (d 0.2))
+  ,("n_map/amp", pforever (d 102))
+  ,("pan", pforever $ pdrange (d (-1)) (d 1))
+  ,("freq", pforever $ pdrange (d 100) (d 8000))
+  ,("atk", pforever (d 1e-4))
+  ,("dcy", pforever (d 1)) ]
+
+-- --------------------------------------------------------------------------
+--
+-- Main
+--
+
+litw :: IO ()
+litw = withSC3 $ \fd -> do
+  setup_litw fd
+  patchNode (nodify litwNd) fd
+  play fd $ toL psw
