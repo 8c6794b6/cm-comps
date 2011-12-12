@@ -149,23 +149,23 @@ bhitp = sseq sinf [p] where
 --
 b002met :: UGen
 b002met = mrg [out ("outt"@@0) sig, out ("outb"@@0) cnt] where
-  sig = impulse kr f 0
+  sig = impulse KR f 0
   cnt = pulseCount sig 0
   f = 2 * ("bpm"@@60) / 60 -- 2 triggers per beat.
 
 noises :: UGen -> UGen
 noises colour = out ("out"@@0) sig where
   sig = select colour $ mce nz
-  nz = [whiteNoise 'w' ar
-       ,pinkNoise 'p' ar
-       ,brownNoise 'b' ar
-       ,grayNoise 'g' ar
-       ,henonL ar (sampleRate/2) 0.1 0.3 x y
-       ,lorenzL ar sampleRate (x*10) (y*10) (z*12) h 0 0 0]
-  x = linLin (lfdNoise3 'x' kr 1) (-1) 1 0 1.4
-  y = linLin (lfdNoise3 'y' kr 1) (-1) 1 0 0.3
-  z = linLin (lfdNoise3 'z' kr 1) (-1) 1 0 0.8
-  h = linLin (lfdNoise3 'h' kr 1) (-1) 1 0 1
+  nz = [whiteNoise 'w' AR
+       ,pinkNoise 'p' AR
+       ,brownNoise 'b' AR
+       ,grayNoise 'g' AR
+       ,henonL AR (sampleRate/2) 0.1 0.3 x y
+       ,lorenzL AR sampleRate (x*10) (y*10) (z*12) h 0 0 0]
+  x = linLin (lfdNoise3 'x' KR 1) (-1) 1 0 1.4
+  y = linLin (lfdNoise3 'y' KR 1) (-1) 1 0 0.3
+  z = linLin (lfdNoise3 'z' KR 1) (-1) 1 0 0.8
+  h = linLin (lfdNoise3 'h' KR 1) (-1) 1 0 1
 
 quickNoiseC :: UGen
 quickNoiseC = quickNoiseC' ("t_trig"@@0)
@@ -175,21 +175,21 @@ quickNoiseC' t_trig = mrg [out ("outt"@@0) t,out ("outf"@@0) f] where
 
 quickNoise :: UGen
 quickNoise = quickNoise' ("t_trig"@@0) dur atck ("freq"@@6600) envn where
-  dur = linLin (lfdNoise1 'd' kr (1/10.32)) (-1) 1
+  dur = linLin (lfdNoise1 'd' KR (1/10.32)) (-1) 1
         ("dmin"@@6.25e-2) ("dmax"@@0.25)
-  atck = linLin (lfdNoise1 'a' kr (1/12.123)) (-1) 1
+  atck = linLin (lfdNoise1 'a' KR (1/12.123)) (-1) 1
          ("amin"@@1e-3) ("amax"@@999e-3) `lag` 0.002
-  envn = linLin (sinOsc kr (1/13.321) 0) (-1) 1 (-10) 10
+  envn = linLin (sinOsc KR (1/13.321) 0) (-1) 1 (-10) 10
 
 quickNoise' tick dur atk freq en = out ("out"@@0) (sig * aenv * ("amp"@@1.2)) where
   sig = resonz nz freq' rq
-  fmod = linLin (lfdNoise3 'f' kr (1/8.9918)) (-1) 1 0.495 2.005
+  fmod = linLin (lfdNoise3 'f' KR (1/8.9918)) (-1) 1 0.495 2.005
   nz = "a_in"@@0
   freq' = lfreq
   lfreq = latch freq tick
-  aenv = envGen kr tick (latch tick tick) 0 dur DoNothing $
+  aenv = envGen KR tick (latch tick tick) 0 dur DoNothing $
          env [0,1,0,0] [atk,1-atk] [EnvNum en] 0 2
-  rq = linLin (lfdNoise1 'r' kr (1/5.12)) (-1) 1 0.1 0.9
+  rq = linLin (lfdNoise1 'r' KR (1/5.12)) (-1) 1 0.1 0.9
 
 slowNoiseC :: UGen
 slowNoiseC = out ("out"@@0) sig where
@@ -203,11 +203,11 @@ slowNoise' tick amp = out ("out"@@0) sig where
   sig = foldr f sig' (map (\x -> rand x 1e-3 3e-2) "random")
   f a b = allpassN b 3e-2 a 5e-2
   sig' = rlpf nz freq rq * aenv * amp
-  freq = envGen kr tick 18000 4000 1 DoNothing $
+  freq = envGen KR tick 18000 4000 1 DoNothing $
          env [1,0] [200e-3] [EnvNum (-14)] 0 (-1)
   rq = 0.85
   nz = "a_in"@@0
-  aenv = envGen kr tick (latch tick tick) 0 1 DoNothing $
+  aenv = envGen KR tick (latch tick tick) 0 1 DoNothing $
          env [0,1,0] [atk,30e-3] [EnvNum 4] 0 (-1)
   atk = 200e-3
 
@@ -221,13 +221,13 @@ hatLike2C = out ("out"@@0) (t * demand t 0 (supply0 hatt2)) where
 
 hatLike :: UGen
 hatLike = hatLike' ("t_trig"@@0) ("amp"@@0.3) sus where
-  sus = linExp (lfdNoise3 'd' kr (1/8)) (-1) 1 2e-2 8e-2
+  sus = linExp (lfdNoise3 'd' KR (1/8)) (-1) 1 2e-2 8e-2
 
 hatLike' t_trig amp sst = out ("out"@@0) sig where
   sig = mix (mkSig (mce [3197*r1, 5889*r2, 12210*r3])) * aenv
   mkSig f = resonz nz f (0.1 + (1/f))
   nz = "a_in"@@0
-  aenv = envGen kr t_trig (latch t_trig t_trig) 0 1 DoNothing $
+  aenv = envGen KR t_trig (latch t_trig t_trig) 0 1 DoNothing $
          env [0,1,0] [sst,15e-3] [EnvNum (-14)] 0 (-1)
   r1 = rand 'a' 0.995 1.005
   r2 = rand 'b' 0.995 1.005
@@ -239,10 +239,13 @@ bhitC t_trig = out ("out"@@0) sig where
 
 bhit :: UGen -> UGen
 bhit t_trig = out ("out"@@0) sig where
-  sig = ringz nz (mce [80.57, 201.33, 481.32, 293.98])
-        (mce [0.9,0.8,0.7,0.6]) * aenv
+  sig = ringz nz (mce fs) (mce as) * aenv
+  -- sig = ringz nz (mce [80.57, 201.33, 481.32, 293.98])
+  --       (mce [0.9,0.8,0.7,0.6]) * aenv
+  fs = [80.57, 132.98, 201.33, 293.98, 488.88, 532.17]
+  as = [0.9,0.8,0.7,0.6,0.5]
   nz = "a_in"@@0
-  aenv = envGen kr t_trig trig' 0 1 DoNothing $
+  aenv = envGen KR t_trig trig' 0 1 DoNothing $
          env [0,1,0] [1e-3,50e-3] [EnvCub] 0 (-1)
   trig' = latch t_trig t_trig
   atk = tExpRand 't' t_trig 1e-3 999e-3
@@ -262,17 +265,17 @@ bosc = bosc' ("gt"@@0) ("freq"@@0) ("amp"@@1)
 bosc' tick freq amp = out ("out"@@0) sig where
   sig = clip2 (rlpf sig' filtf filtq) 1 * amp
   sig' = sum [(sig1 + sig2 + sig3) * aenv
-             ,pulse ar (freq * mce [1.0001,1]) 0.7 * atk]
+             ,pulse AR (freq * mce [1.0001,1]) 0.7 * atk]
   sig1 = combL nz 0.2 (1/ (freq * mce [1,0.9998]))
-         (0.7 + (lfdNoise3 'q' kr 1 * 0.25))
+         (0.7 + (lfdNoise3 'q' KR 1 * 0.25))
   sig2 = combL nz 0.2 (1/ (freq * mce [1.5,1.5002]))
-         (0.7 + (lfdNoise3 'q' kr 1 * 0.28))
+         (0.7 + (lfdNoise3 'q' KR 1 * 0.28))
   sig3 = combL nz 0.2 (1/ (freq * mce [2,1.9998]))
-         (0.7 + (lfdNoise3 'q' kr 1 * 0.29))
+         (0.7 + (lfdNoise3 'q' KR 1 * 0.29))
   nz = "a_in"@@0
-  aenv = envGen kr tick tick' 0 1 DoNothing $
+  aenv = envGen KR tick tick' 0 1 DoNothing $
          env [0,1,1,0.2,0] [1e-3,80e-3,20e-3,10e-3] [EnvNum (-28)] 3 (-1)
-  atk = envGen kr tick tick' 0 1 DoNothing $
+  atk = envGen KR tick tick' 0 1 DoNothing $
         envPerc 1e-3 280e-3
   tick' = latch tick tick
   filtf = ("ff"@@12800)
@@ -307,7 +310,7 @@ b002mix2 = out ("out"@@0) sig where
 b002mst :: UGen
 b002mst = replaceOut ("out"@@0) sig where
   sig = sig' * ("amp"@@1)
-  sig' = mce ["a_inl"@@0, "a_inr"@@1]
+  sig' = hpf (mce ["a_inl"@@0, "a_inr"@@1]) 20
 
 -- | Sustains with given trigger.
 --
