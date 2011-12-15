@@ -309,7 +309,7 @@ b002mix2 = out ("out"@@0) sig where
 -- | Master control
 b002mst :: UGen
 b002mst = replaceOut ("out"@@0) sig where
-  sig = sig' * ("amp"@@1)
+  sig  = sig' * ("amp"@@1)
   sig' = hpf (mce ["a_inl"@@0, "a_inr"@@1]) 20
 
 -- | Sustains with given trigger.

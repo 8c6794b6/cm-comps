@@ -22,7 +22,7 @@ import Sound.OpenSoundControl
 import Sound.SC3
 import Sound.SC3.ID
 import qualified Sound.SC3.Monadic as N
-import Sound.SC3.Lepton
+import Sound.SC3.Lepton hiding (grp, syn, limiter)
 
 grp = Group
 syn = Synth
@@ -206,6 +206,7 @@ setupKtl fd = do
       ,grp 11 [syn 1100 "rev001" []]
       ,grp 12 []]
 
+{- 
 nsetP nid ps = do
   ms <- act $ runPIO $ sequenceA $ M.fromList ps
   forM_ ms $ \m -> do
@@ -222,6 +223,9 @@ snewP name aa gid ps = do
     rest (m!"del")
     pauseHere
   Sound.SC3.Lepton.done
+-}
+
+{-
 
 -- | Try:
 --
@@ -261,6 +265,8 @@ act2 = do
              -- ,("ramp",0.5)
              -- ,("artic",2)]]
   mapM_ (\xs -> f xs >> rest 2) ps
+
+-}
 
 cnv001 = out 0 $ mce [sig, sig]
   where

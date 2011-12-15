@@ -30,7 +30,7 @@ n0 =
   [g 1
    [g 10 -- master control
     [s 1001 "b002met"
-     ["bpm":={- 196 -} 221,"outt":=100,"outb":=101]
+     ["bpm":=196,"outt":=100,"outb":=101]
     ,s 1002 "noises"
      ["out":=3,"colour":=0]]
    ,g 20 -- controls and sources

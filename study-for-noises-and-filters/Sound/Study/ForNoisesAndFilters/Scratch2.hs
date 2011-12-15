@@ -15,8 +15,8 @@ module Sound.Study.ForNoisesAndFilters.Scratch2 where
 import Sound.OpenSoundControl
 import Sound.SC3
 import Sound.SC3.ID
-import Sound.SC3.Lepton
-import Sound.SC3.Lepton.GUI
+import Sound.SC3.Lepton hiding (syn, grp, limiter)
+-- import Sound.SC3.Lepton.GUI
 
 setupRG002 fd = do
   mapM_ (\(n,u) -> loadSynthdef n u fd)

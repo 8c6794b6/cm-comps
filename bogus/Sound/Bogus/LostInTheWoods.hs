@@ -54,7 +54,15 @@ rspdef2 =
   in  out 0 $ pan2 sig ("pan"@@0) ("amp"@@1)
 
 rspdef3 :: UGen
-rspdef3 = out ("out"@@100) (tExpRand 'f' 0.5 2 ("t_trig"@@1))
+rspdef3 =
+  let sig = (tExpRand 'f' (1/2) 2 ("t_trig"@@1)) + vib
+      vib = squared (xLine KR 1e-4 2 100 DoNothing) *
+            (squared $ lfdNoise3 'ζ' KR vbf)
+      -- vib = line KR 1e-4 2 140 DoNothing * (squared $ lfdNoise3 'ζ' KR vbf)
+      -- vib = linExp (linLin (sinOsc KR (1/38) pi) (-1) 1 1e-4 1) 1e-4 1 1e-4 1 *
+      --       (squared $ lfdNoise3 'ζ' KR vbf)
+      vbf = linLin (sinOsc KR (1/37) pi) (-1) 1 1e-9 20
+  in  out ("out"@@100) sig
 
 rspdef4 :: UGen
 rspdef4 =
@@ -62,21 +70,26 @@ rspdef4 =
       pw = lfdNoise3 'p' KR 2 ** 10
       ofq = fbs * fq0
       ffq = fbs * fq3
-      -- fbs = "freq"@@664.647
       fbs = "freq"@@1320.918
       fq0 = mkfq lfdNoise0
       fq3 = mkfq lfdNoise3
       mkfq n = linExp (n 'ε' KR (1/4.13) + 1.01) 0.01 2.01 0.25 32
-      amp = envGen KR tck ("amp"@@0.2) 0 (dur+5e-2) DoNothing shp
-      dur = (1/tfq) * 0.985
-      shp = env [0,1,0] [atk,1-atk] [EnvCub] (-1) (-1)
+      amp = envGen KR tck ("amp"@@0.2) 0 dur DoNothing shp
+      -- dur = (1/tfq) * 0.985
+      dur = (1/tfq) * drm
+      drm = linLin (lfdNoise3 'δ' KR 0.125) (-1) 1 0.125 0.5
+      shp = env [0,1,0] [atk,1-atk] [EnvCub, EnvCub] (-1) 0
       tck = impulse KR tfq 0
       tfq = linLin (lfdNoise3 'ω' KR 0.25) (-1) 1 0.25 5.65 ** 2
       atk = linLin (sinOsc KR (1/37) 0) (-1) 1 1e-3 999e-3
       pan = sinOsc KR pfm 0 * 0.75
       pfm = sinOsc KR (1/7.32) 0 * pi + (1/82)
-      rev = foldr fab sig ['a'..'h']
-      fab a b = allpassC b 8 (rand a 0.1 0.8) (rand a 5e-1 2)
+      rev = foldr fab sig ['a'..'j']
+      -- fab a b = allpassC b 2 (rand a 0.1 0.8) (rand a 5e-1 2)
+      -- fab a b = allpassL b 2 (rand a 0.1 0.8) (rand a 5e-1 2)
+      fab a b =
+        let x = combC b 2 (rand a 0.1 0.8) (rand a 5e-1 2)
+        in  allpassC x 2 (rand a 0.1 0.8) (rand a 5e-1 2)
       rev' = freeVerb rev 0.5 0.9 0.9
   in  out ("out"@@0) (pan2 rev' pan 1)
 
@@ -148,7 +161,7 @@ loop04_amp =
 -- Patterns
 --
 
-psw = ppar [loop01, loop02, loop03, loop04]
+psw = ppar [loop01, loop02, loop03 {- , loop04 -}]
 
 {-
 Alternative: Sending patterns to leptseq.
@@ -171,25 +184,26 @@ loop01 =
       pr n v = preplicate (i n) (d v)
   in  psnew "rspdef1" Nothing AddToHead 11
         [("dur",
-          -- pseq (i 2)
           -- pcycle
-          --   [ pr 2048 (1/41)
-          --   , pr 1024 (2/41)
-          --   , pr 512 (4/41)
-          --   , pr 256 (8/41)
-          --   , pr 128 (16/41)
-          --   , pr 64 (32/41) ])
+          pseq (i 3)
+            [ pr 1024 (1/117)
+            , pr 512 (2/117)
+            , pr 256 (4/117)
+            , pr 128 (8/117)
+            , pr 64 (16/117)
+            , pr 32 (16/117)
+            ])
           -- pcycle
-          pconcat
-            [ pr 2048 (1/117)
-            , pr 512 (4/117)
-            , pr 128 (16/117)
-            , pr 32 (64/117)
-            , pr 2048 (1/117)
-            , pr 512 (4/117)
-            , pr 128 (16/117)
-            , pr 2048 (1/117)
-            , pr 1024 (2/117) ])
+          -- pconcat
+          --   [ pr 2048 (1/117)
+          --   , pr 1024 (2/117)
+          --   , pr 512 (4/117)
+          --   , pr 256 (8/117)
+          --   , pr 1024 (2/117)
+          --   , pr 512 (4/117)
+          --   , pr 64 (32/117)
+          --   , pr 2048 (1/117)
+          --   , pr 1024 (2/117) ])
         ,("freq", pmidiCPS $ pforever $ prand (i 1) $ pitches)
         ,("pan", fr (-1) 1)
         ,("atk", fr 1e-4 1)
@@ -202,11 +216,13 @@ loop02 =
       fr l h = pforever (pdrange (d l) (d h))
       er l h = pforever $ pexp $ pdrange (plog (d l)) (plog (d h))
   in  psnew "rspdef2" Nothing AddToHead 11
-        [("dur", er 1e-1 5e-1)
+        [-- ("dur", er 1e-1 5e-1)
+         ("dur", er 1e-1 5e-1) 
         ,("freq", er 110 17000)
         ,("atk",  fr 1e-4 2)
-        ,("dcy",  fr 5e-1 2)
-        ,("amp",  fr 1e-3 0.48)
+        -- ,("dcy",  fr 5e-1 2)
+        ,("dcy",  fr 1e-4 2)
+        ,("amp",  fr 1e-3 0.58)
         ,("pan",  fr (-1) 1)
         ,("lagt", er 1e-3 8)
         ,("n_map/q", pforever (d 101)) ]
@@ -214,8 +230,9 @@ loop02 =
 loop03 =
   let d = pdouble
       er l h = pforever $ pexp $ pdrange (plog (d l)) (plog (d h))
+      dr l h = pforever $ pdrange (d l) (d h)
   in pnset 100001
-       [("dur", er 4 32)
+       [("dur", {- er 4 32 -} dr 4 32)
        ,("t_trig", pforever (d 1))]
 
 loop04 = let d = pdouble in
