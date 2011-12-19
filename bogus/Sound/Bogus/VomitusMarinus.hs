@@ -10,10 +10,8 @@ Portability : non-portable (NoMonomorphismRestriction)
 
 Vomitus Marinus.
 
-... Or, vomitus marinus.
-
 -}
-module Sound.Bogus.LostInTheWoods where
+module Sound.Bogus.VomitusMarinus where
 
 import Sound.OpenSoundControl
 import Sound.SC3
@@ -58,10 +56,7 @@ rspdef3 =
   let sig = (tExpRand 'f' (1/2) 2 ("t_trig"@@1)) + vib
       vib = squared (xLine KR 1e-4 2 100 DoNothing) *
             (squared $ lfdNoise3 'ζ' KR vbf)
-      -- vib = line KR 1e-4 2 140 DoNothing * (squared $ lfdNoise3 'ζ' KR vbf)
-      -- vib = linExp (linLin (sinOsc KR (1/38) pi) (-1) 1 1e-4 1) 1e-4 1 1e-4 1 *
-      --       (squared $ lfdNoise3 'ζ' KR vbf)
-      vbf = linLin (sinOsc KR (1/37) pi) (-1) 1 1e-9 20
+      vbf = linExp (squared $ sinOsc KR (1/31.4) pi) 0 1 1e-4 20
   in  out ("out"@@100) sig
 
 rspdef4 :: UGen
@@ -75,7 +70,6 @@ rspdef4 =
       fq3 = mkfq lfdNoise3
       mkfq n = linExp (n 'ε' KR (1/4.13) + 1.01) 0.01 2.01 0.25 32
       amp = envGen KR tck ("amp"@@0.2) 0 dur DoNothing shp
-      -- dur = (1/tfq) * 0.985
       dur = (1/tfq) * drm
       drm = linLin (lfdNoise3 'δ' KR 0.125) (-1) 1 0.125 0.5
       shp = env [0,1,0] [atk,1-atk] [EnvCub, EnvCub] (-1) 0
@@ -85,11 +79,10 @@ rspdef4 =
       pan = sinOsc KR pfm 0 * 0.75
       pfm = sinOsc KR (1/7.32) 0 * pi + (1/82)
       rev = foldr fab sig ['a'..'j']
-      -- fab a b = allpassC b 2 (rand a 0.1 0.8) (rand a 5e-1 2)
-      -- fab a b = allpassL b 2 (rand a 0.1 0.8) (rand a 5e-1 2)
       fab a b =
         let x = combC b 2 (rand a 0.1 0.8) (rand a 5e-1 2)
-        in  allpassC x 2 (rand a 0.1 0.8) (rand a 5e-1 2)
+            y = allpassC x 2 (rand a 0.1 0.8) (rand a 5e-1 2)
+        in  y
       rev' = freeVerb rev 0.5 0.9 0.9
   in  out ("out"@@0) (pan2 rev' pan 1)
 
@@ -161,7 +154,7 @@ loop04_amp =
 -- Patterns
 --
 
-psw = ppar [loop01, loop02, loop03 {- , loop04 -}]
+psw = ppar [loop01, loop02, loop03 , loop04]
 
 {-
 Alternative: Sending patterns to leptseq.
@@ -184,26 +177,16 @@ loop01 =
       pr n v = preplicate (i n) (d v)
   in  psnew "rspdef1" Nothing AddToHead 11
         [("dur",
-          -- pcycle
-          pseq (i 3)
+          pconcat
+          [ pseq (i 3)
             [ pr 1024 (1/117)
             , pr 512 (2/117)
             , pr 256 (4/117)
             , pr 128 (8/117)
-            , pr 64 (16/117)
-            , pr 32 (16/117)
-            ])
-          -- pcycle
-          -- pconcat
-          --   [ pr 2048 (1/117)
-          --   , pr 1024 (2/117)
-          --   , pr 512 (4/117)
-          --   , pr 256 (8/117)
-          --   , pr 1024 (2/117)
-          --   , pr 512 (4/117)
-          --   , pr 64 (32/117)
-          --   , pr 2048 (1/117)
-          --   , pr 1024 (2/117) ])
+            , pr 64 (16/117) ]
+          , pr 32 (32/117)
+          , pr 16 (64/117)
+          ])
         ,("freq", pmidiCPS $ pforever $ prand (i 1) $ pitches)
         ,("pan", fr (-1) 1)
         ,("atk", fr 1e-4 1)
@@ -216,33 +199,31 @@ loop02 =
       fr l h = pforever (pdrange (d l) (d h))
       er l h = pforever $ pexp $ pdrange (plog (d l)) (plog (d h))
   in  psnew "rspdef2" Nothing AddToHead 11
-        [-- ("dur", er 1e-1 5e-1)
-         ("dur", er 1e-1 5e-1) 
+        [("dur", er 1e-1 5e-1)
         ,("freq", er 110 17000)
-        ,("atk",  fr 1e-4 2)
-        -- ,("dcy",  fr 5e-1 2)
-        ,("dcy",  fr 1e-4 2)
-        ,("amp",  fr 1e-3 0.58)
-        ,("pan",  fr (-1) 1)
+        ,("atk", fr 1e-4 2)
+        ,("dcy", fr 1e-4 2)
+        ,("amp", fr 1e-3 0.58)
+        ,("pan", fr (-1) 1)
         ,("lagt", er 1e-3 8)
         ,("n_map/q", pforever (d 101)) ]
 
 loop03 =
   let d = pdouble
-      er l h = pforever $ pexp $ pdrange (plog (d l)) (plog (d h))
-      dr l h = pforever $ pdrange (d l) (d h)
+      fr l h = pforever $ pdrange (d l) (d h)
   in pnset 100001
-       [("dur", {- er 4 32 -} dr 4 32)
+       [("dur", fr 4 32)
        ,("t_trig", pforever (d 1))]
 
-loop04 = let d = pdouble in
-  psnew "rspdef5" Nothing AddToHead 1
-  [("dur", pforever (d 0.2) {- preplicate (i 1000) (d 0.2) -})
-  ,("n_map/amp", pforever (d 102))
-  ,("pan", pforever $ pdrange (d (-1)) (d 1))
-  ,("freq", pforever $ pdrange (d 1000) (d 11000)) ]
-  -- ,("atk", pforever (d 1e-4))
-  -- ,("dcy", pforever (d 1)) ]
+loop04 =
+  let d = pdouble
+      i = pint
+  in psnew "rspdef5" Nothing AddToHead 1
+       [("dur", {- pforever (d 0.2) -} preplicate (i 700) (d 0.2))
+       ,("n_map/amp", pforever (d 102))
+       ,("pan", pforever $ pdrange (d (-1)) (d 1))
+       ,("freq", pforever $ pdrange (d 1000) (d 11000))
+       ]
 
 -- --------------------------------------------------------------------------
 --
@@ -254,3 +235,7 @@ litw = withSC3 $ \fd -> do
   setup_litw fd
   patchNode (nodify litwNd) fd
   play fd $ toL psw
+
+-- helper
+w :: (UDP -> IO a) -> IO a
+w = withSC3

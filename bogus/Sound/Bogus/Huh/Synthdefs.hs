@@ -16,16 +16,10 @@ module Sound.Bogus.Huh.Synthdefs where
 import Control.Concurrent
 import Control.Exception
 
-import Data.Binary (decode, encode)
-import Codec.Compression.Zlib(compress, decompress)
 import Sound.OpenSoundControl
 import Sound.SC3
 import Sound.SC3.ID
 import Sound.SC3.Lepton
-
-import qualified Data.ByteString.Lazy.Char8 as LC8
-
--- writeHuh = writeScore [] n0 (ptakeT 180 allP)
 
 {-
 
