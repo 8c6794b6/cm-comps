@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -fno-warn-missing-signatures #-}
 {- |
 Module      : $Header$
 CopyRight   : (c) 8c6794b6
@@ -6,9 +7,7 @@ Maintainer  : 8c6794b6@gmail.com
 Stability   : unstable
 Portability : portable
 
-TODO:
-
-* Add melody.
+B002 - white noise factory.
 
 -}
 module Sound.Study.ForNoisesAndFilters.B002.Synthdef where
@@ -21,6 +20,11 @@ import Sound.SC3.Lepton
 
 r :: IO ()
 r = withSC3 reset
+
+-- --------------------------------------------------------------------------
+--
+-- Demand ugens
+-- 
 
 -- | Trigger values for quickNoise.
 qnT1 :: Supply
@@ -139,8 +143,13 @@ bhitp = sseq sinf [p] where
        ,sseq 2 [w1,0,0,w2,0,0,w2,r2]]]
   w1 = swhite 1 0.9 1
   w2 = swhite 1 0.8 0.6
-  r1 = srand 1 [0,w1]
+  -- r1 = srand 1 [0,w1]
   r2 = srand 1 [0,w2]
+  
+-- --------------------------------------------------------------------------  
+--
+-- Sound sources
+--
 
 -- | Synthdef to count beat.
 --
@@ -151,7 +160,7 @@ b002met :: UGen
 b002met = mrg [out ("outt"@@0) sig, out ("outb"@@0) cnt] where
   sig = impulse KR f 0
   cnt = pulseCount sig 0
-  f = 2 * ("bpm"@@60) / 60 -- 2 triggers per beat.
+  f = 2 * ("bpm"@@60) / 60
 
 noises :: UGen -> UGen
 noises colour = out ("out"@@0) sig where
@@ -183,7 +192,7 @@ quickNoise = quickNoise' ("t_trig"@@0) dur atck ("freq"@@6600) envn where
 
 quickNoise' tick dur atk freq en = out ("out"@@0) (sig * aenv * ("amp"@@1.2)) where
   sig = resonz nz freq' rq
-  fmod = linLin (lfdNoise3 'f' KR (1/8.9918)) (-1) 1 0.495 2.005
+  -- fmod = linLin (lfdNoise3 'f' KR (1/8.9918)) (-1) 1 0.495 2.005
   nz = "a_in"@@0
   freq' = lfreq
   lfreq = latch freq tick
@@ -224,7 +233,7 @@ hatLike = hatLike' ("t_trig"@@0) ("amp"@@0.3) sus where
   sus = linExp (lfdNoise3 'd' KR (1/8)) (-1) 1 2e-2 8e-2
 
 hatLike' t_trig amp sst = out ("out"@@0) sig where
-  sig = mix (mkSig (mce [3197*r1, 5889*r2, 12210*r3])) * aenv
+  sig = mix (mkSig (mce [3197*r1, 5889*r2, 12210*r3])) * aenv * amp
   mkSig f = resonz nz f (0.1 + (1/f))
   nz = "a_in"@@0
   aenv = envGen KR t_trig (latch t_trig t_trig) 0 1 DoNothing $
@@ -248,8 +257,8 @@ bhit t_trig = out ("out"@@0) sig where
   aenv = envGen KR t_trig trig' 0 1 DoNothing $
          env [0,1,0] [1e-3,50e-3] [EnvCub] 0 (-1)
   trig' = latch t_trig t_trig
-  atk = tExpRand 't' t_trig 1e-3 999e-3
-  dcy = 1 - atk
+  -- atk = tExpRand 't' t_trig 1e-3 999e-3
+  -- dcy = 1 - atk
 
 boscC :: UGen
 boscC = mrg [outg, outf] where
@@ -311,6 +320,11 @@ b002mst :: UGen
 b002mst = replaceOut ("out"@@0) sig where
   sig  = sig' * ("amp"@@1)
   sig' = hpf (mce ["a_inl"@@0, "a_inr"@@1]) 20
+  
+-- --------------------------------------------------------------------------  
+--   
+-- Helpers  
+--   
 
 -- | Sustains with given trigger.
 --

@@ -1,3 +1,15 @@
+{-# OPTIONS_GHC -fno-warn-missing-signatures #-}
+{-|
+Module      : $Header$
+CopyRight   : (c) 8c6794b6
+License     : BSD3
+Maintainer  : 8c6794b6@gmail.com
+Stability   : unstable
+Portability : portable
+
+B003 - Untitled.
+
+-}
 module Sound.Study.ForNoisesAndFilters.B003.Synthdef where
 
 import Sound.OpenSoundControl
@@ -49,20 +61,20 @@ cd2tkl' tick = out ("out"@@0) $ decay2 tick 1e-3 1.2 * sig * 0.2 where
   f a b = allpassN b 0.05 a 4
   sig' = ringz nz freq rt
   freq = tExpRand 'f' 1020 12800 tick
-  nz = pinkNoise 'a' ar
-  rt = mouseX kr 0.04 4 Linear 0.1
+  nz = pinkNoise 'a' AR
+  rt = mouseX KR 0.04 4 Linear 0.1
 
 ppt :: UGen
-ppt = out ("out"@@0) (impulse kr (lfdNoise3 'f' kr 1 * f + (f/2)) 0) where
+ppt = out ("out"@@0) (impulse KR (lfdNoise3 'f' KR 1 * f + (f/2)) 0) where
   f = "freq"@@1
 
 b003dust :: UGen -> UGen
 b003dust bpm = out ("out"@@0) sig where
-  sig = dust 'd' kr (bpm/60)
+  sig = dust 'd' KR (bpm/60)
 
 ppC :: UGen -> UGen
 ppC bpm = mrg [outt, outf, outa, outp, outatk] where
-  t = dust 'd' kr (bpm/60)
+  t = dust 'd' KR (bpm/60)
   outt = out ("outt"@@0) t
   outf = out ("outf"@@0) (tExpRand 'f' ("minf"@@1020) ("maxf"@@12080) t)
   outa = out ("outa"@@0) (tExpRand 'a' 1e-3 5e-2 t)
@@ -70,39 +82,46 @@ ppC bpm = mrg [outt, outf, outa, outp, outatk] where
   outatk = out ("outatk"@@0) (tRand 'k' 1e-4 9999e-4 t)
 
 pp01 :: UGen
-pp01 = pp' t a f p (-14) 1 1e-4
-  where
-    f = tExpRand 'f' 1200 12800 t
-    a = tExpRand 'a' 0.05 0.15 t
-    p = tRand 'p' (-1) 1 t
-    t = dust 'd' kr (mouseY kr 0.25 2 Exponential 0.1)
+pp01 = pp' t a f p 8 d k where
+  -- f = tExpRand 'f' 80 12800 t
+  ptchs = [midiCPS (x+y)|x<-[0,3,5,7,10],y<-[36,43..113]]
+  b = asLocalBuf 'a' ptchs
+  f = index b (tRand 'i' 0 (bufFrames KR b) t)
+  a = tExpRand 'a' 0.0125 0.025 t
+  p = tRand 'p' (-1) 1 t
+  k = tExpRand 'k' 1e-4 9999e-4 t
+  t = dust 'd' KR (mouseY KR 0.25 12 Exponential 0.1)
+  -- d = tExpRand 'δ' 1e-4 1e-2 t
+  d = linLin (lfdNoise1 'δ' KR (1/16)) (-1) 1 1e-4 5e-2
 
 pp :: UGen
 pp = pp' ("t_trig"@@1) ("amp"@@0.3) ("freq"@@1200) ("pan"@@0)
      ("envn"@@0) ("dur"@@0.1) ("atk"@@0.1)
 pp' tick amp freq pan en dur atk = out ("out"@@0) sig where
-  sig = foldr f sig' $ map (\x -> rand x 1e-4 5e-3) "blahouqp32813"
-  f a b = allpassN b 5e-3 a 3
+  sig = hpf (foldr f sig' "blahouqp32814") 20
+  f a b = allpassC b 1 (rand a 1e-9 1) (rand a 1e-1 3)
   sig' = pan2 (ringz (nz * aenv) freq q) pan 1
-  -- aenv = decay2 tick 1e-3 1 * amp
-  aenv = envGen kr tick amp 0 dur DoNothing $
+  -- aenv = decay2 tick atk 1 * amp
+  aenv = envGen KR tick amp 0 dur DoNothing $
          env [0,1,0] [atk,1-atk] [EnvNum en] (-1) 0
-  nz = pinkNoise 'p' ar
-  -- nz = henonC ar (sampleRate/2) {- 8800 -} 1.4 0.3 0 0
-  q = lfdNoise3 'q' kr 1 * 2.4 + 2.401
+  nz = pinkNoise 'p' AR
+  -- nz = whiteNoise 'w' AR
+  -- nz = henonC AR (sampleRate/2) {- 8800 -} 1.4 0.3 0 0
+  -- q = linLin (lfdNoise3 'q' KR 1) (-1) 1 1e-1 9e-1
+  q = linLin (lfdNoise3 'q' KR 20) (-1) 1 1e-3 999e-3
 
 fshift :: UGen
 fshift = fshift' ("a_in"@@0)
 fshift' input = out ("out"@@0) sig where
-  sig = freqShift input (sinOsc kr f 0 * 250.5 + 250.5) 0
-  f = sinOsc kr (1/5.1) 0 * 2.5 + 2.5
+  sig = freqShift input (sinOsc KR f 0 * 250.5 + 250.5) 0
+  f = sinOsc KR (1/5.1) 0 * 2.5 + 2.5
 
 fs2 :: UGen
 fs2 = out ("out"@@0) sig where
-  sig = freqShift source (sinOsc kr f 0 * 250.5 + 250.5) 0
-  f = sinOsc kr (1/5.1) 0 * 2.5 + 2.5
-  source = ringz (pinkNoise 'p' ar * aenv * 0.3) freq rq
+  sig = freqShift source (sinOsc KR f 0 * 250.5 + 250.5) 0
+  f = sinOsc KR (1/5.1) 0 * 2.5 + 2.5
+  source = ringz (pinkNoise 'p' AR * aenv * 0.3) freq rq
   freq = tExpRand 'f' 1200 8800 tick
-  rq = lfdNoise3 'q' kr 1 * 0.49 + 0.5
+  rq = lfdNoise3 'q' KR 1 * 0.49 + 0.5
   aenv = decay2 tick 1e-3 1
-  tick = dust 'd' kr 1
+  tick = dust 'd' KR 1
