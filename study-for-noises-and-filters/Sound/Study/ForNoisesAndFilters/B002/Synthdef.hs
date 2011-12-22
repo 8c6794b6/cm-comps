@@ -14,6 +14,7 @@ module Sound.Study.ForNoisesAndFilters.B002.Synthdef where
 
 import System.Random
 
+import Sound.OpenSoundControl
 import Sound.SC3
 import Sound.SC3.ID
 import Sound.SC3.Lepton
@@ -21,15 +22,36 @@ import Sound.SC3.Lepton
 r :: IO ()
 r = withSC3 reset
 
+setup_b002 fd = mapM_ (send fd . d_recv . uncurry synthdef) defs where
+  defs =
+    [ ("b002met", b002met)
+    , ("quickNoiseC", quickNoiseC)
+    , ("quickNoise", quickNoise)
+    , ("slowNoiseC", slowNoiseC)
+    , ("slowNoise", slowNoise)
+    , ("hatLike1C", hatLike1C)
+    , ("hatLike2C", hatLike2C)
+    , ("hatLike", hatLike)
+    , ("bhitC", bhitC tick)
+    , ("bhit", bhit tick)
+    , ("boscC", boscC)
+    , ("b002amps", b002amps)
+    , ("b002mix1", b002mix1)
+    , ("b002mix2", b002mix2)
+    , ("b002mst", b002mst)
+    , ("noises", noises)
+    ]
+  tick = "t_trig"@@0
+
 -- --------------------------------------------------------------------------
 --
 -- Demand ugens
--- 
+--
 
 -- | Trigger values for quickNoise.
 qnT1 :: Supply
 qnT1 =
-  sseq sinf
+  sseq 2
   [sseq 128 [0]
   ,sseq 4
    [sseq 3 [base1]
@@ -58,7 +80,7 @@ qnF1 =
 -- | Gate values for bosc.
 boG1 :: Supply
 boG1 =
-  sseq sinf
+  sseq 2
   [sseq 1
    [srand 48 [1,0.8,0.2,0,-1], sseq 1 [1,sseq 14 [-1],0.8]
    ,srand 48 [1,0.8,-1], swhite 16 0.3 1]
@@ -84,15 +106,20 @@ boG1 =
 -- | Frequency value for bosc, in midi node.
 boF1 :: Supply
 boF1 =
-  sseq sinf
-  [sseq 1 [sseq 16 [52], srand 16 [52,64]
-          ,srand 16 [52,64,76], srand 16 base
-          ,sseq 16 [52], srand 16 [52,64]
-          ,srand 16 [52,64,76], sseq 2 base]
-  ,sseq 1
-   [sseq 32 base
-   ,srand 112 base, sseq 2 base
-   ,sseq 16 base]]
+  sseq 1
+  [sseq 2
+    [sseq 1 [sseq 16 [52], srand 16 [52,64]
+            ,srand 16 [52,64,76], srand 16 base
+            ,sseq 16 [52], srand 16 [52,64]
+            ,srand 16 [52,64,76], sseq 2 base]
+    ,sseq 1
+     [sseq 32 base
+     ,srand 112 base, sseq 2 base
+     ,sseq 16 base]]
+  , sseq 7 base
+  , sseq 1 base2
+  , sseq 32 [sval 52]
+  ]
   -- ,sseq 1 [sseq 48 base, srand 128 plus7]]
   -- ,sseq 1 [sseq 24 base, sseq 8 plus5
   --         ,sseq 8 base, sseq 8 minus2
@@ -102,6 +129,7 @@ boF1 =
           -- ,srand 128 (minus5 ++ plus5)]]
   where
     base = [52,57,59, 64,69,71, 76,78]
+    base2 = map (+12) base
     -- plus2 = map (+ 2) base
     -- plus5 = map (+ 5) base
     -- plus7 = map (+ 7) base
@@ -110,9 +138,12 @@ boF1 =
 
 snt1 :: Supply
 snt1 =
-  sseq sinf [sseq 112 [0], sseq 4 [0,w,0,0]
-            ,sseq 128 [0,w,0,0]]
+  sseq sinf
+    [ sseq 112 [0], sseq 4 b
+    , sseq 128 b
+    ]
   where
+    b = [0,0,w,0]
     w = swhite 1 0.8 1
 
 hatt1 :: Supply
@@ -134,7 +165,7 @@ hatt2 =
     w2 = swhite 1 0.4 0.8
 
 bhitp :: Supply
-bhitp = sseq sinf [p] where
+bhitp = sseq 1 [sseq 2 [p], sseq sinf [w1,sseq 3 [r2]]]  where
   p = sseq 1
       [sseq 12 [w1,0,0,0], sseq 1 (replicate 16 0)
       ,sseq 12 [w1,0,0,0], sseq 2 [w1,0,0,w2,0,0,w2,r2]
@@ -142,11 +173,11 @@ bhitp = sseq sinf [p] where
        [sseq 3 [1,0,0,r2, w1,0,r2,0, w1,r2,0,0, w1,0,r2,0]
        ,sseq 2 [w1,0,0,w2,0,0,w2,r2]]]
   w1 = swhite 1 0.9 1
-  w2 = swhite 1 0.8 0.6
+  w2 = swhite 1 0.6 0.8
   -- r1 = srand 1 [0,w1]
   r2 = srand 1 [0,w2]
-  
--- --------------------------------------------------------------------------  
+
+-- --------------------------------------------------------------------------
 --
 -- Sound sources
 --
@@ -157,13 +188,17 @@ bhitp = sseq sinf [p] where
 -- of current beat count.
 --
 b002met :: UGen
-b002met = mrg [out ("outt"@@0) sig, out ("outb"@@0) cnt] where
+b002met = mrg [out ("outt"@@0) sig, out ("outb"@@0) cnt, fslf] where
   sig = impulse KR f 0
   cnt = pulseCount sig 0
+  fslf = freeSelf (cnt >=* (1024 + 256 + 64 + 1))
   f = 2 * ("bpm"@@60) / 60
 
-noises :: UGen -> UGen
-noises colour = out ("out"@@0) sig where
+noises :: UGen
+noises = noises' ("colour"@@0)
+
+noises' :: UGen -> UGen
+noises' colour = out ("out"@@0) sig where
   sig = select colour $ mce nz
   nz = [whiteNoise 'w' AR
        ,pinkNoise 'p' AR
@@ -187,7 +222,7 @@ quickNoise = quickNoise' ("t_trig"@@0) dur atck ("freq"@@6600) envn where
   dur = linLin (lfdNoise1 'd' KR (1/10.32)) (-1) 1
         ("dmin"@@6.25e-2) ("dmax"@@0.25)
   atck = linLin (lfdNoise1 'a' KR (1/12.123)) (-1) 1
-         ("amin"@@1e-3) ("amax"@@999e-3) `lag` 0.002
+         ("amin"@@1e-4) ("amax"@@999e-4) `lag` 2e-4
   envn = linLin (sinOsc KR (1/13.321) 0) (-1) 1 (-10) 10
 
 quickNoise' tick dur atk freq en = out ("out"@@0) (sig * aenv * ("amp"@@1.2)) where
@@ -209,16 +244,17 @@ slowNoise :: UGen
 slowNoise = slowNoise' ("t_trig"@@0) ("amp"@@0.3)
 
 slowNoise' tick amp = out ("out"@@0) sig where
-  sig = foldr f sig' (map (\x -> rand x 1e-3 3e-2) "random")
-  f a b = allpassN b 3e-2 a 5e-2
+  sig = foldr f sig' "slownz"
+  f a b = allpassN b 1e-1 (rand a 3e-4 1e-2) (rand a 5e-2 5e-1)
   sig' = rlpf nz freq rq * aenv * amp
   freq = envGen KR tick 18000 4000 1 DoNothing $
-         env [1,0] [200e-3] [EnvNum (-14)] 0 (-1)
-  rq = 0.85
+         env [0.5,0.5,0] [100e-3,100e-3] [EnvNum (-14)] 0 (-1)
+  -- rq = 0.85
+  rq  = linLin (sinOsc KR (1/pi * rqf) (pi/4)) (-1) 1 250e-3 850e-3
+  rqf = linLin (sinOsc KR (1/pi) 0) (-1) 1 1 pi
   nz = "a_in"@@0
   aenv = envGen KR tick (latch tick tick) 0 1 DoNothing $
-         env [0,1,0] [atk,30e-3] [EnvNum 4] 0 (-1)
-  atk = 200e-3
+         env [0,1,0] [200e-3,10e-3] [EnvNum 11] 0 (-1)
 
 hatLike1C :: UGen
 hatLike1C = out ("out"@@0) (t * demand t 0 (supply0 hatt1)) where
@@ -248,17 +284,17 @@ bhitC t_trig = out ("out"@@0) sig where
 
 bhit :: UGen -> UGen
 bhit t_trig = out ("out"@@0) sig where
-  sig = ringz nz (mce fs) (mce as) * aenv
-  -- sig = ringz nz (mce [80.57, 201.33, 481.32, 293.98])
-  --       (mce [0.9,0.8,0.7,0.6]) * aenv
+  sig = ringz nz (mce fs * fenv) (mce as) * aenv
   fs = [80.57, 132.98, 201.33, 293.98, 488.88, 532.17]
-  as = [0.9,0.8,0.7,0.6,0.5]
+  as = [0.4,0.18,0.16,0.14,0.12,0.1]
   nz = "a_in"@@0
-  aenv = envGen KR t_trig trig' 0 1 DoNothing $
-         env [0,1,0] [1e-3,50e-3] [EnvCub] 0 (-1)
   trig' = latch t_trig t_trig
-  -- atk = tExpRand 't' t_trig 1e-3 999e-3
-  -- dcy = 1 - atk
+  aenv =
+    envGen KR t_trig trig' 0 1 DoNothing $
+    env [0,1,0.7,0] [1e-3,20e-3,80e-3] [EnvNum (-13)] 0 (-1)
+  fenv =
+    envGen KR t_trig 1 0 1 DoNothing $
+    env [2,2,0.5] [80e-3,80e-3] [EnvNum 8] 0 (-1)
 
 boscC :: UGen
 boscC = mrg [outg, outf] where
@@ -320,11 +356,11 @@ b002mst :: UGen
 b002mst = replaceOut ("out"@@0) sig where
   sig  = sig' * ("amp"@@1)
   sig' = hpf (mce ["a_inl"@@0, "a_inr"@@1]) 20
-  
--- --------------------------------------------------------------------------  
---   
--- Helpers  
---   
+
+-- --------------------------------------------------------------------------
+--
+-- Helpers
+--
 
 -- | Sustains with given trigger.
 --

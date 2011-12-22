@@ -8,29 +8,36 @@ Portability : portable
 -}
 module Sound.Study.ForNoisesAndFilters.B002.Node where
 
+import Sound.OpenSoundControl
 import Sound.SC3
 import Sound.SC3.Lepton
 import Sound.Study.ForNoisesAndFilters.B002.Synthdef
 
-go :: IO ()
-go = withSC3 $ patchNode n0
+go :: Transport t => t -> IO ()
+go fd = do
+  setup_b002 fd
+  patchNode n0 fd
 
 w = withSC3
 g = Group
 s = Synth
 
--- XXX: Found a bug.
---
--- Patching OSC message made from below to empty node tree will add group 50
--- inside group 20.
---
+{-
+
+XXX: Found a bug.
+
+Patching OSC message made from below to empty node tree will add group 50
+inside group 20.
+
+-}
+
 n0 :: SCNode
 n0 =
   g 0
   [g 1
    [g 10 -- master control
     [s 1001 "b002met"
-     ["bpm":=196,"outt":=100,"outb":=101]
+     ["bpm":=212,"outt":=100,"outb":=101]
     ,s 1002 "noises"
      ["out":=3,"colour":=0]]
    ,g 20 -- controls and sources
@@ -67,11 +74,9 @@ n0 =
      ,s 2501 "bhit"
       ["out":=27,"a_in":<=3,"t_trig":<-208]]]
    ,g 50 -- mix
-    [s 5000 "b002amps"
-     -- ["quickNoise":=4.5,"bosc":=1.1,"slowNoise":=4
-     -- ,"hat1":=1,"hat2":=1,"bhit":=0.2]
-     ["quickNoise":=2.25,"bosc":=0.65,"slowNoise":=2
-     ,"hat1":= 0.5,"hat2":=0.5,"bhit":=0.1]
+    [s 5000 "b002amps" -- pre amps
+     ["quickNoise":=2.5,"bosc":=0.65,"slowNoise":=4
+     ,"hat1":= 2.25,"hat2":=2.25,"bhit":=0.1]
     ,s 5001 "b002mix1" -- quickNoise
      ["out":=0,"a_in":<=20,"amp":<-800
      ,"pan":=(0.1),"dtl":=1e-4,"dtr":=1.7e-4]
@@ -79,7 +84,7 @@ n0 =
      ["out":=0,"a_inl":<=22, "a_inr":<=23,"amp":<-801]
     ,s 5003 "b002mix1" -- slowNoise
      ["out":=0,"a_in":<=24,"amp":<-802
-     ,"pan":=(-0.1),"dtr":=1e-4,"dtl":=2.8e-4]
+     ,"pan":=(-0.1),"dtr":=0.1e-4,"dtl":=0.28e-4]
     ,s 5004 "b002mix1" -- hat1
      ["out":=0,"a_in":<=25,"amp":<-803
      ,"pan":=0.95,"dtr":=1.8e-3,"dtl":=1.3e-3]
@@ -88,7 +93,7 @@ n0 =
      ,"pan":=(-0.95),"dtr":=1.5e-3,"dtl":=2e-3]
     ,s 5006 "b002mix1" -- bhit
      ["out":=0,"a_in":<=27,"amp":<-805
-     ,"pan":=(-0.25),"dtr":=2e-4,"dtl":=3e-4]]
+     ,"pan":=(-0.25),"dtr":=0.3e-4,"dtl":=0.17e-4]]
    ,g 99 -- master
     [s 9901 "b002mst"
-     ["amp":=0.2,"a_inl":<=0,"a_inr":<=1]]]]
+     ["amp":=0.18,"a_inl":<=0,"a_inr":<=1]]]]

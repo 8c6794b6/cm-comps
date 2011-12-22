@@ -26,12 +26,6 @@ go = patchNode n0
 
 -- Wish list:
 --
--- * Get rid of manual node id book keeping,
---  e.g. enable querying of 'give me what ever free id'.
---
--- * Get rid of manual bus number book keeping,
---  e.g. enable querying like 'value used in this node's that parameter'.
---
 -- * Enable doing the same thing as hsynthdef shell command with using
 --   Template haskell.
 
@@ -48,11 +42,6 @@ n0 =
      ["t_trig":<-100,"freq":<-101,"amp":<-102,"pan":<-103
      ,"dur":=1,"atk":<-105,"en":=1]
     ]]]
-
-data PP01 = PP01 Freq Amp Dur
-data Freq = Freq UGen
-data Amp = Amp UGen deriving (Eq,Show)
-data Dur = Dur UGen
 
 cd2tkl :: UGen
 cd2tkl = cd2tkl' ("t_trig"@@1)
@@ -84,7 +73,7 @@ ppC bpm = mrg [outt, outf, outa, outp, outatk] where
 pp01 :: UGen
 pp01 = pp' t a f p 8 d k where
   -- f = tExpRand 'f' 80 12800 t
-  ptchs = [midiCPS (x+y)|x<-[0,3,5,7,10],y<-[36,43..113]]
+  ptchs = [midiCPS (x+y)|x<-[0,4,7,11],y<-[36,48..108]]
   b = asLocalBuf 'a' ptchs
   f = index b (tRand 'i' 0 (bufFrames KR b) t)
   a = tExpRand 'a' 0.0125 0.025 t
@@ -97,18 +86,18 @@ pp01 = pp' t a f p 8 d k where
 pp :: UGen
 pp = pp' ("t_trig"@@1) ("amp"@@0.3) ("freq"@@1200) ("pan"@@0)
      ("envn"@@0) ("dur"@@0.1) ("atk"@@0.1)
-pp' tick amp freq pan en dur atk = out ("out"@@0) sig where
-  sig = hpf (foldr f sig' "blahouqp32814") 20
-  f a b = allpassC b 1 (rand a 1e-9 1) (rand a 1e-1 3)
-  sig' = pan2 (ringz (nz * aenv) freq q) pan 1
-  -- aenv = decay2 tick atk 1 * amp
+pp' tick amp freq pan en dur atk = out ("out"@@0) sig0 where
+  sig0 = rlpf sig1 12000 0.9
+  sig1 = hpf (foldr f sig2 "blahouqp32814") 20
+  sig2 = pan2 (ringz (nz * aenv) freq q) pan 1
+  f a b = allpassC b 1 (rand a 1e-1 1) (rand a 1 4)
   aenv = envGen KR tick amp 0 dur DoNothing $
          env [0,1,0] [atk,1-atk] [EnvNum en] (-1) 0
   nz = pinkNoise 'p' AR
   -- nz = whiteNoise 'w' AR
   -- nz = henonC AR (sampleRate/2) {- 8800 -} 1.4 0.3 0 0
   -- q = linLin (lfdNoise3 'q' KR 1) (-1) 1 1e-1 9e-1
-  q = linLin (lfdNoise3 'q' KR 20) (-1) 1 1e-3 999e-3
+  q = linLin (lfdNoise3 'q' KR 20) (-1) 1 1e-3 125e-3
 
 fshift :: UGen
 fshift = fshift' ("a_in"@@0)
@@ -125,3 +114,12 @@ fs2 = out ("out"@@0) sig where
   rq = lfdNoise3 'q' KR 1 * 0.49 + 0.5
   aenv = decay2 tick 1e-3 1
   tick = dust 'd' KR 1
+
+pk :: UGen
+pk = out 0 (pan2 (hpf sig1 20) 0 1) where
+  sig1 = decay2 t 1e-4 1 * sig0
+  sig0 = sum [f x|x<-[36,48,60,72,84,96,108]] * 1e-1
+  nz = pinkNoise 'p' AR
+  f x = combC nz 1 (1/(midiCPS x + q)) 0.5
+  q = linLin (lfdNoise1 'q' KR 1) (-1) 1 1e-1 10
+  t = dust 'τ' KR (pi/2) + impulse KR (1/2) 0
