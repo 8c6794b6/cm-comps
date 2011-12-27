@@ -5,6 +5,9 @@ License     : BSD3
 Maintainer  : 8c6794b6@gmail.com
 Stability   : unstable
 Portability : portable
+
+B002 - White steam.
+
 -}
 module Sound.Study.ForNoisesAndFilters.B002.Node where
 
@@ -21,15 +24,6 @@ go fd = do
 w = withSC3
 g = Group
 s = Synth
-
-{-
-
-XXX: Found a bug.
-
-Patching OSC message made from below to empty node tree will add group 50
-inside group 20.
-
--}
 
 n0 :: SCNode
 n0 =

@@ -33,7 +33,9 @@ go fd = do
     ,("pp02",pp02)
     ,("pp03",pp03)
     ,("pp04",pp04)
-    ,("pp05",pp05)]
+    ,("pp05",pp05)
+    ,("pp06",pp06)
+    ]
   patchNode (nodify n0) fd
 
 w :: (UDP -> IO a) -> IO a
@@ -67,6 +69,7 @@ n0 =
         ,syn "pp03" ["t_trig"*<-tout,"a_nz"*<=pn_out]
         ,syn "pp04" ["t_trig"*<-tout,"a_nz"*<=pn_out]
         ,syn "pp05" ["t_trig"*<-tout,"a_nz"*<=pn_out]
+        ,syn "pp06" ["t_trig"*<-tout,"a_nz"*<=pn_out]
         ]]]
 
 -- --------------------------------------------------------------------------
@@ -89,13 +92,23 @@ ppt02 = out ("out"@@0) (impulse KR ("bpm"@@480/60) 0)
 ppnz :: UGen
 ppnz = out ("out"@@0) (pinkNoise 'p' AR)
 
--- ppnz = out ("out"@@0) sig where
---   sig = xFade2 hnz pnz (fSinOsc KR (1/60) 0) 1
---   hnz = henonC AR (sampleRate/2) y x 0 0 * 0.65
---   pnz = pinkNoise 'p' AR
---   x = linLin (lfdNoise0 'x' KR m) (-1) 1 0.1 0.5 `lag3` 0.25
---   y = linLin (lfdNoise0 'y' KR m) (-1) 1 0.3 1.8 `lag3` 0.25
---   m = linLin (fSinOsc KR (1/32) 0) (-1) 1 (1/32) 4
+{-
+ppnz = out ("out"@@0) sig where
+  sig = xFade2 hnz pnz (fSinOsc KR (1/60) 0) 1
+  -- sig = hpf ltc 20
+  -- sig = hnz
+  hnz = henonC AR (sampleRate/2) y x 0.5 0.3 * 0.40
+  pnz = pinkNoise 'p' AR
+  x = linLin (lfdNoise0 'x' KR m) (-1) 1 0.1 0.5 `lag3` 0.25
+  y = linLin (lfdNoise3 'y' KR m) (-1) 1 0.8 1.8 -- `lag3` 0.25
+  m = linLin (fSinOsc KR (1/32) 0) (-1) 1 (1/32) 4
+  ltc = latoocarfianC AR (sampleRate/4)
+        (lfNoise2 'a' KR 2 * 1.5 + 1.5)
+        (lfNoise2 'b' KR 2 * 1.5 + 1.5)
+        (lfNoise2 'c' KR 2 * 0.5 + 1.5)
+        (lfNoise2 'd' KR 2 * 0.5 + 1.5)
+        1 1 * 0.125
+-}
 
 -- --------------------------------------------------------------------------
 --
@@ -222,6 +235,7 @@ pp03' tick = out 0 (pan2 (hpf sig 20) ("pan"@@0.1) 1) where
     prob  = linLin (lfdNoise3 'r' KR 0.125) (-1) 1 0 (1/6)
     tick' = pulseDivider tick 2 0
 
+
 -- --------------------------------------------------------------------------
 --
 -- Reverbed low frequency percussive hit
@@ -266,7 +280,7 @@ pp05' t = out ("out"@@0) (pan2 sig0 ("pan"@@0.05) 1) where
   tamp = index ampb (pulseCount (pulseDivider t 2 0) 0 `mod` nbuf)
   nbuf = bufFrames IR ampb
   ampb = asLocalBuf '5' [1,0.50,0.70,0.53, 0.95,0.55,0.62,0.55]
-  fs = [f * f1 + bf, f * f2 + bf, f * f3 + bf]
+  fs = [x*f+bf | x <- [f1,f2,f3]]
   f1 = tExpRand 'u' 2400 4800 tf
   f2 = tExpRand 'e' 1600 6400 tf
   f3 = tExpRand 'o' 4100 8200 tf
@@ -288,36 +302,30 @@ pp05' t = out ("out"@@0) (pan2 sig0 ("pan"@@0.05) 1) where
   tick = coinGate 't' r (pulseDivider t 2 0) where
     r = linLin (lfdNoise3 't' KR (1/33)) (-1) 1 (1/4) (3/4)
 
-{-
+-- --------------------------------------------------------------------------
+--
+-- High frequency pitched noise with comb filter
+--
 
-cd2tkl :: UGen
-cd2tkl = cd2tkl' ("t_trig"@@1)
-cd2tkl' tick = out ("out"@@0) $ decay2 tick 1e-3 1.2 * sig * 0.2 where
-  sig = foldr f sig' (map (\i -> rand i 0.001 0.05) "abwewpoew")
-  f a b = allpassN b 0.05 a 4
-  sig' = ringz nz freq rt
-  freq = tExpRand 'f' 1020 12800 tick
-  nz = pinkNoise 'a' AR
-  rt = mouseX KR 0.04 4 Linear 0.1
-
-b003dust :: UGen -> UGen
-b003dust bpm = out ("out"@@0) sig where
-  sig = dust 'd' KR (bpm/60)
-
-fshift :: UGen
-fshift = fshift' ("a_in"@@0)
-fshift' input = out ("out"@@0) sig where
-  sig = freqShift input (sinOsc KR f 0 * 250.5 + 250.5) 0
-  f = sinOsc KR (1/5.1) 0 * 2.5 + 2.5
-
-fs2 :: UGen
-fs2 = out ("out"@@0) sig where
-  sig = freqShift source (sinOsc KR f 0 * 250.5 + 250.5) 0
-  f = sinOsc KR (1/5.1) 0 * 2.5 + 2.5
-  source = ringz (pinkNoise 'p' AR * aenv * 0.3) freq rq
-  freq = tExpRand 'f' 1200 8800 tick
-  rq = lfdNoise3 'q' KR 1 * 0.49 + 0.5
-  aenv = decay2 tick 1e-3 1
-  tick = dust 'd' KR 1
-
--}
+pp06 :: UGen
+pp06 = out ("out"@@0) sig0 where
+  sig0 = rev $ rev $ grainIn 2 gt 0.1 sig1 mx (-1) 512
+  gt = impulse KR my 0
+  mx = tRand 'x' (-1) 1 (impulse KR 19 0)
+  my = squared ((lfdNoise3 'y' KR 0.8 + 1) * 2) + 5
+  sig1 = rlpf (mix $ resonz sig2 (mce rs) (mce qs) * e * (1/120)) 8000 0.2
+  sig2 = combC nz 0.1 (1/frq) 2
+  rs = [2300, 3500, 5600]
+  qs = [clip x 1 0 | i <- [0.9, 0.8, 0.7], let x = lfdNoise3 'd' KR i * i]
+  frq = midiCPS $ index (mce [ptchb1,ptchb2]) ((pulseCount t 0 `mod` nbuf) - 1)
+  nbuf = bufFrames IR ptchb1
+  ptchb1 = asLocalBuf 'p' ptchs1
+  ptchb2 = asLocalBuf 'p' ptchs2
+  ptchs1 = map (+ 36) [64,62,60,71,69,67]
+  ptchs2 = map (+ 36) [60,67,69,62,64,59]
+  nz = "a_nz"@@0
+  e = envGen KR t 1 0 4 DoNothing $
+      env [0,1,1,0] [0.3,0.3,0.3] [EnvCos] (-1) 0
+  t = pulseDivider ("t_trig"@@0) 64 0
+  rev x = x + foldr f x "blashing09238-GQ" where
+    f a b = allpassC b 1 (rand a 1e-4 1) (rand a 1 5)
