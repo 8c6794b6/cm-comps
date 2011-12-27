@@ -29,6 +29,7 @@ grp = Group
 syn = Synth
 
 w = withSC3
+a = audition
 
 -- n_mapa n ps = Message "/n_mapa" $ reverse $ L.foldl' f [Int n] ps
 --   where
@@ -57,6 +58,10 @@ n002 noisef filterf = pan2 n' 0 1
 
 n0021 = out 0 $ n002 whiteNoise resonz *
         decay2 (dust 'd' KR (abs (lfdNoise3 'f' KR 0.1) * 50)) 5e-4 100e-3
+
+n0022 = out 0 $ n002 pinkNoise resonz *
+        envGen KR (dust 'd' KR (abs (lfdNoise3 'f' KR 0.1) * 50)) 1 0 1 DoNothing
+        (env [0,1,0] [100e-3,8e-3] [EnvNum (-8)] (-1) 0)
 
 n003 = out 0 $ pan2 sig 0 1 * 0.05
   where
@@ -195,7 +200,7 @@ rev001 = replaceOut input sig
   where
     input = in' 2 AR (ctrl "out" 0)
     sig = foldr f input "abcdefg"
-    f a b = allpassN b 0.01 (rand a 0.005 0.01) 4
+    f x y = allpassN y 0.01 (rand x 0.005 0.01) 4
 
 setupKtl :: (Transport t) => t -> IO ()
 setupKtl fd = do
@@ -269,16 +274,24 @@ act2 = do
 
 -}
 
-cnv001 = out 0 $ mce [sig1,sig1]
+cnv001 = out 0 $ pan2 sig2 0 1
   where
+    sig2 = rlpf sig1 12000 0.8
+    -- sig1 = hpf (sum
+    --   [ resonz sig0 700 (q * 0.6)
+    --   , resonz sig0 1220 (q * 0.5)
+    --   , resonz sig0 2600 (q * 0.4)
+    --   ]) 20
+    -- q = linExp (lfdNoise3 'q' KR 1 + 1.01) 0.01 2 0.125 0.875
     -- sig1 = hpf (sum
     --   [ resonz sig0 700 (630/700)
     --   , resonz sig0 1220 (820/1200)
     --   , resonz sig0 2600 (1880/2600)
     --   ]) 20
-    sig1 = hpf sig0 50
+    sig1 = hpf sig0 80
     sig0 = convolution tck krn 2048 * 0.0725
-    krn = mix $ pulse AR rsn (lfdNoise3 'p' KR 2 + 1 * 0.5) * 0.25
+    -- krn = mix $ pulse AR rsn (lfdNoise3 'p' KR 2 + 1 * 0.5) * 0.25
+    krn = mix $ pulse AR rsn (lfdNoise3 'p' KR 4 + 1 * 0.125 + 0.125) * 0.25
     -- rsn = mce [80,130,330,458.832,910.1,1020.2,2320,3511.12]
     rsn = mce
       [ lag3 (midiCPS (f i)) 8e-3
@@ -297,17 +310,19 @@ cnv001 = out 0 $ mce [sig1,sig1]
     -- nz = whiteNoise 'a' AR * 0.1
     -- nz = pinkNoise 'a' AR * 0.1
     -- nz = brownNoise 'w' AR * 0.1
-    -- nz = grayNoise 'g' AR * 0.1
+    nz = grayNoise 'g' AR * 0.1
     -- nz = henonL AR (sampleRate/4) (n*0.2+1.2) (n*0.15+0.15) 0 0 * 0.3
-    nz = lorenzL AR sampleRate n0 n1 n2 0.05 0.1 0 0 * 0.3
-    n = lfdNoise3 'n' KR 0.25
-    n0 = n * 8 + 10
-    n1 = n * 3 + 38
-    n2 = n * 1.5 + 2
+    -- nz = lorenzL AR sampleRate n0 n1 n2 0.05 0.1 0 0 * 0.3
+    -- n = lfdNoise3 'n' KR 0.25
+    -- n0 = n * 8 + 10
+    -- n1 = n * 3 + 38
+    -- n2 = n * 1.5 + 2
     trg1 = impulse KR tf1 0.5
+    -- trg1 = trg4
     -- trg2 = dust 'ı' KR 0.5 + impulse KR 1 0
     trg2 = trg1
-    trg3 = pulseDivider (coinGate 't' 0.5 (impulse KR 2 0)) 6 0
+    trg3 = pulseDivider trg4 24 0
+    trg4 = impulse KR 4 0
     tf1 = linLin (lfdNoise3 'k' KR 0.5) (-1) 1 0.85 9.5
 
 cnv002 = cnv002' ("freq"@@440)
@@ -322,15 +337,24 @@ cnv002' freq = mrg [l, out 0 $ pan2 sig 0 1]
 
 cnv003 = out 0 $ mce [sig,sig]
   where
-    sig = rlpf (convolution n k 2048) (lfdNoise3 'r' KR 1 * 4000 + 4100) q * 0.1
-    q = lfdNoise3 'q' KR 0.5 * 0.4 + 0.5
+    -- sig = rlpf (convolution n k 2048) (lfdNoise3 'r' KR 1 * 4000 + 4100) q * 0.1
+    sig = rlpf (convolution n k 2048) frq q * 0.1 * 0.25
+    frq = mce
+      [ f i
+      | i <- ['a','b','c']
+      , let f x = lag3 (tExpRand x 80 14800 trg) 0.2]
+    q = lag (tExpRand 'q' 50e-3 999e-3 trg) 0.4
     n = whiteNoise 'n' AR * 0.1 * hit
     hit = envGen KR trg 1 0 1 DoNothing shape
-    shape = env [0,0,1,0] [0,2e-3,800e-3] [EnvNum (-13)] (-1) 0
+    -- shape = env [0,0,1,0] [0,2e-3,800e-3] [EnvNum (-13)] (-1) 0
+    shape = env [0,0,1,0] [0,300e-3,700e-3] [EnvCos] (-1) 0
     trg = impulse KR (lfdNoise3 'f' KR 0.25 * 3 + 3) 0
-    k = mix (lfSaw AR (mce [freq,freq*2+0.11,freq*3-0.08,freq*4+0.07]) 0 *
+    -- k = mix (lfSaw AR (mce [freq,freq*2+0.11,freq*3-0.08,freq*4+0.07]) 0 *
+    --          mouseX KR 1 2 Linear 0.1)
+    k = mix (pulse AR (mce [freq,freq*2+0.11,freq*3-0.08,freq*4+0.07]) 0 *
              mouseX KR 1 2 Linear 0.1)
-    freq = linExp (lfdNoise3 'a' KR 1) (-1) 1 10 1760
+    freq = linExp (lfdNoise3 'a' KR (1/7.23)) (-1) 1 10 1760
+    -- freq = tExpRand 'f' 200 1200 trg
 
 sos001 :: UGen
 sos001 = out 0 $ mce [sig, sig]
@@ -458,7 +482,7 @@ rg002 = out 0 sig''
     dtr = dust 't' KR 0.1
     -- dtt = impulse KR dttf 0
     -- dttf = lfdNoise3 'f' KR (1/128) * 1.5 + 1.6
-    sig'' = sum $ zipWith3 rs fs ts as
+    sig'' = clip2 (sum $ zipWith3 rs fs ts as) 1 * 0.8
     -- sig'' = nz
     fs = [tt 'a' 50 200, tt 'b' 200 800, tt 'c' 800 3200, tt 'd' 3200 12800]
     ts = [lfdNoise3 'b' KR 1 * 0.5 + 0.6
@@ -481,7 +505,7 @@ rg002 = out 0 sig''
     -- shp = env [0,0,1,0] [0,8e-3,278e-3] [EnvNum (-13)] (-1) 0
     -- tr = impulse KR ((sinOsc KR (1/16) 0 * 2 + 2)+ lfdNoise3 'f' KR 1 * 1.5 + 2) 0
     -- tr = coinGate 'c' 0.5 (impulse KR (henonL KR (1/2) 1.4 0.3 0 0.05 * 2.5 + 3.5) 0)
-    rs f t a = ringz nz f t * a
+    rs f t k = ringz nz f t * k
 
 lz001 :: UGen
 lz001 = out 0 $ mce [o,o]
