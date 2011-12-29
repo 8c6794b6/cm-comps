@@ -31,7 +31,7 @@ n0 =
   [g 1
    [g 10 -- master control
     [s 1001 "b002met"
-     ["bpm":=262,"outt":=100,"outb":=101]
+     ["bpm":=252,"outt":=100,"outb":=101]
     ,s 1002 "noises"
      ["out":=3,"colour":=0]]
    ,g 20 -- controls and sources
@@ -66,11 +66,17 @@ n0 =
      [s 2500 "bhitC"
       ["out":=208,"t_trig":<-100]
      ,s 2501 "bhit"
-      ["out":=27,"a_in":<=3,"t_trig":<-208]]]
+      ["out":=27,"a_in":<=3,"t_trig":<-208]]
+    ,g 260
+      [s 2600 "bamC"
+       ["out":=210,"t_trig":<-100,"outf":=211,"outt":=212]
+      ,s 2601 "bam"
+       ["out":=28,"a_in":<=3,"t_trig":<-210,"pitch":<-211,"t_trig":<-212]]
+    ]
    ,g 50 -- mix
     [s 5000 "b002amps" -- pre amps
-     ["quickNoise":=2.5,"bosc":=0.75,"slowNoise":=3.8
-     ,"hat1":= 2.25,"hat2":=2.25,"bhit":=0.1]
+     ["quickNoise":=2.5,"bosc":=0.90,"slowNoise":=3.8
+     ,"hat1":= 2.25,"hat2":=2.25,"bhit":=0.1,"bam":=0.25]
     ,s 5001 "b002mix1" -- quickNoise
      ["out":=0,"a_in":<=20,"amp":<-800
      ,"pan":=(0.1),"dtl":=0.1e-4,"dtr":=0.521e-4]
@@ -81,13 +87,17 @@ n0 =
      ,"pan":=(-0.1),"dtr":=0.1e-4,"dtl":=0.29e-4]
     ,s 5004 "b002mix1" -- hat1
      ["out":=0,"a_in":<=25,"amp":<-803
-     ,"pan":=0.95,"dtr":=1.8e-3,"dtl":=1.3e-3]
+     ,"pan":=1,"dtr":=1.8e-3,"dtl":=0.7e-3]
     ,s 5005 "b002mix1" -- hat2
      ["out":=0,"a_in":<=26,"amp":<-804
-     ,"pan":=(-0.95),"dtr":=1.5e-3,"dtl":=2e-3]
+     ,"pan":=(-1),"dtr":=0.5e-3,"dtl":=2e-3]
     ,s 5006 "b002mix1" -- bhit
      ["out":=0,"a_in":<=27,"amp":<-805
-     ,"pan":=(-0.25),"dtr":=0.013e-4,"dtl":=0.017e-4]]
+     ,"pan":=(-0.25),"dtr":=0.013e-4,"dtl":=0.017e-4]
+    ,s 5007 "b002mix1" -- bam
+     ["out":=0,"a_in":<=28,"amp":<-806
+     ,"pan":=(0.25),"dtr":=0.017e-4,"dtl":=0.013e-4]
+    ]
    ,g 99 -- master
     [s 9901 "b002mst"
-     ["amp":=0.18,"a_inl":<=0,"a_inr":<=1]]]]
+     ["amp":=0.2,"a_inl":<=0,"a_inr":<=1]]]]

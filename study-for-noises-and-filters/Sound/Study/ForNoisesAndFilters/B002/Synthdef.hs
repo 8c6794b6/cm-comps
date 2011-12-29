@@ -1,14 +1,11 @@
 {-# OPTIONS_GHC -fno-warn-missing-signatures #-}
-{- |
+{-|
 Module      : $Header$
 CopyRight   : (c) 8c6794b6
 License     : BSD3
 Maintainer  : 8c6794b6@gmail.com
 Stability   : unstable
 Portability : portable
-
-B002 - white noise factory.
-
 -}
 module Sound.Study.ForNoisesAndFilters.B002.Synthdef where
 
@@ -35,6 +32,8 @@ setup_b002 fd = mapM_ (send fd . d_recv . uncurry synthdef) defs where
     , ("bhitC", bhitC tick)
     , ("bhit", bhit tick)
     , ("boscC", boscC)
+    , ("bamC", bamC)
+    , ("bam", bam)
     , ("b002amps", b002amps)
     , ("b002mix1", b002mix1)
     , ("b002mix2", b002mix2)
@@ -54,7 +53,7 @@ qnT1 =
   sseq 2
   [sseq 128 [0]
   ,sseq 4
-   [sseq {- 3 -} 1 [base1]
+   [sseq 1 [base1]
    ,sseq 1
     [1.0,   0,  0.5, 1.0, 0.3, 1.0,   0, 0.8
     ,srand 1
@@ -84,7 +83,7 @@ boG1 =
   [sseq 1
    [srand 48 [1,0.8,0.2,0,-1], sseq 1 [1,sseq 14 [-1],0.8]
    ,srand 48 [1,0.8,-1], swhite 16 0.3 1]
-  ,sseq {- 2 -} 1 verse1
+  ,sseq 1 verse1
   ,sseq 1
    [sseq 3 [base], swhite 16 0.3 1
    ,srand 48 [1,0.8,0.75,-1], swhite 16 0.3 1]
@@ -113,7 +112,7 @@ boF1 =
             ,sseq 16 [52], srand 16 [52,64]
             ,srand 16 [52,64,76], sseq 2 base]
     ,sseq 1
-     [sseq {- 32 -} 16 base
+     [sseq 16 base
      ,srand 112 base, sseq 2 base
      ,sseq 16 base]]
   , sseq 7 base
@@ -168,13 +167,30 @@ bhitp = sseq 1 [sseq 2 [p], sseq sinf [w1,sseq 3 [r2]]]  where
   p = sseq 1
       [sseq 12 [w1,0,0,0], sseq 1 (replicate 16 0)
       ,sseq 12 [w1,0,0,0], sseq 2 [w1,0,0,w2,0,0,w2,r2]
-      ,sseq {- 8 -} 6
+      ,sseq 6
        [sseq 3 [1,0,0,r2, w1,0,r2,0, w1,r2,0,0, w1,0,r2,0]
        ,sseq 2 [w1,0,0,w2,0,0,w2,r2]]]
   w1 = swhite 1 0.9 1
   w2 = swhite 1 0.6 0.8
   -- r1 = srand 1 [0,w1]
   r2 = srand 1 [0,w2]
+
+bamf :: Supply
+bamf = srand sinf [52]
+
+{-
+bamt :: Supply
+bamt =
+  sseq 1
+  [ sseq 256 [0]
+  , sseq 832 [1,0,0, 0.8,0,0, srand 1 [swhite 1 0.6 1],0]]
+-}
+
+bamt :: Supply
+bamt =
+  sseq 1
+  [ sseq 128 [0]
+  , sseq 416 [1,0,0, 0.8,0,0, srand 1 [swhite 1 0.6 1],0]]
 
 -- --------------------------------------------------------------------------
 --
@@ -287,7 +303,7 @@ bhitC t_trig = out ("out"@@0) sig where
 
 bhit :: UGen -> UGen
 bhit t_trig = out ("out"@@0) sig where
-  sig = hpf (ringz nz (mce fs * fenv) (mce as) * aenv) 30
+  sig = hpf (ringz nz (mce fs * fenv) (mce as) * aenv * 0.35) 30
   fs = [80.57, 132.98, 201.33, 293.98, 488.88, 532.17]
   as = [0.4,0.18,0.16,0.14,0.12,0.1]
   nz = "a_in"@@0
@@ -312,50 +328,75 @@ bosc = bosc' ("gt"@@0) ("freq"@@0) ("amp"@@1)
 
 bosc' tick freq amp = out ("out"@@0) sig where
   sig = clip2 (rlpf sig' filtf filtq) 1 * amp
-  sig' = sum [(sig1 + sig2 + sig3) * aenv
-             ,pulse AR (freq * mce [1.0001,1]) 0.7 * atk]
-  sig1 = combL nz 0.2 (1/ (freq * mce [1,0.9998]))
-         (0.7 + (lfdNoise3 'q' KR 1 * 0.25))
-  sig2 = combL nz 0.2 (1/ (freq * mce [1.5,1.5002]))
-         (0.7 + (lfdNoise3 'q' KR 1 * 0.28))
-  sig3 = combL nz 0.2 (1/ (freq * mce [2,1.9998]))
-         (0.7 + (lfdNoise3 'q' KR 1 * 0.29))
+  sig' = sum [(sig0 + sig1 + sig2 + sig3) * aenv
+             ,pulse AR (freq * mce [1.0001,1]) pw * atk]
+  sig0 = combsig [0.5,0.49998] 0.24
+  sig1 = combsig [1.0,0.99998] 0.25
+  sig2 = combsig [1.5,1.49998] 0.28
+  sig3 = combsig [2.0,1.99998] 0.29
+  combsig fs k = combL nz 0.2 (1 / (freq * mce fs)) (combq k)
+  combq k = 0.7 + (lfdNoise3 'q' KR 1 * k)
+  pw = linLin (lfdNoise3 'w' KR (1/33)) (-1) 1 0.1 0.9
   nz = "a_in"@@0
   aenv = envGen KR tick tick' 0 1 DoNothing
          (env [0,1,1,0.2,0] [1e-3,80e-3,20e-3,10e-3] [EnvNum (-28)] 3 (-1)) *
          tExpRand 'γ' 0.75 1.33 tick
-  atk = envGen KR tick tick' 0 1 DoNothing $
-        envPerc 1e-3 280e-3
+  atk = envGen KR tick tick' 0 1 DoNothing $ envPerc 1e-3 280e-3
   tick' = latch tick tick
   filtf = ("ff"@@12800)
   filtq = ("fq"@@0.8)
 
+bamC :: UGen
+bamC = mrg [outf, outt] where
+  outf = out ("outf"@@0) $ demand tick 0 (supply0 bamf)
+  outt = out ("outt"@@0) $ demand tick 0 (supply0 bamt)
+  tick = "t_trig"@@1
+
+bam :: UGen
+bam = out ("out"@@0) sig where
+  sig = rlpf ((combC nz 1 (1/freq) 3 + sig')) 2000 q * e * 0.3
+  sig' = resonz nz (mce [freq*i| i<-[1..8]]) q
+  freq = ((midiCPS $ "pitch"@@42) * fe) + 0.1
+  fe = envGen KR t_trig 1 0 1 DoNothing $
+       env [1,0,1] [110e-3,110e-3] [EnvSqr] (-1) 0
+  q = linLin (lfdNoise1 'q' KR (1/pi)) (-1) 1 0.1 0.9
+  e = envGen KR t_trig 1 0 1 DoNothing $
+      env [0,1,0] [2e-3,225e-3] [EnvNum 13] (-1) 0
+  t_trig = "t_trig"@@0
+  nz = "a_in"@@0
+
+-- ------------------------------------------------------------------------------
+--
+-- Mixers
+--
+
+-- | Amplitudes.
 b002amps :: UGen
-b002amps = mrg [qn,bo,sn,h1,h2,bh] where
+b002amps = mrg [qn,bo,sn,h1,h2,bh,ba] where
   qn = out (800) (("quickNoise"@@1) `lag` 0.1)
   bo = out (801) (("bosc"@@1) `lag` 0.1)
   sn = out (802) (("slowNoise"@@1) `lag` 0.1)
   h1 = out (803) (("hat1"@@1) `lag` 0.1)
   h2 = out (804) (("hat2"@@1) `lag` 0.1)
   bh = out (805) (("bhit"@@1) `lag` 0.1)
+  ba = out (806) (("bam"@@1) `lag` 0.1)
 
 -- | Mixer with pan, for single channel input.
 b002mix1 :: UGen
 b002mix1 = out ("out"@@0) sig where
   input = "a_in"@@0
-  seeds = ['a'..'h']
-  rev f i = foldr f i seeds
+  seeds1 = ['a'..'h']
+  seeds2 = ['i'..'p']
+  rev f sds i = foldr f i sds
   rev_c = "rev"@@0.125
-  f1 x y =
-    y + rev_c * combL y 1e-1 (expRand x 6e-3 6e-2) (expRand x 6e-3 6e-1 * dtr)
-  f2 x y =
-    y + rev_c * combL y 1e-1 (expRand x 5e-3 5e-2) (expRand x 5e-3 5e-1 * dtl)
+  fcomb x y =
+    y + rev_c * combL y 1e-1 (expRand x 5e-3 5e-2) (expRand x 5e-3 5e-1 * dtr)
   sig = pan2 flt ("pan"@@0) 1 + mce [dlyl,dlyr]
   flt = input * ("amp"@@1)
   dtl = "dtl"@@0
   dtr = "dtr"@@0
-  dlyl = rev f1 $ delayL flt 0.5 dtl
-  dlyr = rev f2 $ delayL flt 0.5 dtr
+  dlyl = rev fcomb seeds1 $ delayL flt 0.5 dtl
+  dlyr = rev fcomb seeds2 $ delayL flt 0.5 dtr
 
 -- | Mixer without pan, for dual channel input.
 b002mix2 :: UGen
@@ -372,7 +413,7 @@ b002mst :: UGen
 b002mst = replaceOut ("out"@@0) sig where
   sig  = sig' * ("amp"@@1)
   sig' = freeVerb sig'' 0.075 0.999 0.999
-  sig'' = hpf (mce ["a_inl"@@0, "a_inr"@@1]) 20
+  sig'' = lpf (hpf (mce ["a_inl"@@0, "a_inr"@@1]) 20) 20000
 
 -- --------------------------------------------------------------------------
 --

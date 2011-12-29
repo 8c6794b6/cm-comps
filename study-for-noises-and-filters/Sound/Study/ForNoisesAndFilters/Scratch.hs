@@ -158,15 +158,24 @@ ktl002 = out 0 $ mce [sig,sig]
     dlyT = 0.5
     dcyT = 10
 
-ktl003 = out 0 sig
+ktl003 = out 0 $ mce [sig,sig]
   where
-    sig = (combL nz dlyT dlyT dcyT + nz) * 0.1
-    nz = mce [grayNoise 'p' AR, pinkNoise 'p' AR] * burstEnv
-    burstEnv = envGen KR trg 1 0 1 DoNothing $ envPerc 0.01 0.05
+    sig = (sig' + foldr f sig' "a8193-=@~") * tamp where
+      f i acc = allpassL acc 1 (rand i 1e-4 2e-2) (rand i 1e-4 3)
+    sig' = rhpf ((combL nz dlyT dlyT dcyT + nz) * 0.1) 20 0.5
+    nz = (grayNoise 'p' AR + pinkNoise 'p' AR) * burstEnv
+    -- nz = whiteNoise 'w' AR * burstEnv
+    burstEnv = envGen KR atrg 1 0 1 DoNothing $ envPerc 0.01 0.05
     trg = impulse KR tfreq 0
-    tfreq = mouseY KR 1 20 Exponential 0.1
-    dlyT = recip (midiCPS 69)
-    dcyT = mouseX KR 0.25 10 Exponential 0.1
+    atrg = coinGate 'g' 0.5 trg
+    ptrg = pulseDivider trg 8 0
+    tfreq = mouseY KR 1 8 Exponential 0.1
+    dlyT = recip $ midiCPS ptch
+    ptch = index pbuf (tRand 't' 0 (bufFrames IR pbuf) ptrg)
+    pbuf = asLocalBuf 'p' $ map (+12)
+           [36,39,43, 48,51,55, 60,63,67, 72,75,79]
+    dcyT = mouseX KR 0.125 10 Exponential 0.1
+    tamp = tExpRand 'a' 0.5 1 atrg
 
 ktl004 = ktl004' (ctrl "dt" (1/440))
 ktl004' dt = mrg [out 0 $ pan2 plk 0 1, det]
