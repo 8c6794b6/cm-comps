@@ -102,7 +102,8 @@ ppnz = out ("out"@@0) sig where
   x = linLin (lfdNoise0 'x' KR m) (-1) 1 0.1 0.5 `lag3` 0.25
   y = linLin (lfdNoise3 'y' KR m) (-1) 1 0.8 1.8 -- `lag3` 0.25
   m = linLin (fSinOsc KR (1/32) 0) (-1) 1 (1/32) 4
-  ltc = latoocarfianC AR (sampleRate/4)
+
+ltc = latoocarfianC AR (sampleRate/4)
         (lfNoise2 'a' KR 2 * 1.5 + 1.5)
         (lfNoise2 'b' KR 2 * 1.5 + 1.5)
         (lfNoise2 'c' KR 2 * 0.5 + 1.5)
