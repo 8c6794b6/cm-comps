@@ -10,10 +10,10 @@
 --
 module Sound.Study.ForSynthSecrets.Y2000 where
 
-import Sound.OSC (DuplexOSC, Message(..))
+import Sound.OSC (DuplexOSC, Message(..), SendOSC(..), bundle, time)
 import Sound.SC3
-    ( B_Gen(..), DoneAction(..), Envelope_Curve(..), Loop(..), UGen,
-      Rate(..), Warp(..), async, audition, mce, mceChannel, mceEdit, mrg
+    ( AddAction(..), B_Gen(..), DoneAction(..), Envelope_Curve(..), Loop(..)
+    , UGen, Rate(..), Warp(..), async, audition, mce, mceChannel, mceEdit, mrg
     , play, reset, send, withSC3
     )
 import Sound.SC3.UGen.Dot (draw_svg)
@@ -800,6 +800,7 @@ If we're going to get the best from our synthesizers, we need to understand how
 their sounds react when played -- whatever means we use to play them.
 -}
 
+-- | Triggering amplitude and frequency change with different rate.
 simpleTriggers01 :: UGen
 simpleTriggers01 = centeredOut sig
   where
@@ -822,3 +823,191 @@ simpleTriggers01 = centeredOut sig
 -- * November 2000
 --
 -- --------------------------------------------------------------------------
+
+{-
+Quotes:
+
+Duophonic synthesizers are far less than polyphonic synthesizers restricted to
+playing two notes at a time.
+
+Duophonic synthesizers are far less than polyphonic synthesizers restricted to
+playing two notes at a time, but duo-timbral synthesizers are far more than
+monophonic synthesizers that can play two notes at a time.
+
+-}
+
+-- | Playing multiple notes in server side with 'UGen.pulseDivider'.
+simplePoly01 ::
+    UGen    -- ^ Signal to trigger.
+    -> UGen
+simplePoly01 tr0 = centeredOut sig
+  where
+    numv :: Num a => a
+    numv = 5
+    hps  = 1.15
+    sig  = sum $ map go [(1::Int)..numv]
+    ps   = zipWith (+)
+           (concatMap (replicate 5) [32,44,56,68,80])
+           (cycle [0,3,5,7,10])
+    rsh  = UGen.envCoord [(0,0.9),(0.5,0.1),(1,0.7)] 1 1 EnvLin
+    ash  = UGen.envCoord lvls 1 1 EnvCub
+    lvls = [(0,0),(1e-3,1),(0.1,0.3),(0.7,0.7),(1,0)]
+    prob = (ID.lfNoise2 'p' KR 0.25 + 1) * 0.275 + 0.2
+    ampm = ((UGen.sinOsc KR
+             ((ID.lfNoise2 'q' KR (1/23) + 1) * 9) 0 + adep) *
+            (1/(adep+1)))
+    adep = ((UGen.sinOsc KR (1/33) 0 + 1) * 0.5) * 6
+    go n = lsig
+      where
+        lsig = UGen.rlpf (UGen.saw AR freq) cf rq * amp
+        freq = UGen.midiCPS $ ID.tChoose n ltr (mce ps)
+        cf   = UGen.envGen KR ltr (freq*8) 0 (recip hps*3.8) DoNothing rsh
+        rq   = UGen.envGen KR ltr 1 0 (recip hps*3.8) DoNothing rsh
+        amp  = UGen.envGen KR ltr 0.2 0 (recip hps*4.2) DoNothing ash * ampm
+        ltr  = ID.coinGate n prob $
+               UGen.pulseDivider tr0 numv (fromIntegral $ n-1)
+
+-- | Simple pattern with noise and oscillator
+simplePoly02 ::
+    UGen    -- ^ Signal to trigger.
+    -> UGen
+simplePoly02 tr0 = centeredOut sig
+  where
+    sig  = sum $ map ($ tr0) sigs
+    sigs = [simplePoly02_sig0, simplePoly02_sig1, simplePoly02_sig2]
+
+-- | Sig0 in 'simplePoly02'.
+simplePoly02_sig0 :: UGen -> UGen
+simplePoly02_sig0 tr0 = sig0
+  where
+    sig0   = UGen.sinOsc AR freq0 phase0 * amp0
+    amp0   = UGen.envGen KR tr00 amp00 0 dur0 DoNothing ash0
+    amp00  = ID.tExpRand '鯆' 0.24 0.35 tr00
+    ash0   = UGen.envCoord alvls  1 1 EnvCub
+    alvls  = [(0,0),(1e-4,1),(1e-2,0.9),(0.5,0.5),(1,0)]
+    dur0   = (0.125 * (ID.lfNoise2 '鱈' KR (1/14.53) + 1)) + 0.1
+    freq0  = UGen.envGen KR tr00 famp0 0 dur0 DoNothing fsh0 * ofreq
+    fsh0   = UGen.envCoord [(0,1),(0.2,0.5),(0.45,0.9),(1,0)] 1 1 EnvCub
+    ofreq  = UGen.envGen KR tr00 1 0 1 DoNothing ofsh0 *
+             UGen.sinOsc AR 20 0
+    ofsh0  = UGen.envCoord [(0,1),(1e-4,1),(1,0)] 1 1 EnvSin
+    famp0  = ID.tExpRand 'b' 40 80 (ID.coinGate 'c' (1/17) tr0)
+    phase0 = UGen.sinOsc AR (freq0 * 0.72001) 0 * idx0
+    idx0   = UGen.envGen KR tr00 35 0 dur0 DoNothing ish0
+    ish0   = UGen.envCoord [(0,0),(1e-5,1),(1e-2,0.3),(1,0)] 1 1 EnvCos
+    tr00   = ID.coinGate '鰯' 0.63 tr0
+
+-- | Sig1 in 'simplePoly02'.
+simplePoly02_sig1 :: UGen -> UGen
+simplePoly02_sig1 tr0 = sig
+  where
+    sig   = sig0 + sig1
+    sig0  = UGen.rlpf (UGen.mix $ UGen.sinOsc AR freq0 phs0) 8000 0.8 * amp0
+    freq0 = mce [585.78, 113.23, 332.10]
+    amp0  = UGen.envGen KR tr1 0.3 0 dur0 DoNothing ash0 * aosc0
+    ash0  = UGen.envCoord [(0,1e-3),(1e-4,1),(1e-3,0.9),(1,1e-3)] 1 1 EnvExp
+    dur0  = 0.3
+    aosc0 = (UGen.sinOsc KR aoscf 0 + 1) * 0.3 + 0.1
+    aoscf = UGen.envGen KR tr1 100 0 dur0 DoNothing aosh
+    aosh  = UGen.envCoord [(0,0),(1e-4,1),(1,0)] 1 1 EnvLin
+    phs0  = (UGen.sinOsc KR 158 0 + 1) * 10
+    sig1  = UGen.resonz (UGen.rhpf wnz freq1 rq) famp1 0.99 * amp1
+    wnz   = ID.whiteNoise 'a' AR
+    freq1 = UGen.envGen KR tr1 famp1 0 dur1 DoNothing fsh1
+    famp1 = ID.tExpRand 'd' 6000 12000 (ID.coinGate 'e' (1/23) tr0)
+    fsh1  = UGen.envCoord [(0,1),(0.25,0.5),(1,0.01)] 1 1 EnvExp
+    rq    = 0.9
+    amp1  = UGen.envGen KR tr1 0.2 0 dur1 DoNothing ash1
+    ash1  = UGen.envCoord [(0,0),(1e-4,1),(1,0)] 1 1 EnvCub
+    dur1  = 0.3
+    tr1   = UGen.pulseDivider tr0 4 1
+
+-- | Sig2 in 'simplePoly02'.
+simplePoly02_sig2 :: UGen -> UGen
+simplePoly02_sig2 tr0 = sig2
+  where
+    sig2  = UGen.rlpf (wnz + pulse) freq rq2 * amp2
+    wnz   = ID.whiteNoise '鮪' AR
+    pulse = UGen.pulse AR (freq/16) ((UGen.sinOsc AR 1.111 0 + 1) * 0.5)
+    freq  = UGen.envGen KR tr0 1 0 dur2 DoNothing fsh
+    fsh   = UGen.envCoord [(0,fv0),(ft1,fv1),(1,fv2)] 1 1 EnvSqr
+    fv0   = ID.tExpRand '鯵' 6000 13000 (ID.coinGate '鰍' (1/7) tr0)
+    ft1   = ID.tExpRand '鯨' 0 1 (ID.coinGate '鱚' (1/11) tr0)
+    fv1   = ID.tExpRand '鰹' 100 8000 (ID.coinGate '鮎' (1/13) tr0)
+    fv2   = ID.tExpRand '鰤' 300 9000 (ID.coinGate '鯏' (1/11) tr0)
+    rq2   = (((ID.lfNoise2 '鮗' KR 3) + 1) * 0.4) + 0.1
+    amp2  = UGen.envGen KR tr01 0.1 0 dur2 DoNothing ash2
+    ash2  = UGen.envCoord [(0,0),(atk2,1),(1,0)] 1 1 (EnvNum en2)
+    atk2  = (ID.lfNoise0 '鯖' KR (1/3) + 1) * 0.5
+    en2   = ID.lfNoise0 '鮭' KR (1/13) * 10
+    dur2  = (ID.lfNoise2 '鯱' KR (1/17) + 1) * 0.3
+    tr01  = ID.coinGate '鰻' 0.38 tr0
+
+-- | Plays 'simplePoly01' and 'simplePoly02' with same impulse to trigger.
+simplePolys :: UGen
+simplePolys = mrg $ [simplePoly01 tr0, simplePoly02 tr1]
+  where
+    tr0  = UGen.impulse KR 3.75 0 + ID.coinGate 'g' 0.25 tr2
+    tr1  = tr0 + tr2
+    tr2  = ID.dust 'a' KR dhps
+    dhps = ((ID.lfNoise2 'b' KR (1/19) + 1) ** 4) * 0.3
+
+
+-- --------------------------------------------------------------------------
+--
+-- * December 2000
+--
+-- --------------------------------------------------------------------------
+
+{-
+Quotes:
+
+Just like human beings, sounds are born, reach their prime, and
+die. Furthermore, if you have more than one person in a room, each must be born,
+reach his/her prime, and die independently of all the others.
+-}
+
+-- | To play with attack contour.
+simpleContour01 :: UGen
+simpleContour01 = centeredOut sig
+  where
+    sig  = UGen.sinOsc AR freq 0 * amp
+    freq = ID.tChoose '樹' tr0 (mce ptcs)
+    tr0  = UGen.impulse KR cps 0
+    cps  = 2
+    ptcs = map UGen.midiCPS [60,65,67,70]
+    amp  = UGen.envGen KR tr0 0.3 0 (recip cps * 0.8) DoNothing ash
+    ash  = UGen.envCoord [(0,0),(atk,1),(1,0)] 1 1 (EnvNum en)
+    atk  = ID.lfNoise2 '植' KR (1/9) ** 2
+    en   = ID.lfNoise2 '標' KR (1/11) * 10
+
+-- | UGen with freq, amp, and dur controls.
+fad01 :: UGen
+fad01 = centeredOut sig
+  where
+    sig   = UGen.sinOsc AR freq phase * ampe
+    freq  = UGen.control KR "freq" 440
+    amp   = UGen.control KR "amp" 0.3
+    dur   = UGen.control KR "dur" 1
+    phase = UGen.sinOsc AR (freq*1.498) 0 * idx
+    idx   = UGen.envGen KR 1 10 0 dur DoNothing ish
+    ish   = UGen.envCoord [(0,1),(1,0)] 1 1 EnvLin
+    ampe  = UGen.envGen KR 1 amp 0 dur RemoveSynth ash
+    ash   = UGen.envCoord
+            [(0,0),(1e-3,1),(1e-1,0.6),(0.9,0.6),(1,0)]
+            1 1 EnvCub
+
+-- | Using 'sendOSC' to send 'Bundle' message with timestamps, specifying
+-- duration of new synth sent with 'Server.s_new' messages.
+simplePara01 :: IO ()
+simplePara01 = withSC3 $ do
+    let name   = "fad01"
+        sn p d = Server.s_new name (-1) AddToTail 1
+                 [("freq",UGen.midiCPS p),("dur",d),("amp",0.2)]
+    _ <- async $ Server.d_recv $ Server.synthdef name fad01
+    now <- time
+    mapM_ sendOSC
+        [ bundle now [sn 48 2, sn 76 1]
+        , bundle (now+0.5) [sn 67 1.5]
+        , bundle (now+1) [sn 60 1]
+        ]
