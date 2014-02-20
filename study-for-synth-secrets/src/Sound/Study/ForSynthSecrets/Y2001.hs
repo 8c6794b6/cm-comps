@@ -44,7 +44,7 @@ In mainstream synthesis, there have only ever been two totally analogue
 polysynths: the Korg PS3100 and PS3300.
 -}
 
--- | Synthdef used in 'playSem01':
+-- | Synthdef used in 'play_sem01':
 --
 -- >>> audition sem01
 sem01 :: UGen
@@ -70,8 +70,8 @@ play_sem01_once :: IO ()
 play_sem01_once = audition sem01
 
 -- | Play polyphonically.
-playSem01 :: IO ()
-playSem01 = withSC3 $ do
+play_sem01 :: IO ()
+play_sem01 = withSC3 $ do
     let name  = "sem01"
         bdur  = 3
         n p d = Server.s_new name (-1) AddToTail 1
@@ -91,7 +91,7 @@ playSem01 = withSC3 $ do
     now <- time
     zipWithM_ (\t o -> sendOSC $ bundle (now+(t*bdur)) o) [0..] pat
 
--- | Synthdef used in 'playSem02'.
+-- | Synthdef used in 'play_sem02'.
 sem02 :: UGen
 sem02 = centeredOut sig
   where
