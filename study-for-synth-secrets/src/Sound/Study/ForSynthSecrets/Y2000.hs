@@ -135,7 +135,7 @@ simpleFeb00_trm = simpleFeb00 2000 sig
 
 -- | Feeding 'UGen.saw', and controlling cutoff frequency with sine wave.
 -- Mouse Y controls the frquency of cutoff frequency modulator.
-simpleFeb00_cutoff:: UGen
+simpleFeb00_cutoff :: UGen
 simpleFeb00_cutoff = simpleFeb00 csig ssig
   where
     csig = (UGen.sinOsc KR cfreq 0 + 1) * 1900 + 200
@@ -559,6 +559,8 @@ vocFreqs tr0 = ID.tChoose 'v' tr0 $ mce $ map UGen.midiCPS ptcs
 -- Using 36 banks to detect amplitude envelope of input sound file. Mouse X
 -- controls lag time of oscillator pitches.
 --
+-- >>> simpleVocoder01 soundFile01
+--
 simpleVocoder01 ::
     FilePath -- ^ Input sound file.
     -> IO ()
@@ -594,6 +596,7 @@ simpleVocoder01 file = withSC3 $ do
 -- file. Mouse X controls lag time of oscillator pitches, mouse Y controls
 -- frequency factor for oscillators.
 --
+-- >>> simpleVocoder02 soundFile02
 simpleVocoder02 ::
     FilePath -- ^ Input sound file.
     -> IO ()
@@ -840,7 +843,7 @@ monophonic synthesizers that can play two notes at a time.
 simplePoly01 ::
     UGen    -- ^ Signal to trigger.
     -> UGen
-simplePoly01 tr0 = centeredOut sig
+simplePoly01 tr0 = UGen.out 0 sig
   where
     numv :: Num a => a
     numv = 5
@@ -857,8 +860,9 @@ simplePoly01 tr0 = centeredOut sig
              ((ID.lfNoise2 'q' KR (1/23) + 1) * 9) 0 + adep) *
             (1/(adep+1)))
     adep = ((UGen.sinOsc KR (1/33) 0 + 1) * 0.5) * 6
-    go n = lsig
+    go n = psig
       where
+        psig = UGen.pan2 lsig (-0.4 + 0.16 * fromIntegral n) 1
         lsig = UGen.rlpf (UGen.saw AR freq) cf rq * amp
         freq = UGen.midiCPS $ ID.tChoose n ltr (mce ps)
         cf   = UGen.envGen KR ltr (freq*8) 0 (recip hps*3.8) DoNothing rsh
@@ -871,14 +875,13 @@ simplePoly01 tr0 = centeredOut sig
 simplePoly02 ::
     UGen    -- ^ Signal to trigger.
     -> UGen
-simplePoly02 tr0 = centeredOut sig
-  where
-    sig  = sum $ map ($ tr0) sigs
-    sigs = [simplePoly02_sig0, simplePoly02_sig1, simplePoly02_sig2]
+simplePoly02 tr0 =
+    mrg $ map ($ tr0)
+    [simplePoly02_sig0, simplePoly02_sig1, simplePoly02_sig2]
 
 -- | Sig0 in 'simplePoly02'.
 simplePoly02_sig0 :: UGen -> UGen
-simplePoly02_sig0 tr0 = sig0
+simplePoly02_sig0 tr0 = UGen.out 0 (UGen.pan2 sig0 (-0.08) 1)
   where
     sig0   = UGen.sinOsc AR freq0 phase0 * amp0
     amp0   = UGen.envGen KR tr00 amp00 0 dur0 DoNothing ash0
@@ -888,24 +891,26 @@ simplePoly02_sig0 tr0 = sig0
     dur0   = (0.125 * (ID.lfNoise2 '鱈' KR (1/14.53) + 1)) + 0.1
     freq0  = UGen.envGen KR tr00 famp0 0 dur0 DoNothing fsh0 * ofreq
     fsh0   = UGen.envCoord [(0,1),(0.2,0.5),(0.45,0.9),(1,0)] 1 1 EnvCub
-    ofreq  = UGen.envGen KR tr00 1 0 1 DoNothing ofsh0 *
+    ofreq  = UGen.envGen KR tr00 0.5 0 1 DoNothing ofsh0 *
              UGen.sinOsc AR 20 0
     ofsh0  = UGen.envCoord [(0,1),(1e-4,1),(1,0)] 1 1 EnvSin
-    famp0  = ID.tExpRand 'b' 40 80 (ID.coinGate 'c' (1/17) tr0)
+    famp0  = ID.tExpRand 'γ' 40 80 (ID.coinGate 'c' (1/17) tr0)
     phase0 = UGen.sinOsc AR (freq0 * 0.72001) 0 * idx0
-    idx0   = UGen.envGen KR tr00 35 0 dur0 DoNothing ish0
+    idx0   = UGen.envGen KR tr00 18 0 dur0 DoNothing ish0 *
+             (ID.lfNoise2 'β' AR (1/37) + 1) * 2
     ish0   = UGen.envCoord [(0,0),(1e-5,1),(1e-2,0.3),(1,0)] 1 1 EnvCos
     tr00   = ID.coinGate '鰯' 0.63 tr0
 
 -- | Sig1 in 'simplePoly02'.
 simplePoly02_sig1 :: UGen -> UGen
-simplePoly02_sig1 tr0 = sig
+simplePoly02_sig1 tr0 = UGen.out 0 (UGen.pan2 sig 0.08 1)
   where
     sig   = sig0 + sig1
     sig0  = UGen.rlpf (UGen.mix $ UGen.sinOsc AR freq0 phs0) 8000 0.8 * amp0
     freq0 = mce [585.78, 113.23, 332.10]
-    amp0  = UGen.envGen KR tr1 0.3 0 dur0 DoNothing ash0 * aosc0
+    amp0  = UGen.envGen KR tr1 ampr0 0 dur0 DoNothing ash0 * aosc0
     ash0  = UGen.envCoord [(0,1e-3),(1e-4,1),(1e-3,0.9),(1,1e-3)] 1 1 EnvExp
+    ampr0 = ID.tExpRand 'c' 0.2 0.35 tr1
     dur0  = 0.3
     aosc0 = (UGen.sinOsc KR aoscf 0 + 1) * 0.3 + 0.1
     aoscf = UGen.envGen KR tr1 100 0 dur0 DoNothing aosh
@@ -924,7 +929,7 @@ simplePoly02_sig1 tr0 = sig
 
 -- | Sig2 in 'simplePoly02'.
 simplePoly02_sig2 :: UGen -> UGen
-simplePoly02_sig2 tr0 = sig2
+simplePoly02_sig2 tr0 = UGen.out 0 (UGen.pan2 sig2 pos 1)
   where
     sig2  = UGen.rlpf (wnz + pulse) freq rq2 * amp2
     wnz   = ID.whiteNoise '鮪' AR
@@ -942,8 +947,14 @@ simplePoly02_sig2 tr0 = sig2
     en2   = ID.lfNoise0 '鮭' KR (1/13) * 10
     dur2  = (ID.lfNoise2 '鯱' KR (1/17) + 1) * 0.3
     tr01  = ID.coinGate '鰻' 0.38 tr0
+    pos   = ID.lfNoise2 '鰌' KR (1/3) * 0.4
 
 -- | Plays 'simplePoly01' and 'simplePoly02' with same impulse to trigger.
+--
+-- Try:
+--
+-- >>> audition simplePolys
+--
 simplePolys :: UGen
 simplePolys = mrg $ [simplePoly01 tr0, simplePoly02 tr1]
   where
@@ -951,7 +962,6 @@ simplePolys = mrg $ [simplePoly01 tr0, simplePoly02 tr1]
     tr1  = tr0 + tr2
     tr2  = ID.dust 'a' KR dhps
     dhps = ((ID.lfNoise2 'b' KR (1/19) + 1) ** 4) * 0.3
-
 
 -- --------------------------------------------------------------------------
 --
@@ -999,8 +1009,8 @@ fad01 = centeredOut sig
 
 -- | Using 'sendOSC' to send 'Bundle' message with timestamps, specifying
 -- duration of new synth sent with 'Server.s_new' messages.
-simplePara01 :: IO ()
-simplePara01 = withSC3 $ do
+digiEx01 :: IO ()
+digiEx01 = withSC3 $ do
     let name   = "fad01"
         sn p d = Server.s_new name (-1) AddToTail 1
                  [("freq",UGen.midiCPS p),("dur",d),("amp",0.2)]
