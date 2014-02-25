@@ -577,13 +577,17 @@ play_brass012 = withSC3 $ do
                then do
                     mapM_ sendOSC $ concat os
                     pauseThreadUntil (t2 - 0.1)
-                    go g2 t2 tend (nid0+nv) oidx1
+                    go g2 t2 tend ((nid0+nv) `mod` 3000) oidx1
                else return ()
+                   -- then concat os ++ go g2 t2 tend ((nid0+nv)`mod`1024) oidx1
+                   -- else []
     _ <- async $ Server.d_recv $ Server.synthdef name brass012
     now <- time
     gen0 <- lift newStdGen
     let now' = now + 1
     go gen0 now' (now'+3000) 1000 0
+    -- mapM_ sendOSC $
+    --     sortBy (compare `on` bundleTime) $ go gen0 now (now+900) 1000 0
 
 -- | Simple synth to play with OSC bundle, to see how bundle message behaves in
 -- server side scsynth.
@@ -608,16 +612,16 @@ play_sem03 = withSC3 $ do
              [Server.s_new name nid AddToTail 1 [("freq",f),("amp",a)]]
             ,bundle (t+d)
              [Server.n_set nid [("gate",0)]]]
-        computeTime = 0.1
-        go g0 t0 tend nid0 = do
+        go g0 t0 tend nid0 =
             let (fr,g1) = randomR (log 50,log 17000) g0
                 (a, g2) = randomR (0.01,0.2) g1
                 t2      = t0 + 0.05
-            if t0 < tend
-               then mapM_ sendOSC (sn t0 nid0 0.001 (exp fr) a) >>
-                    pauseThreadUntil (t2-computeTime) >>
-                    go g2 t2 tend (nid0+1)
-               else return ()
+            in if tend < t0
+               then return ()
+               else do
+                mapM_ sendOSC (sn t0 nid0 0.001 (exp fr) a)
+                pauseThreadUntil (t2-0.1)
+                go g2 t2 tend (nid0+1)
     _ <- async $ Server.d_recv $ Server.synthdef name sem03
     now <- time
     gen0 <- lift newStdGen
@@ -799,14 +803,14 @@ play_gtr02 = withSC3 $ do
     now <- time
     let art  = 0.09915
         tmul = 1.785
-        cI   = [ 0, 7, 12, 16, 19, 24]
-        cii7 = [ 2, 5, 12, 14, 21, 24]
-        cIV  = [ 0, 5, 12, 17, 20, 24]
-        cdim = [ -1, 2, 8, 14, 17, 24]
+        cI   = [  0, 7, 12, 16, 19, 24]
+        cii7 = [  2, 5, 12, 14, 21, 24]
+        cIV  = [  0, 5, 12, 17, 21, 24]
+        cdim = [ -1, 5,  8, 14, 20, 26]
         cs   = [cI,cii7,cIV,cdim]
         cads :: [(Int, [Int])]
         cads = [(0, [0,1,2,3]) -- I
-               ,(1, [0,1,3])   -- ii7
+               ,(1, [1,3])     -- ii7
                ,(2, [0,1,2,3]) -- IV
                ,(3, [0,3])]    -- dim
         amps = [0.12, 0.15, 0.18, 0.22]

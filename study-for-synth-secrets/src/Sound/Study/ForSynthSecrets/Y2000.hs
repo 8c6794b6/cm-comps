@@ -950,11 +950,6 @@ simplePoly02_sig2 tr0 = UGen.out 0 (UGen.pan2 sig2 pos 1)
     pos   = ID.lfNoise2 '鰌' KR (1/3) * 0.4
 
 -- | Plays 'simplePoly01' and 'simplePoly02' with same impulse to trigger.
---
--- Try:
---
--- >>> audition simplePolys
---
 simplePolys :: UGen
 simplePolys = mrg $ [simplePoly01 tr0, simplePoly02 tr1]
   where
@@ -962,6 +957,10 @@ simplePolys = mrg $ [simplePoly01 tr0, simplePoly02 tr1]
     tr1  = tr0 + tr2
     tr2  = ID.dust 'a' KR dhps
     dhps = ((ID.lfNoise2 'b' KR (1/19) + 1) ** 4) * 0.3
+
+-- | Play 'simplePolys'.
+play_simplePolys :: IO ()
+play_simplePolys = audition simplePolys
 
 -- --------------------------------------------------------------------------
 --
