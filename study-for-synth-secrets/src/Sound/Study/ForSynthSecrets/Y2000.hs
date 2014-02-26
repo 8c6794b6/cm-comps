@@ -511,6 +511,10 @@ soundFile03 = wavFileDir </> "rakista_mono.wav"
 soundFile04 :: FilePath
 soundFile04 = wavFileDir </> "voice.wav"
 
+-- | Sound file, shorter variant of 'soundFile01'.
+soundFile05 :: FilePath
+soundFile05 = wavFileDir </> "lecture_is_about.wav"
+
 -- | From hsc3 help file of 'UGen.diskIn'.
 diskIn_example ::
     FilePath -- ^ Input sound file.
