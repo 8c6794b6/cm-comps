@@ -109,8 +109,8 @@ sem02 = centeredOut sig
     k    = UGen.control KR
 
 -- | Another action using OSC messaging with timestamps.
-play_sem02 :: IO ()
-play_sem02 = withSC3 $ do
+perform_sem02 :: UGen -> IO ()
+perform_sem02 ug = withSC3 $ do
     let name     = "sem02"
         s2 f d a = Server.s_new name (-1) AddToTail 1
                  [("freq",f),("dur",d),("amp",a)]
@@ -131,10 +131,13 @@ play_sem02 = withSC3 $ do
             in  if tend > t2
                    then (t2,os):go g2 t2 tend
                    else []
-    void $ async $ Server.d_recv $ Server.synthdef name sem02
+    void $ async $ Server.d_recv $ Server.synthdef name ug
     now <- time
     g0 <- lift newStdGen
     mapM_ (sendOSC . uncurry bundle) $ go g0 now (now + 3000)
+
+play_sem02 :: IO ()
+play_sem02 = perform_sem02 sem02
 
 -- --------------------------------------------------------------------------
 --
@@ -577,7 +580,7 @@ play_brass012 = withSC3 $ do
                then do
                     mapM_ sendOSC $ concat os
                     pauseThreadUntil (t2 - 0.1)
-                    go g2 t2 tend ((nid0+nv) `mod` 3000) oidx1
+                    go g2 t2 tend ((nid0+nv) `mod` 4096) oidx1
                else return ()
                    -- then concat os ++ go g2 t2 tend ((nid0+nv)`mod`1024) oidx1
                    -- else []

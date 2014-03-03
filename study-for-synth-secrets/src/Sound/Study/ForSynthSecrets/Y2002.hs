@@ -259,7 +259,7 @@ play_bd04AndNonfund = audition $ mrg [bd04, noFundamental01]
 bd05 :: UGen -> UGen
 bd05 bpm = centeredOut sig
   where
-    sig   = UGen.rlpf (sig1+sig2+sig3) cf rq * 0.4
+    sig   = UGen.rlpf (sig1+sig2+sig3) cf rq * 0.6
     sig1  = UGen.sinOsc AR cfreq phase * amp1 * 0.2
     cfreq = 1250
     phase = UGen.sinOsc AR 870 0 * 5
@@ -478,7 +478,7 @@ cymTrigger ::
 cymTrigger bpm = tr1 + tr2
   where
     tr1 = ID.coinGate 'y' 0.96 (UGen.impulse KR (2*bpm/60) 0)
-    tr2 = ID.coinGate 'c' 0.48 (UGen.impulse KR (4*bpm/60) 0)
+    tr2 = ID.coinGate 'c' 0.88 (UGen.impulse KR (4*bpm/60) 0)
 
 -- | Play rhythm, take 1.
 play_rhy01 :: IO ()
@@ -567,8 +567,8 @@ cym05 = centeredOut sig
     amp1  = UGen.envGen KR tr0 1 0 3.7 DoNothing $
             UGen.envCoord [(0,0),(0.12,1),(0.3,1),(1,0)] 1 1 EnvCub
     rq1   = amp1
-    ampm  = UGen.decay2 tr0 1e-9 0.75 * ampr * 0.03
-    ampr  = ID.tExpRand 'R' 0.85 1 tr0
+    ampm  = UGen.decay2 tr0 1e-9 0.75 * ampr * 0.01
+    ampr  = ID.tExpRand 'R' 0.5 1 tr0
     tr0   = cymTrigger 120
 
 -- | Plays rhythm, take 4.
@@ -731,7 +731,7 @@ perform_rep01 sdef = withSC3 $ do
         degs   = [0,2,4,5,7,9,11]
         dur    = (1/4) * (60/120)
         plen   = length pcs
-        rlen   = 4
+        rlen   = 8
         fpcs g = take rlen $ shuffle' pcs plen g
         go g0 t0 tend i0 p0
             | tend < t0 = []
@@ -740,17 +740,17 @@ perform_rep01 sdef = withSC3 $ do
                     t1      = t0 + (fromIntegral dt * dur)
                     i1      = (i0 + 1) `mod` rlen
                     (p1,g2) = foldr fr ([],g1) p0
-                    (a1,g3) = randomR (0.3,0.5) g2
+                    (a1,g3) = randomR (0.3,0.6) g2
                     fr x (acc,h0) =
                         let (dp,h1) = randomR (0,1::Double) h0
                             (i',h2) = randomR (0,plen-1) h1
-                            x'      = if dp < 0.994 then x else pcs !! i'
+                            x'      = if dp < 0.996 then x else pcs !! i'
                         in  (x':acc,h2)
                 in  bundle t0 [sn a1 (p1!!i1)] : go g3 t1 tend i1 p1
     _ <- async $ Server.d_recv $ Server.synthdef name sdef
     now <- time
     g0 <- lift newStdGen
-    mapM_ sendOSC $ go g0 now (now+300) 0 $ fpcs g0
+    mapM_ sendOSC $ go g0 now (now+3000) 0 $ fpcs g0
 
 -- | Play 'perform_rep01' with 'pn01'.
 play_pn01 :: IO ()
@@ -789,7 +789,8 @@ phasor_ex01 = centeredOut (f0 sig0 * amp0)
     sig0 = (UGen.phasor AR tr0 sfrq 0 1 0 - 0.5) * 0.3
     sfrq = frq*rat/UGen.sampleRate
     rat  = ID.lfNoise2 'r' AR (pi/2) + 2
-    amp0 = UGen.envGen KR tr1 1 0 1 RemoveSynth $ UGen.envPerc 1e-5 1
+    amp0 = UGen.envGen KR tr1 1 0 dur RemoveSynth $ UGen.envPerc 1e-5 1
+    dur  = 6 * recip (log frq)
     tr0  = UGen.impulse AR frq 0
     frq  = k "freq" 440
     tr1  = k "gate" 1
@@ -899,11 +900,12 @@ case, it's not what you've got, it's what you can do with it that matters.
 pn02 :: UGen
 pn02 = centeredOut sig
   where
-    sig  = sig0 * amp0 * 0.5
-    sig0 = UGen.rlpf sig1 cf 0.8
-    cf   = mfrq * 1.24
+    sig  = sig0 * amp0 * 0.3
+    sig0 = UGen.rlpf sig1 cf 0.3
+    -- cf   = mfrq * 1.25003
+    cf   = mfrq * 2
     sig1 = (UGen.phasor AR tr0 sfrq 0 1 0 - 0.5) * 2
-    sfrq = UGen.envGen AR tr1 sval 0 0.1 DoNothing $
+    sfrq = UGen.envGen AR tr1 sval 0 0.2 DoNothing $
            UGen.envCoord [(0,2),(1e-3,2),(1,1)] 1 1 (EnvNum en)
     en   = 3
     sval = mfrq / UGen.sampleRate
@@ -1020,19 +1022,3 @@ play_simpleSine = withSC3 $ do
     now <- time
     g0 <- lift newStdGen
     mapM_ sendOSC $ go g0 now (now+30)
-
--- | 'UGen.mouseX' with lag=0.1.
-mX ::
-    UGen    -- ^ Low value.
-    -> UGen -- ^ High value.
-    -> Warp -- ^ Warp.
-    -> UGen
-mX low hi warp = UGen.mouseX KR low hi warp 0.1
-
--- | 'UGen.mouseY' with lag=0.1.
-mY ::
-    UGen    -- ^ Low value.
-    -> UGen -- ^ High value.
-    -> Warp -- ^ Warp.
-    -> UGen
-mY low hi warp = UGen.mouseY KR low hi warp 0.1
