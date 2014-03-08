@@ -49,7 +49,7 @@ orgn04 f0 = centeredOut $ f0 sig
            , (5, 0.18, 0.12)
            , (6, 0.15, 0.10)
            ]
-    dur  = 1
+    dur  = k "dur" 1
     tr0  = k "gate" 1
     freq = k "freq" 440
     amp  = k "amp" 0.3
@@ -427,6 +427,10 @@ rev02 sig = mrg [localOut sig0, out 0 sig1]
 -- | Play 'rev02' with 'pitchedSine'.
 play_rev02_sine2 :: IO ()
 play_rev02_sine2 = audition $ rev02 pitchedSine
+
+-- | Play 'rev02' and 'dly03' with 'pitchedSine'.
+play_rev02_dly03_sine2 :: IO ()
+play_rev02_dly03_sine2 = audition $ rev02 $ dly03 pitchedSine
 
 -- | Simple phrased sine, 'lfPulse' used as amplitude envelope.
 phrasedSine :: UGen
