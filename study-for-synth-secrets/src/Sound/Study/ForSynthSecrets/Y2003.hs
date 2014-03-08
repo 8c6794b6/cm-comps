@@ -13,7 +13,7 @@ module Sound.Study.ForSynthSecrets.Y2003 where
 import Control.Monad.Trans.Class (lift)
 import System.Random (getStdRandom, newStdGen, randomR, randomRs)
 
-import Sound.OSC (bundle, immediately, sendOSC, time)
+import Sound.OSC (Bundle(..), bundle, immediately, sendOSC, time)
 import Sound.SC3
 import Sound.SC3.ID
 
@@ -542,7 +542,8 @@ blow03 = centeredOut sig
     dcyt  = 0.08
     nz0   = rhpf (whiteNoise 'A' AR) 2800 0.8
     amp00 = envGen KR tr0 0.2 0 dur DoNothing ash00
-    ash00 = Envelope [0,1,0.15,0.1,0] [0.1,0.05,0.8,0.05] [EnvCub] Nothing Nothing
+    ash00 = Envelope [0,1,0.15,0.1,0] [0.1,0.05,0.8,0.05] [EnvCub]
+            Nothing Nothing
     sig01 = rlpf nz0 800 0.9
     amp01 = envGen KR tr0 0.3 0 dur01 DoNothing ash01
     dur01 = clip dur (dur*0.5) (tRand 'U' 0.3 0.6 tr0)
@@ -676,7 +677,7 @@ orgn01 = centeredOut sig
 perform_gtd01 :: UGen -> IO ()
 perform_gtd01 ug = withSC3 $ do
     let name = "gtd01"
-        pchs = map midiCPS $ foldr (\o acc -> map (+o) degs ++ acc) [] octs
+        pchs = foldr (\o acc -> map (midiCPS . (+o)) degs ++ acc) [] octs
         octs = take 6 $ iterate (+12) 24
         degs = [0,2,5,7]
         bdl t nid f d =
@@ -694,11 +695,18 @@ perform_gtd01 ug = withSC3 $ do
                 nid1      = nid0 + 1
                 t1        = t0 + (dt * fromIntegral imul)
                 dt        = 0.125
-            in  if t1 < tend then bdls ++ go t1 tend nid1 g3 else []
+            in  if tend < t1 then [] else bdls ++ go t1 tend nid1 g3
     _ <- async $ d_recv $ synthdef name ug
     now <- time
     g0 <- lift newStdGen
-    mapM_ sendOSC $ go now (now+300) 10000 g0
+    -- mapM_ sendOSC $ go now (now+300) 10000 g0
+    let os = go now (now+300) 10000 g0
+    lift $ do
+        let o1 = head os
+            o2 = last os
+        putStrLn $ unwords ["sending", show $ length os, "bundles,"
+                           , show (bundleTime o2 - bundleTime o1), "secs."]
+    mapM_ sendOSC os
 
 -- | Play 'perform_gtd01' with 'orgn01'.
 play_gtd01_orgn01 :: IO ()
@@ -716,7 +724,7 @@ orgn02 :: UGen
 orgn02 = centeredOut sig
   where
     sig   = f0 (sig0 + sig1) * aenv0
-    f0 x  = resonz (rlpf x (freq*1.5*cfenv) 0.3) 850 0.8
+    f0 x  = rlpf x (freq*1.5*cfenv) 0.3
     cfenv = envGen KR tr0 1 0 dur DoNothing cfsh
     cfsh  = envCoord [(0,0.01),(0.001,10),(0.01,1)] 1 1 EnvCub
     sig0  = pulse AR freq (1/2)
