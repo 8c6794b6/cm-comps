@@ -955,20 +955,6 @@ act02 = audition (centeredOut sig)
     amp  = UGen.envGen KR 1 0.3 0 dur RemoveSynth $
            UGen.envCoord [(0,0),(1e-4,1),(1,0)] 1 1 EnvCub
 
--- | From @haskell-sc-scratch/SCHelp/SPE/Part1.hs@.
-help_SPE1 :: IO ()
-help_SPE1 = do
-  dl <- randomRs (0,0.05) `fmap` newStdGen
-  dr <- randomRs (0,0.05) `fmap`newStdGen
-  let nz = UGen.midiCPS (ID.lfNoise1 'a' KR 1 * 36 + 110)
-      evl = UGen.envGen KR 1 1 0 1 RemoveSynth shp * 0.3
-      shp = UGen.envPerc 0.01 1
-      v = UGen.rlpf (UGen.lfSaw AR (k "freq" 440) 0 * evl) nz 0.1
-      f a b = UGen.allpassN b 0.05 a 4
-      sig = foldr f v (take 4 $ zipWith UGen.mce2 dl dr)
-      k = UGen.control KR
-  audition $ UGen.out 0 sig
-
 -- | Playing with 'UGen.envGen'.
 --
 -- There's more to understand in 'UGen.envGen'.

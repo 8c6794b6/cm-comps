@@ -14,6 +14,7 @@ module Sound.Study.ForSynthSecrets
     , module Sound.Study.ForSynthSecrets.Y2001
     , module Sound.Study.ForSynthSecrets.Y2002
     , module Sound.Study.ForSynthSecrets.Y2003
+    , module Sound.Study.ForSynthSecrets.Y2004
     ) where
 
 import Sound.Study.ForSynthSecrets.Y1999
@@ -21,3 +22,4 @@ import Sound.Study.ForSynthSecrets.Y2000
 import Sound.Study.ForSynthSecrets.Y2001
 import Sound.Study.ForSynthSecrets.Y2002
 import Sound.Study.ForSynthSecrets.Y2003
+import Sound.Study.ForSynthSecrets.Y2004
