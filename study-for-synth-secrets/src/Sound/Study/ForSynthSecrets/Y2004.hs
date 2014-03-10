@@ -675,7 +675,9 @@ new_help_SPE1 ptch =
     s_new "help_SPE1" (-1) AddToTail 1 [("freq",midiCPS ptch),("amp",0.2)]
 
 play_r0 :: IO ()
-play_r0 = runRoutine $ replicateM_ 32 r0
+play_r0 = do
+    _ <- prepare_help_SPE1
+    runRoutine $ replicateM_ 32 r0
 
 r0 :: Routine ()
 r0 = do
