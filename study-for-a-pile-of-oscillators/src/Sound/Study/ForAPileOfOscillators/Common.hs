@@ -46,6 +46,7 @@ import Control.Monad.Reader
 import Data.List (zipWith4, transpose)
 import qualified Data.Map as M
 
+import Sound.OSC (Connection)
 import Sound.OSC.FD
 import Sound.SC3.FD
 import Sound.SC3.UGen.ID
@@ -53,8 +54,8 @@ import Sound.SC3.Lepton hiding (bufSampleRate)
 import Sound.SC3.Lepton.GUI
 
 -- | Show GUI.
-showGUI :: (Transport t) => t -> IO ()
-showGUI fd = treeToGui (Group 0 afpDefault) hints fd
+showGUI :: Transport t => Connection t ()
+showGUI = treeToGui (Group 0 afpDefault) hints
 
 -- | Write synthdefs and reload them.
 --

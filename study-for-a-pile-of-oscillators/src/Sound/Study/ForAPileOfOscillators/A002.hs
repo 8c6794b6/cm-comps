@@ -25,9 +25,7 @@ import Sound.SC3.Lepton.GUI
 import Sound.Study.ForAPileOfOscillators.Common
 
 main :: IO ()
-main = withSC3 $ do
-    fd <- ask
-    liftIO $ treeToGui (Group 0 [Group 1 afp2]) hints fd
+main = withSC3 $ treeToGui (Group 0 [Group 1 afp2]) hints
 
 -- | Write synthdef, reload them, make nodes.
 setup_a002 :: Transport m => m ()

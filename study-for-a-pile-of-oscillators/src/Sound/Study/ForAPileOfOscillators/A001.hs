@@ -26,9 +26,7 @@ import Sound.Study.ForAPileOfOscillators.Common
 
 -- | For compiling GUI.
 main :: IO ()
-main = withSC3 $ do
-    fd <- ask
-    liftIO $ treeToGui (Group 0 [Group 1 afp]) hints fd
+main = withSC3 $ treeToGui (Group 0 [Group 1 afp]) hints
 
 -- | Write synthdefs to file, reload them, then make synth nodes.
 setup_a001 :: (Transport m) => m ()
