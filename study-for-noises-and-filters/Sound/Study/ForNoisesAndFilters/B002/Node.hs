@@ -11,15 +11,15 @@ B002 - White steam.
 -}
 module Sound.Study.ForNoisesAndFilters.B002.Node where
 
-import Sound.OpenSoundControl
+import Sound.OSC
 import Sound.SC3
 import Sound.SC3.Lepton
 import Sound.Study.ForNoisesAndFilters.B002.Synthdef
 
-go :: Transport t => t -> IO ()
-go fd = do
-  setup_b002 fd
-  patchNode n0 fd
+go :: Transport m => m ()
+go = do
+  setup_b002
+  patchNode n0
 
 w = withSC3
 g = Group

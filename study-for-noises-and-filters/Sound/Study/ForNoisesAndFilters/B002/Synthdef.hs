@@ -11,7 +11,7 @@ module Sound.Study.ForNoisesAndFilters.B002.Synthdef where
 
 import System.Random
 
-import Sound.OpenSoundControl
+import Sound.OSC
 import Sound.SC3
 import Sound.SC3.ID
 import Sound.SC3.Lepton
@@ -19,7 +19,8 @@ import Sound.SC3.Lepton
 r :: IO ()
 r = withSC3 reset
 
-setup_b002 fd = mapM_ (send fd . d_recv . uncurry synthdef) defs where
+setup_b002 :: Transport m => m ()
+setup_b002 = mapM_ (send . d_recv . uncurry synthdef) defs where
   defs =
     [ ("b002met", b002met)
     , ("quickNoiseC", quickNoiseC)
@@ -31,6 +32,7 @@ setup_b002 fd = mapM_ (send fd . d_recv . uncurry synthdef) defs where
     , ("hatLike", hatLike)
     , ("bhitC", bhitC tick)
     , ("bhit", bhit tick)
+    , ("bosc", bosc)
     , ("boscC", boscC)
     , ("bamC", bamC)
     , ("bam", bam)
@@ -246,7 +248,7 @@ quickNoise' tick dur atk freq en = out ("out"@@0) (sig * aenv * ("amp"@@1.2)) wh
   freq' = lfreq + 5
   lfreq = latch freq tick
   aenv = envGen KR tick (latch tick tick) 0 dur DoNothing $
-         env [0,1,0] [atk,1-atk] [EnvNum en] (-1) 0 -- 2
+         Envelope [0,1,0] [atk,1-atk] [EnvNum en] (Just (-1)) (Just 0) -- 2
   rq = linLin (lfdNoise1 'r' KR (1/5.12)) (-1) 1 0.125 0.999
 
 slowNoiseC :: UGen
@@ -262,12 +264,13 @@ slowNoise' tick amp = out ("out"@@0) sig where
   f a b = allpassN b 1e-1 (rand a 3e-4 1e-2) (rand a 5e-2 5e-1)
   sig' = rlpf nz freq rq * aenv * amp
   freq = envGen KR tick 18000 4000 1 DoNothing $
-         env [0.5,0.5,0] [100e-3,100e-3] [EnvNum (-14)] 0 (-1)
+         Envelope [0.5,0.5,0] [100e-3,100e-3] [EnvNum (-14)]
+         (Just 0) (Just (-1))
   rq  = linLin (sinOsc KR (1/pi * rqf) (pi/4)) (-1) 1 250e-3 850e-3
   rqf = linLin (sinOsc KR (1/pi) 0) (-1) 1 1 pi
   nz = "a_in"@@0
   aenv = envGen KR tick (latch tick tick) 0 1 DoNothing $
-         env [0,1,0] [atk,dcy] [EnvNum 11] (-1) 0
+         Envelope [0,1,0] [atk,dcy] [EnvNum 11] (Just (-1)) (Just 0)
   atk = index atkb idx
   dcy = index dcyb idx
   idx = pulseCount tick 0 `mod` 2
@@ -292,7 +295,7 @@ hatLike' t_trig amp sst = out ("out"@@0) sig where
   mkSig f = resonz nz f (0.1 + (10/f))
   nz = "a_in"@@0
   aenv = envGen KR t_trig (latch t_trig t_trig) 0 1 DoNothing $
-         env [0,1,0] [sst,15e-3] [EnvNum (-14)] 0 (-1)
+         Envelope [0,1,0] [sst,15e-3] [EnvNum (-14)] (Just 0) (Just (-1))
   r1 = rand 'a' 0.995 1.005
   r2 = rand 'b' 0.995 1.005
   r3 = rand 'c' 0.995 1.005
@@ -310,10 +313,10 @@ bhit t_trig = out ("out"@@0) sig where
   trig' = latch t_trig t_trig
   aenv =
     envGen KR t_trig trig' 0 1 DoNothing $
-    env [0,1,0.7,0] [1e-4,40e-3,80e-3] [EnvNum (-13)] (-1) 0
+    Envelope [0,1,0.7,0] [1e-4,40e-3,80e-3] [EnvNum (-13)] (Just (-1)) (Just 0)
   fenv =
     envGen KR t_trig 1 0 1 DoNothing $
-    env [0.25,1,0.5] [30e-3,180e-3] [EnvNum 8] (-1) 0
+    Envelope [0.25,1,0.5] [30e-3,180e-3] [EnvNum 8] (Just (-1)) (Just 0)
 
 boscC :: UGen
 boscC = mrg [outg, outf] where
@@ -339,7 +342,8 @@ bosc' tick freq amp = out ("out"@@0) sig where
   pw = linLin (lfdNoise3 'w' KR (1/33)) (-1) 1 0.1 0.9
   nz = "a_in"@@0
   aenv = envGen KR tick tick' 0 1 DoNothing
-         (env [0,1,1,0.2,0] [1e-3,80e-3,20e-3,10e-3] [EnvNum (-28)] 3 (-1)) *
+         (Envelope [0,1,1,0.2,0] [1e-3,80e-3,20e-3,10e-3] [EnvNum (-28)]
+          (Just 3) (Just (-1))) *
          tExpRand 'γ' 0.75 1.33 tick
   atk = envGen KR tick tick' 0 1 DoNothing $ envPerc 1e-3 280e-3
   tick' = latch tick tick
@@ -358,10 +362,10 @@ bam = out ("out"@@0) sig where
   sig' = resonz nz (mce [freq*i| i<-[1..8]]) q
   freq = ((midiCPS $ "pitch"@@42) * fe) + 0.1
   fe = envGen KR t_trig 1 0 1 DoNothing $
-       env [1,0,1] [110e-3,110e-3] [EnvSqr] (-1) 0
+       Envelope [1,0,1] [110e-3,110e-3] [EnvSqr] (Just (-1)) (Just 0)
   q = linLin (lfdNoise1 'q' KR (1/pi)) (-1) 1 0.1 0.9
   e = envGen KR t_trig 1 0 1 DoNothing $
-      env [0,1,0] [2e-3,225e-3] [EnvNum 13] (-1) 0
+      Envelope [0,1,0] [2e-3,225e-3] [EnvNum 13] (Just (-1)) (Just 0)
   t_trig = "t_trig"@@0
   nz = "a_in"@@0
 
