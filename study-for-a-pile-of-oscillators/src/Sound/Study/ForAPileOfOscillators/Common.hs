@@ -38,24 +38,23 @@ module Sound.Study.ForAPileOfOscillators.Common
 
     -- * Util
   , w, packBy
-  , grp, syn
   , (=:)
 
   ) where
 
-import Data.List (isPrefixOf, zipWith4, transpose)
+import Control.Monad.Reader
+import Data.List (zipWith4, transpose)
 import qualified Data.Map as M
 
-import Sound.OpenSoundControl
-import Sound.SC3
-import Sound.SC3.ID
+import Sound.OSC.FD
+import Sound.SC3.FD
+import Sound.SC3.UGen.ID
 import Sound.SC3.Lepton hiding (bufSampleRate)
 import Sound.SC3.Lepton.GUI
 
 -- | Show GUI.
 showGUI :: (Transport t) => t -> IO ()
-showGUI fd = do
-  treeToGui (Group 0 afpDefault) hints fd
+showGUI fd = treeToGui (Group 0 afpDefault) hints fd
 
 -- | Write synthdefs and reload them.
 --
@@ -63,20 +62,20 @@ showGUI fd = do
 -- UDP connection. From this reason, synthdefs are written to file once and
 -- then reloaded.
 --
-updateSynthdefs :: (Transport t) => t -> IO OSC
+updateSynthdefs :: Transport t => t -> IO Message
 updateSynthdefs fd = do
   mapM_ (\(n,u) -> writeSynthdef n u)
     [("aosc",aosc)
     ,("ac1",ac1)
     ,("fc1",fc1)
     ,("pc1",pc1)]
-  reloadSynthdef fd
+  runReaderT reloadSynthdef fd
 
 -- | Simple single sine oscillator.
 aosc :: UGen
 aosc = out 0 (pan2 sig pan 1)
   where
-    sig = sinOsc ar freq 0 * (lag2 amp amplag)
+    sig = sinOsc AR freq 0 * (lag2 amp amplag)
     pan = ctrl "pan" 0
     amp = ctrl "amp" 0.3
     amplag = ctrl "amplag" 2e-6
@@ -90,16 +89,17 @@ ac1 = mrg outs
     zf o u = out (fromIntegral o)
              (delayN (sig u) 1 (del * tRand u 1e-3 800e-3 t_trig))
     sig j = ((lin j * (1-mx)) + (lfn j * mx)) * val j
-    lin j = envGen kr (linTrig j) 1 0 edur' DoNothing $
-            env [1e-9,1e-9,1,1e-9] [0,atk,rel] [EnvNum curve] (-1) 0
+    lin j = envGen KR (linTrig j) 1 0 edur' DoNothing $
+            Envelope [1e-9,1e-9,1,1e-9] [0,atk,rel] [EnvNum curve]
+            (Just (-1)) (Just 0)
     atk = 1 - edgey
     rel = edgey
     edur' = linExp edur 1e-9 1 1e-4 2
-    linTrig j = coinGate 'c' chaos (dust j kr dfreq) +
-                coinGate 'c' (1-chaos) (impulse kr dfreq 0)
-    lfn j = lfdNoise3 j kr (linExp (nfreq+1e-9) (1e-9) 1 (1/64) 64)
+    linTrig j = coinGate 'c' chaos (dust j KR dfreq) +
+                coinGate 'c' (1-chaos) (impulse KR dfreq 0)
+    lfn j = lfdNoise3 j KR (linExp (nfreq+1e-9) (1e-9) 1 (1/64) 64)
     dfreq = cubed (clip2 (dmod * tmul) tmul) + toffset
-    dmod = lfdNoise3 'm' kr tfreq * 0.5 + 0.5
+    dmod = lfdNoise3 'm' KR tfreq * 0.5 + 0.5
     val i = tRand i vMin vMax t_trig
     vMin = vc - (vc * vd)
     vMax = vc + (vc * vd)
@@ -124,18 +124,17 @@ fc1 = mrg outs
     outs = zipWith out (map fromIntegral fBusses) sigs
     sigs = map f fBusses
     f i = (noise i * mx) + ((pitched' i + (nfreq i * vib)) * (1-mx))
-    noise j = linExp (lfdNoise3 j kr (nfreq j) * 0.5 + 0.5 + 1e-9)
+    noise j = linExp (lfdNoise3 j KR (nfreq j) * 0.5 + 0.5 + 1e-9)
               1e-9 1 vMin vMax
               * noiseC
     pitched' j = clip (pitched j) 0 vMax
-    pitched j = select (tiRand j 0 (fromIntegral $ length partials - 1) t_trig)
-                (mce $ pitches j)
-    pitches j = zipWith (\a b -> midiCPS (a + b)) (repeat ptc) partials
+    pitched j = select (tIRand j 0 (fromIntegral $ length partials - 1) t_trig)
+                (mce pitches)
+    pitches = zipWith (\a b -> midiCPS (a + b)) (repeat ptc) partials
     partials = take (length fBusses) $
-               zipWith (\f c -> f * 12 + c)
+               zipWith (\f' c -> f' * 12 + c)
                (concatMap (replicate 4) [0,1..12]) (cycle overtones)
     overtones = [-12,-10,-7,-5,0,2,5,7,12]
-    val j = tExpRand j vMin vMax t_trig
     vMin = (vc - (vc * vd)) + 1e-9
     vMax = vc + (vc * vd)
     nfreq j = tExpRand j fMin fMax t_trig
@@ -158,8 +157,8 @@ pc1 = mrg outs
     outs = zipWith out (map fromIntegral pBusses) sigs
     sigs = map f ['a'..]
     f i = clip ((noise i + sinu i + e + offset) * val i) (-1) 1
-    noise j = (lfdNoise3 j kr (freq j) * 0.5 + 0.5) * noiseC
-    sinu j = (sinOsc kr (freq j) 0 * 0.5 + 0.5) * sinC
+    noise j = (lfdNoise3 j KR (freq j) * 0.5 + 0.5) * noiseC
+    sinu j = (sinOsc KR (freq j) 0 * 0.5 + 0.5) * sinC
     val j = vc + tRand j (vc-(vd/2)) (vc+(vd/2)) t_trig
     freq j = fc + tRand j (fc-(fd/2)) (fc+(fd/2)) t_trig
     e = linen t_trig atk lev rel DoNothing
@@ -172,28 +171,30 @@ pc1 = mrg outs
     fc = ctrl "fc" 2
     fd = ctrl "fd" 0.999
     noiseC = ctrl "noise" 0
-    tickC = ctrl "tick" 0
     sinC = ctrl "sin" 0
     t_trig = ctrl "t_trig" 1
 
 
 -- | BreakPoints for (time, value)
-type BreakPoints = [(UGen,UGen)]
+type BreakPoints = [(Double,Double)]
 
 -- | Helper for making envelope.
 mkEnv :: EnvCurve      -- ^ Curve shape
       -> UGen          -- ^ Level scale
       -> UGen          -- ^ Time scale
-      -> [(UGen,UGen)] -- ^ Break points of (time,value)
+      -> BreakPoints   -- ^ Break points of (time,value)
       -> UGen
 mkEnv curve ls ts bps =
-  envGen kr (ctrl "t_trig" 1) ls 0 ts DoNothing $ envCoord bps 1 1 curve
+  envGen KR (ctrl "t_trig" 1) ls 0 ts DoNothing $ envCoord bps' 1 1 curve
+  where
+    bps' = map (\(x,y) -> (constant x, constant y)) bps
+
 
 -- | Simple mixer
 smaster :: UGen
 smaster = replaceOut 0 (sig * amp)
   where
-    sig = freeVerb2 (in' 1 ar 0) (in' 1 ar 1) rmix rroom rdamp
+    sig = freeVerb2 (in' 1 AR 0) (in' 1 AR 1) rmix rroom rdamp
     amp = ctrl "amp" 1
     rmix = ctrl "rmix" 0.5
     rroom = ctrl "rroom" 0.5
@@ -244,7 +245,7 @@ afpDefault =
   ,Synth 1002 "fc1" (f fc1)
   ,Synth 1003 "pc1" (f pc1)]
   where
-   f = map (\(NodeK _ _ n v _) -> n:=v) . controls . synth
+   f = map (\(NodeK _ _ n v _) -> n:=realToFrac v) . controls . synth
 
 -- | Oscillator synth nodes.
 oscs :: [SCNode]
@@ -295,17 +296,9 @@ w = withSC3
 packBy :: Int -> [a] -> [[a]]
 packBy n xs = transpose $ g n xs
   where
-    g n xs = case xs of
+    g n' xs' = case xs' of
       [] -> []
-      _  -> xs'
+      _  -> xs''
       where
-        xs' = as : g n ass
-        (as,ass) = splitAt n xs
-
--- | Short cut for Group constructor
-grp :: NodeId -> [SCNode] -> SCNode
-grp = Group
-
--- | Short cut for Synth constructor
-syn :: NodeId -> String -> [SynthParam] -> SCNode
-syn = Synth
+        xs'' = as : g n' ass
+        (as,ass) = splitAt n' xs'

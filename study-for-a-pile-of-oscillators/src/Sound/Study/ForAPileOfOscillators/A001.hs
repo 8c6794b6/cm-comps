@@ -11,13 +11,14 @@
 --
 module Sound.Study.ForAPileOfOscillators.A001 where
 
+import Control.Monad.Reader (ask)
 import Data.List (zipWith4)
 import qualified Data.ByteString.Lazy as B
 import qualified Data.Map as M
 
-import Sound.OpenSoundControl
+import Sound.OSC
 import Sound.SC3
-import Sound.SC3.ID
+import Sound.SC3.UGen.ID
 import Sound.SC3.Lepton
 import Sound.SC3.Lepton.GUI
 
@@ -25,15 +26,16 @@ import Sound.Study.ForAPileOfOscillators.Common
 
 -- | For compiling GUI.
 main :: IO ()
-main = withSC3 $ \fd -> do
-  treeToGui (Group 0 [Group 1 afp]) hints fd
+main = withSC3 $ do
+    fd <- ask
+    liftIO $ treeToGui (Group 0 [Group 1 afp]) hints fd
 
 -- | Write synthdefs to file, reload them, then make synth nodes.
-setup :: (Transport t) => t -> IO ()
-setup fd = do
-  mapM_ (\(n,u) -> writeSynthdef n u) [("piece1",piece1)]
-  reloadSynthdef fd
-  addNode 0 a001Tree fd
+setup_a001 :: (Transport m) => m ()
+setup_a001 = do
+  liftIO $ mapM_ (\(n,u) -> writeSynthdef n u) [("piece1",piece1)]
+  reloadSynthdef
+  addNode 0 a001Tree
 
 -- | Main synth node tree.
 a001Tree :: SCNode
@@ -41,7 +43,7 @@ a001Tree =
   Group 0
     [Group 1
       [Group 10 [Synth 1000 "piece1" ["bpm":=424]]
-      ,Group 11 afp  
+      ,Group 11 afp
       ,Group 20 oscs]]
 
 -- | Controller synth nodes.
@@ -64,11 +66,11 @@ afp = [Synth 1001 "ac1"
           "t_trig":<-105]]
 
 -- | Write osc data for non-realtime synthesis.
-writeA001Score :: FilePath -> IO ()
-writeA001Score path = do
-  let os = zipWith (\t m -> Bundle (NTPr t) [m]) (repeat 0) (treeToNew 0 a001Tree)
-      end = Bundle (NTPr 342) []
-  writeNRT path $ os ++ [end]
+-- writeA001Score :: FilePath -> IO ()
+-- writeA001Score path = do
+--   let os = zipWith (\t m -> Bundle t [m]) (repeat 0) (treeToNew 0 a001Tree)
+--       end = Bundle 342 []
+--   writeNRT path $ os ++ [end]
 
 piece1 :: UGen
 piece1 = mrg outs
@@ -97,42 +99,43 @@ piece1 = mrg outs
       where
         r l = k `mod` 8 == l
 
-    edgey = clip (lfdNoise3 'b' kr (1/(beat*128)) * 30) 0 1
-    aMix = cubed (cubed (lfTri kr (1/(beat*512)) 0))
+    edgey = clip (lfdNoise3 'b' KR (1/(beat*128)) * 30) 0 1
+    aMix = cubed (cubed (lfTri KR (1/(beat*512)) 0))
     edur = (950e-3 * (1.001 - eInvertedNoise)) * wholeEnv + 1e-3
-    eInvertedNoise = squared $ lfdNoise3 'c' kr (1/(64*beat))
+    eInvertedNoise = squared $ lfdNoise3 'c' KR (1/(64*beat))
     chaos = gate chaosVal startChaos
-    chaosVal = tRand 'd' 0 0.8 (lfNoise0 'e' kr (1/(beat*256)))
+    chaosVal = tRand 'd' 0 0.8 (lfNoise0 'e' KR (1/(beat*256)))
     startChaos = tDelay (512 <* pulseCount metro 0) 0
     del = gate delVal startDel
-    delVal = tRand 'f' 1e-3 100e-3 (lfNoise0 'g' kr (1/(beat*256)))
+    delVal = tRand 'f' 1e-3 100e-3 (lfNoise0 'g' KR (1/(beat*256)))
     startDel = tDelay (756 <* pulseCount metro 0) 0
     tmul = tmulTransit initialTmul (tmulVal+0.5)
     tfreq = tmulTransit initialTfreq (tfreqVal+0.5)
     initialTmul = 5
     initialTfreq = 2.74
-    tmulVal = squared $ squared $ lfdNoise3 'h' kr (1/(beat*128)) * 1.8
-    tfreqVal = squared $ lfdNoise3 'i' kr (1/(beat*256)) * 1.4
+    tmulVal = squared $ squared $ lfdNoise3 'h' KR (1/(beat*128)) * 1.8
+    tfreqVal = squared $ lfdNoise3 'i' KR (1/(beat*256)) * 1.4
     tmulTransit a b = a * (1-tmulTransitEnv) + b * tmulTransitEnv
-    tmulTransitEnv = envGen kr startTmul 1 0 1 DoNothing $
-                     env [0,0,1] [0,1] [EnvLin] (-1) 0
+    tmulTransitEnv = envGen KR startTmul 1 0 1 DoNothing $
+                     Envelope [0,0,1] [0,1] [EnvLin] (Just (-1)) (Just 0)
     startTmul = tDelay (1024 <* pulseCount metro 0) 0
 
     -- freqs
-    pitchTrig = tDuty kr (dseq 'j' dinf (mce $ map (*beat) bars))
+    pitchTrig = tDuty KR (dseq 'j' dinf (mce $ map (*beat) bars))
                 0 DoNothing 1 0
     sweep = clip (randSweep + periodicSweep) 0 1
-    randSweep = envGen kr sweepTrigR 1 0 1 DoNothing $
-                env [0,0,1,1,0] [0,sweepAtk,sweepSus,sweepRel]
-                [EnvSin] (-1) 0
+    randSweep = envGen KR sweepTrigR 1 0 1 DoNothing $
+                Envelope [0,0,1,1,0] [0,sweepAtk,sweepSus,sweepRel]
+                [EnvSin] (Just (-1)) (Just 0)
     sweepAtk = tExpRand 'k' (1*beat) (12*beat) sweepTrigR
     sweepSus = tExpRand 'l' (9*beat) (36*beat) sweepTrigR
     sweepRel = tExpRand 'm' (1*beat) (12*beat) sweepTrigR
-    sweepTrigR = dust 'n' kr (1/(beat*96))
+    sweepTrigR = dust 'n' KR (1/(beat*96))
     periodicSweep = shortSweep + longSweep
     shortSweep = 0
-    longSweep = envGen kr sweepTrigPLong 1 0 1 DoNothing $
-                env [0,0,1,0] [0,beat*3,beat*3] [EnvSin] (-1) 0
+    longSweep = envGen KR sweepTrigPLong 1 0 1 DoNothing $
+                Envelope [0,0,1,0] [0,beat*3,beat*3] [EnvSin]
+                (Just (-1)) (Just 0)
     sweepTrigPLong = pulseDivider metro (mce [32]) 2
     ftrig = select (stepper stepTrig 0 0 11 1 0) (mce pary)
     stepTrig = pulseDivider metro 64 1 +
@@ -142,18 +145,19 @@ piece1 = mrg outs
                pulseDivider metro 256 52 +
                pulseDivider metro 256 56 +
                pulseDivider metro 256 60
-    ffc = (squared (lfdNoise3 'p' kr (1/(beat*128))) * 3) + 1
+    ffc = (squared (lfdNoise3 'p' KR (1/(beat*128))) * 3) + 1
 
     -- pan
-    panChange = dust 'o' kr (1/(beat*128))
+    panChange = dust 'o' KR (1/(beat*128))
 
     -- common
-    metro = impulse kr (bpm/60) 0
+    metro = impulse KR (bpm/60) 0
     hitRandTrig = pulseDivider metro 128 127
     freeTheSound = free (2048 <* pulseCount metro 0) 20
     beat = 60/bpm
-    wholeEnv = squared $ envGen kr t_trig 1 0 1 DoNothing $
-               env [0,0,1,1,0] [0,128*beat,1664*beat,256*beat] [EnvSin] (-1) 0
+    wholeEnv = squared $ envGen KR t_trig 1 0 1 DoNothing $
+               Envelope [0,0,1,1,0] [0,128*beat,1664*beat,256*beat] [EnvSin]
+               (Just (-1)) (Just 0)
 
     pary = [0,  4, 11,  3, 10,  2,  9,  1,  8,  0,  7, 11,
             6, 10,  5,  9,  4,  8,  3,  7,  2,  6,  1,  5]
@@ -175,4 +179,3 @@ piece1 = mrg outs
     panBus = ctrl "pan" 105
     rTrigBus = ctrl "rtrig" 111
     t_trig = ctrl "t_trig" 1
-
