@@ -17,7 +17,7 @@ import Control.Concurrent (threadDelay)
 import Data.Traversable (sequenceA)
 import qualified Data.Map as M
 
-import Sound.OpenSoundControl
+import Sound.OSC
 import Sound.SC3
 import Sound.SC3.ID
 import Sound.SC3.Lepton
@@ -25,8 +25,8 @@ import Sound.SC3.Lepton.GUI
 
 import Sound.Study.ForAPileOfOscillators.Common
 
-main = withSC3 $ \fd ->
-  treeToGui (Group 0 ([ac3Node]++smasterNode)) hints' fd
+main = withSC3 $
+  treeToGui (Group 0 ([ac3Node]++smasterNode)) hints'
   where
     hints' = foldr M.union hints [h1,h2]
     h1 = M.fromList $ map (\x -> (x,h1')) ["ac2_1","ac2_2","ac2_3","ac2_4"]
@@ -38,37 +38,37 @@ main = withSC3 $ \fd ->
         [ParamRange "fc" 0 8000
         ,ParamRange "vc" 0 0.2])]
 
-writeA004Score :: FilePath -> IO ()
-writeA004Score path = do
-  ps <- runPIO $ pat000
-  m1s <- runPIO $ sequenceA patA00
-  m2s <- runPIO $ sequenceA patF01
-  writeNRT path $ initial ++ zipWith3 f (take 1664 ps) m1s m2s ++ last
-  where
-    f p m1 m2 = Bundle (NTPr (0.5+(p*(1/4)*beat))) (oscAddition p msgs)
-      where
-        msgs = [n_set 1001 (M.assocs m1),n_set 1105 m2',n_set 1106 m2']
-        m2' = M.assocs m2
-    initial = map (\m -> Bundle (NTPr 0) [m])
-              (b_alloc pitchBuf (length pitches) 1:
-               b_setn pitchBuf [(0,pitches)]:
-               treeToNew 0 a004Nodes)
-    last = [Bundle (NTPr ((1664 * beat * (1/4))+1)) []]
+-- writeA004Score :: FilePath -> IO ()
+-- writeA004Score path = do
+--   ps <- runPIO $ pat000
+--   m1s <- runPIO $ sequenceA patA00
+--   m2s <- runPIO $ sequenceA patF01
+--   writeNRT path $ initial ++ zipWith3 f (take 1664 ps) m1s m2s ++ last
+--   where
+--     f p m1 m2 = Bundle (NTPr (0.5+(p*(1/4)*beat))) (oscAddition p msgs)
+--       where
+--         msgs = [n_set 1001 (M.assocs m1),n_set 1105 m2',n_set 1106 m2']
+--         m2' = M.assocs m2
+--     initial = map (\m -> Bundle (NTPr 0) [m])
+--               (b_alloc pitchBuf (length pitches) 1:
+--                b_setn pitchBuf [(0,pitches)]:
+--                treeToNew 0 a004Nodes)
+--     last = [Bundle (NTPr ((1664 * beat * (1/4))+1)) []]
 
-setup :: (Transport t) => t -> IO OSC
-setup fd = do
-  mapM_ (\(n,u) -> loadSynthdef n u fd)
+setup_a004 :: Transport m => m Message
+setup_a004 = do
+  liftIO $ mapM_ (\(n,u) -> loadSynthdef n u)
     [("ac2_1", ac2_1),("ac2_2",ac2_2),("ac2_3",ac2_3),("ac2_4",ac2_4)
     ,("fc2_1",fc2_1),("fc2_2",fc2_2),("ac3_1",ac3_1)
-    ,("t0041",t0041),("t0043_1",t0043_1)]
-  async fd $ b_free pitchBuf
-  async fd $ b_alloc pitchBuf (length pitches) 1
-  send fd $ b_setn pitchBuf [(0,pitches)]
-  reloadSynthdef fd
+    ,("t0041",t0041),("t0043_1",t0043_1),("smaster",smaster)]
+  async $ b_free pitchBuf
+  async $ b_alloc pitchBuf (length pitches) 1
+  send $ b_setn pitchBuf [(0,pitches)]
+  reloadSynthdef
 
-go fd = do
-  addNode 0 a004Nodes fd
-  goTrig fd
+go = do
+  addNode 0 a004Nodes
+  goTrig
 
 --
 -- Try:
@@ -81,17 +81,17 @@ go fd = do
 -- | Change values of pitch buffer.
 goPitchBuf :: (Transport t)
            => (Double -> Double) -- ^ Function mapped to pitches
-           -> t -> IO ()
-goPitchBuf f fd = do
-  async fd $ b_alloc pitchBuf (length pitches) 1
-  send fd $ b_setn pitchBuf [(0,map f pitches)]
+           -> t ()
+goPitchBuf f = do
+  async $ b_alloc pitchBuf (length pitches) 1
+  send $ b_setn pitchBuf [(0,map f pitches)]
 
-goTrig fd = do
-  m1s <- runPIO $ sequenceA patA00
-  m2s <- runPIO $ sequenceA patF01
-  ps <- runPIO $ pat000
+goTrig = do
+  m1s <- runLIO $ sequenceA patA00
+  m2s <- runLIO $ sequenceA patF01
+  ps <- runLIO $ pat000
   let z = ZipList
-  sequence_ $ getZipList $ playPat fd <$> z ps <*> z m1s <*> z m2s
+  sequence_ $ getZipList $ playPat <$> z ps <*> z m1s <*> z m2s
 
 --
 -- Node mappings
@@ -184,14 +184,14 @@ pitches = map (+36) $ zipWith (+) (cycle [0,3,5,7,10])
 -- Patterns
 --
 
-playPat fd p0 m1 m2 = do
-  now <- utcr
+playPat p0 m1 m2 = do
+  now <- liftIO time
   let m2' = M.assocs m2
   let msgs = [n_set 1001 (M.assocs m1),n_set 1105 m2',n_set 1106 m2']
-  send fd $ Bundle (UTCr $ now+0.1) (oscAddition p0 msgs)
-  threadDelay (floor $ 1e6 * (1/4) * beat)
+  sendOSC $ Bundle (now+0.1) (oscAddition p0 msgs)
+  liftIO $ threadDelay (floor $ 1e6 * (1/4) * beat)
 
-oscAddition :: Double -> [OSC] -> [OSC]
+oscAddition :: Double -> [Message] -> [Message]
 oscAddition p ms = case p of
   129  -> n_set 1001 [("camp",0.006),("clag",beat*128)]:ms
   240  -> n_set 1001 [("gamp",0.03)]:ms
@@ -218,7 +218,7 @@ oscAddition p ms = case p of
   where
     pch f = b_setn pitchBuf [(0,map f pitches)]
 
-pat000 = plist [0,1..]
+pat000 = plist $ map pdouble [0,1..1700]
 
 patA00 =
   fmap pforever $ M.unionsWith pappend
@@ -264,6 +264,8 @@ patA05 = M.fromList
 patF01 = M.fromList
   [("t_trig", pcycle [pseq 60 [0], plist [0,1,0,0]])]
 
+plist = pseq 1
+
 --
 -- UGens
 --
@@ -285,12 +287,12 @@ t0043 ids = t0043' ids ("amp"=:0) ("freq"=:1) ("fmod"=:1) ("fidx"=:1)
 t0043' ids amp freq fmod fidx = out outBus sig
   where
     outBus = select idx (mce $ map ampBus ids)
-    idx = tiRand 'i' 0 (fromIntegral $ length ids) tr
+    idx = tIRand 'i' 0 (fromIntegral $ length ids) tr
     sig = linen tr atk lv 10e-3 DoNothing * amp
     lv = tExpRand 'v' 0.05 0.2 tr
     atk = tExpRand 'x' 100e-3 2 tr
-    tr = dust 'a' kr dfreq
-    dfreq = clip (freq + (lfdNoise3 'f' kr fmod) * fidx) 0 (freq+fidx)
+    tr = dust 'a' KR dfreq
+    dfreq = clip (freq + (lfdNoise3 'f' KR fmod) * fidx) 0 (freq+fidx)
 
 (ac2_1:ac2_2:ac2_3:ac2_4:_) = map ac2 [bank1a,bank1b,bank1c,bank1d]
 ac3_1 = ac3 bank3
@@ -310,8 +312,8 @@ ac2' ids master amp atk rel pan t_trig = mrg (concatMap mkO ids)
   where
     mkO i = [out (ampBus i) (amp' i), out (panBus i) pan]
     amp' i = ampEnv * amp * master * tRand i 0.5 1.5 t_trig
-    ampEnv = envGen kr t_trig 1 0 1 DoNothing $
-             env [0,0,1,0] [0,atk,rel] [EnvCub] (-1) 0
+    ampEnv = envGen KR t_trig 1 0 1 DoNothing $
+             Envelope [0,0,1,0] [0,atk,rel] [EnvCub] (Just (-1)) (Just 0)
 
 -- | Rapid envelope with envgen triggered by impulse.
 ac3 :: [NodeId] -> UGen
@@ -323,20 +325,21 @@ ac3' ids edgey dur fc fd dense dmf dmi ffreq fpan vc curve t_trig =
   where
     mkO i = [out (ampBus i) amp, out (freqBus i) freq,out (panBus i) pan]
       where
-        amp = envGen kr tr vc 0 edur DoNothing $
-              env [1e-9,1e-9,1,1e-9] [0,1-edgey,edgey] [EnvNum ecurve] (-1) 0
+        amp = envGen KR tr vc 0 edur DoNothing $
+              Envelope [1e-9,1e-9,1,1e-9] [0,1-edgey,edgey] [EnvNum ecurve]
+              (Just (-1)) (Just 0)
         edur = linExp dur 1e-9 1 1e-4 2
         ecurve = linLin curve 0 1 (-12) 12
-        tr = impulse kr trf 1
-        trf = cubed (clip2 (lfdNoise3 'a' kr dmf' * 0.5 + 0.5) 1 * dmi') + dense'
+        tr = impulse KR trf 1
+        trf = cubed (clip2 (lfdNoise3 'a' KR dmf' * 0.5 + 0.5) 1 * dmi') + dense'
         dmf' = linLin dmf 0 1 0 10
         dmi' = linLin dmi 0 1 0 10
         dense' = linLin dense 0 1 0 50
         freq = clip (tExpRand i flo fhi t_trig) 0 12000 *
-               lfdNoise3 i kr ffreq
+               lfdNoise3 i KR ffreq
         flo = 1e-3 + (fc/2) - (fd*(fc/2))
         fhi = (fc/2) + (fd*(fc/2))
-        pan = lfdNoise3 'p' kr fpan
+        pan = lfdNoise3 'p' KR fpan
 
 -- | Look up a buffer for pitch value and use for each oscillators.
 fc2 :: [NodeId] -> UGen
@@ -347,5 +350,5 @@ fc2' ids bufn lagt t_trig = mrg $ map mkO ids
     freq i = lag (targetFreq i) (lagt * tExpRand i 0.25 4 t_trig)
     targetFreq i = midiCPS (index bufn (idx i)) * detune i
     detune i = tRand i 0.9998 1.0002 t_trig
-    idx i = tiRand i 0 (fromIntegral $ length pitches - 1)
+    idx i = tIRand i 0 (fromIntegral $ length pitches - 1)
             (tDelay t_trig (tExpRand (succ i) 0.25 4 t_trig))
