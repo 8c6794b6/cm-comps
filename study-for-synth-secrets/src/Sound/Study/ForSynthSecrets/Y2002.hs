@@ -905,7 +905,7 @@ pn02 = centeredOut sig
     -- cf   = mfrq * 1.25003
     cf   = mfrq * 2
     sig1 = (UGen.phasor AR tr0 sfrq 0 1 0 - 0.5) * 2
-    sfrq = UGen.envGen AR tr1 sval 0 0.2 DoNothing $
+    sfrq = UGen.envGen AR tr1 sval 0 0.01 DoNothing $
            UGen.envCoord [(0,2),(1e-3,2),(1,1)] 1 1 (EnvNum en)
     en   = 3
     sval = mfrq / UGen.sampleRate
