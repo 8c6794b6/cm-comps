@@ -12,7 +12,7 @@ B003 - Pink blizzard.
 -}
 module Sound.Study.ForNoisesAndFilters.B003 where
 
-import Sound.OpenSoundControl
+import Sound.OSC
 import Sound.SC3
 import Sound.SC3.ID
 import Sound.SC3.Lepton
@@ -22,9 +22,9 @@ import Sound.SC3.Lepton
 -- Main
 --
 
-go :: Transport t => t -> IO ()
-go fd = do
-  mapM_ (async fd . d_recv . uncurry synthdef)
+go :: (MonadIO m, DuplexOSC m) => m ()
+go = do
+  mapM_ (async . d_recv . uncurry synthdef)
     [("ppnz",ppnz)
     ,("ppC",ppC ("bpm"@@60))
     ,("ppt01",ppt01)
@@ -36,10 +36,7 @@ go fd = do
     ,("pp05",pp05)
     ,("pp06",pp06)
     ]
-  patchNode (nodify n0) fd
-
-w :: (UDP -> IO a) -> IO a
-w = withSC3
+  patchNode (nodify n0)
 
 -- --------------------------------------------------------------------------
 --
@@ -126,7 +123,7 @@ ppC bpm = mrg [outt, outf, outa, outp, outk] where
   outa = out ("outa"@@0) (tExpRand 'a' 1e-3 5e-2 t)
   outp = out ("outp"@@0) en where
     en = envGen KR t 1 0 1 DoNothing sh
-    sh = env [st, ed] [du] [EnvSin] (-1) 0
+    sh = Envelope [st, ed] [du] [EnvSin] (Just (-1)) (Just 0)
     st = tRand 's' (-1) 1 t
     ed = tRand 'e' (-1) 1 t
     du = tRand 'd' 0.25 2 t
@@ -152,7 +149,7 @@ pp' tick amp freq pan en dur atk = out ("out"@@0) sig0 where
   sig2 = pan2 (ringz (nz * aenv) freq (q*(min 1.25 (4000/(freq**1.1))))) pan 1
   f a b = allpassC b 1 (rand a 1e-1 1) (rand a 1 4)
   aenv = envGen KR tick amp 0 dur DoNothing $
-         env [0,1,0] [atk,1-atk] [EnvNum en] (-1) 0
+         Envelope [0,1,0] [atk,1-atk] [EnvNum en] (Just (-1)) (Just 0)
   nz = "a_nz"@@0
   q = linLin (lfdNoise3 'q' KR 20) (-1) 1 1e-3 125e-3
 
@@ -198,7 +195,7 @@ pp02' t = out ("out"@@0) (pan2 sig pan 1) where
     fs = mce [frq*i|i<-[1..16]]
     qs = mce [q*recip i|i<-[1..16]]
     e = envGen KR t 1 0 dur DoNothing
-        (env [0,1,0] [8e-3,920e-3] [EnvCub] (-1) 0)
+        (Envelope [0,1,0] [8e-3,920e-3] [EnvCub] (Just (-1)) (Just 0))
     dur = linLin (fSinOsc KR (1/176) (1.5*pi) + 1) 0 2 (1/128) 2.56
   sig = freeVerb sig' 0.5 0.99 0.99 * 0.6
 
@@ -225,13 +222,13 @@ pp03' tick = out 0 (pan2 (hpf sig 20) ("pan"@@0.1) 1) where
     [ f x r
     | x <- [321.139, 479.32, 632.03]
     , r <- [28e-3, 12e-3, 16e-3]
-    , let v i = env [0,1,0] [i,800e-3] [EnvNum (-3)] (-1) 0
+    , let v i = Envelope [0,1,0] [i,800e-3] [EnvNum (-3)] (Just (-1)) (Just 0)
     , let h i = i * envGen KR t 1 0 1 DoNothing (v i)
     , let f a b = rhpf nz a (h b) ]
   nz = "a_nz"@@0
   q = linLin (lfdNoise1 'q' KR 0.25) (-1) 1 1e-1 20
   e = envGen KR t 1 0 1 DoNothing $
-      env [0,1,0.8,0.8,0] [1e-3,20e-3,50e-3,100e-3] [EnvNum (-8)] (-1) 0
+      Envelope [0,1,0.8,0.8,0] [1e-3,20e-3,50e-3,100e-3] [EnvNum (-8)] (Just (-1)) (Just 0)
   t = pulseDivider tick 16 0 + coinGate 'p' prob tick' where
     prob  = linLin (lfdNoise3 'r' KR 0.125) (-1) 1 0 (1/6)
     tick' = pulseDivider tick 2 0
@@ -258,9 +255,9 @@ pp04' tick = out ("out"@@0) (pan2 sig ("pan"@@(-0.1)) 1) where
   fs = [59.32,120,255,372,493,893,1203.32,3821.32]
   sig' = mix $ rlpf nz (mce fs) q * e * tExpRand 'a' 0.6 1 t
   q = envGen KR t 1 0 1 DoNothing $
-      env [0,1,0] [20e-3,210e-3] [EnvNum (-8)] (-1) 0
+      Envelope [0,1,0] [20e-3,210e-3] [EnvNum (-8)] (Just (-1)) (Just 0)
   e = envGen KR t 1 0 1 DoNothing $
-      env [0,1,0] [3e-3,250e-3] [EnvNum (-3)] (-1) 0
+      Envelope [0,1,0] [3e-3,250e-3] [EnvNum (-3)] (Just (-1)) (Just 0)
 
 
 -- --------------------------------------------------------------------------
@@ -290,9 +287,9 @@ pp05' t = out ("out"@@0) (pan2 sig0 ("pan"@@0.05) 1) where
   qs = [q * 0.3 + 0.04, q * 0.4 + 0.03, q * 0.9 + 0.01]
   f = tExpRand '≒' 0.5 1 tick
   q = envGen KR tick 1 0 et DoNothing $
-      env [1,1e-8,0.5] [120e-3,220e-3] [EnvLin] (-1) 0
+      Envelope [1,1e-8,0.5] [120e-3,220e-3] [EnvLin] (Just (-1)) (Just 0)
   e = envGen KR tick 1 0 et DoNothing $
-      env [0,1,l1,l2,0] [d0,d1,d2,d3] [EnvNum (-11)] (-1) 0 where
+      Envelope [0,1,l1,l2,0] [d0,d1,d2,d3] [EnvNum (-11)] (Just (-1)) (Just 0) where
     l1 = tExpRand '1' 0.1 1 tick
     l2 = tExpRand '2' 0.1 1 tick
     d0 = tExpRand 'κ' 1e-4 10e-4 tick
@@ -326,7 +323,7 @@ pp06 = out ("out"@@0) sig0 where
   ptchs2 = map (+ 36) [60,67,69,62,64,59]
   nz = "a_nz"@@0
   e = envGen KR t 1 0 4 DoNothing $
-      env [0,1,1,0] [0.3,0.3,0.3] [EnvCos] (-1) 0
+      Envelope [0,1,1,0] [0.3,0.3,0.3] [EnvCos] (Just (-1)) (Just 0)
   t = pulseDivider ("t_trig"@@0) 64 0
   rev x = x + foldr f x "blashing09238-GQ" where
     f a b = allpassC b 1 (rand a 1e-4 1) (rand a 1 5)

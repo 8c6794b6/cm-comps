@@ -13,23 +13,27 @@ B004 - Pluck fiesta.
 -}
 module Sound.Study.ForNoisesAndFilters.B004 where
 
-import Sound.OpenSoundControl
+import Control.Concurrent (forkIO, killThread)
+
+import Sound.OSC
 import Sound.SC3
 import Sound.SC3.ID
 import Sound.SC3.Lepton hiding (tu)
 
 main :: IO ()
-main = w go
+main = do
+    tid <- forkIO $ withSC3 go
+    getChar >> killThread tid
 
-go :: Transport t => t -> IO ()
-go fd = do
-  setup_b004 fd
-  patchNode (nodify n0) fd
-  play_b004 fd
+go :: Transport m => m ()
+go = do
+  setup_b004
+  patchNode (nodify n0)
+  play_b004
 
-setup_b004 :: Transport t => t -> IO ()
-setup_b004 fd = do
-  mapM_ (async fd . d_recv . uncurry synthdef)
+setup_b004 :: Transport m => m ()
+setup_b004 = do
+  mapM_ (async . d_recv . uncurry synthdef)
     [ ("bp01", bp01)
     , ("bp02", bp02)
     , ("bp03", bp03)
@@ -40,7 +44,7 @@ setup_b004 fd = do
     , ("bp08", bp08)
     ]
 
-w :: (UDP -> IO a) -> IO a
+w :: Connection UDP a -> IO a
 w = withSC3
 
 -- --------------------------------------------------------------------------
@@ -52,7 +56,7 @@ w = withSC3
 --
 bp01 :: UGen
 bp01 = mrg [out 0 $ pan2 sig ("pan"@@0) 1, dts] where
-  dts = detectSilence' sig 0.01 1 RemoveSynth
+  dts = detectSilence sig 0.01 1 RemoveSynth
   sig = (combL nz dlyT dlyT dcyT + nz) * (1/8) * tamp
   nz = hpf ((grayNoise 'p' AR + pinkNoise 'p' AR) * burstEnv) 20
   burstEnv = envGen KR trg 1 0 1 DoNothing $ envPerc 0.01 0.05
@@ -80,14 +84,14 @@ bp03 = out ("out"@@0) sig where
   sig = (sig1*m) + (sig2*(1-m))
   sig1 = (fSinOsc KR (1/(tu*32)) (pi*1.5) + 1) * 4
   sig2 = envGen KR ("t_trig"@@1) 1 0 1 DoNothing $
-         env [1/64,64] [150 * tu] [EnvExp] (-1) 0
+         Envelope [1/64,64] [150 * tu] [EnvExp] (Just (-1)) (Just 0)
   m = squared (line KR 1 0 (120*tu) DoNothing)
 
 -- | Tambourine-ish percussive pluck.
 --
 bp04 :: UGen
 bp04 = mrg [out ("out"@@0) (pan2 sig ("pan"@@0) 1), dts] where
-  dts = detectSilence' sig 0.01 1 RemoveSynth
+  dts = detectSilence sig 0.01 1 RemoveSynth
   sig = mix (hpf (combL nz dlyt dlyt dcyt + nz) 60) * 0.08 * amp
   amp = "amp"@@1
   nz = whiteNoise 'w' AR * e
@@ -95,7 +99,7 @@ bp04 = mrg [out ("out"@@0) (pan2 sig ("pan"@@0) 1), dts] where
   dcyt = 0.3
   t_trig = "t_trig"@@1
   e = envGen KR t_trig 1 0 1 DoNothing $
-      env [0,1,0] [2e-3,50e-3] [EnvCub] (-1) 0
+      Envelope [0,1,0] [2e-3,50e-3] [EnvCub] (Just (-1)) (Just 0)
 
 -- | Low frequency gray pluck.
 --
@@ -112,23 +116,23 @@ bp05 = out ("out"@@0) (pan2 sig ("pan"@@0) 1) where
   dlyT2 = mce [1/3203.32, 1/3970.17, 1/5318.32]
   dcyT2 = 0.1
   e1 = envGen KR t_trig 1 0 1 DoNothing $
-       env [0,1,1,0] [1e-4,20e-3,405e-3] [EnvCos] (-1) 0
+       Envelope [0,1,1,0] [1e-4,20e-3,405e-3] [EnvCos] (Just (-1)) (Just 0)
   e2 = envGen KR t_trig 1 0 1 DoNothing $
-       env [0,1,0.5,0] [1e-4,25e-3,5e-3] [EnvCub] (-1) 0
+       Envelope [0,1,0.5,0] [1e-4,25e-3,5e-3] [EnvCub] (Just (-1)) (Just 0)
   t_trig = "t_trig"@@0
 
 -- | Clap-ish pluck.
 --
 bp06 :: UGen
 bp06 = mrg [out ("out"@@0) (pan2 sig ("pan"@@0) 1), dts, fse] where
-  dts = detectSilence' sig 0.01 1 RemoveSynth
+  dts = detectSilence sig 0.01 1 RemoveSynth
   fse = freeSelfWhenDone (line KR 0 1 4 RemoveSynth)
   sig = resonz (mix (combC nz dlyT dlyT dcyT) * e1 * 0.2 * amp) 1200 e2
   amp = "amp"@@0.3 * "amp2"@@1
   e1 = envGen KR t_trig 1 0 1 DoNothing $
-       env [0,1,1,0] [2e-3,25e-3,310e-3] [EnvCub] (-1) 0
+       Envelope [0,1,1,0] [2e-3,25e-3,310e-3] [EnvCub] (Just (-1)) (Just 0)
   e2 = envGen KR t_trig 1 0 1 DoNothing $
-       env [0.999,0.5,0.95] [30e-3,100e-3] [EnvCub] (-1) 0
+       Envelope [0.999,0.5,0.95] [30e-3,100e-3] [EnvCub] (Just (-1)) (Just 0)
   dlyT = mce fs * e2
   dcyT = 0.2
   fs = [recip x| x<-[139.32, 341.119, 513.13, 208.88, 429.13]]
@@ -140,7 +144,7 @@ bp06 = mrg [out ("out"@@0) (pan2 sig ("pan"@@0) 1), dts, fse] where
 bp07 :: UGen
 bp07 = out ("out"@@0) sig where
   sig = envGen KR ("t_trig"@@1) 1 0 1 DoNothing shp
-  shp = env [1,1,0] [90,30] [EnvSqr] (-1) 0
+  shp = Envelope [1,1,0] [90,30] [EnvSqr] (Just (-1)) (Just 0)
 
 -- | Using localIn and localOut.
 -- More close to original karplus-strong.
@@ -154,7 +158,7 @@ bp08 = mrg [offsetOut 0 sig2, localOut sig0, fslf] where
   fdbk = localIn 1 AR
   nsrc = hpf ((pinkNoise 'p' AR + brownNoise 'b' AR) * 0.25 * ebst) 20
   ebst = envGen KR t_trig 1 0 1 DoNothing $
-         env [0,1,0] [5e-3,200e-3] [EnvCub] (-1) 0
+         Envelope [0,1,0] [5e-3,200e-3] [EnvCub] (Just (-1)) (Just 0)
   t_trig = "t_trig"@@0
   artc = mouseX KR 0 (1-1e-4) Linear 0.1
   freq = midiCPS ("ptch"@@69)
@@ -185,8 +189,8 @@ bp02_n = syn "bp02" ["in"*=0,"out"*=0]
 -- Patterns
 --
 
-play_b004 :: Transport t => t -> IO ()
-play_b004 = flip play (toL patterns)
+play_b004 :: Transport m => m ()
+play_b004 = play (toL patterns)
 
 tu = 60/63
 

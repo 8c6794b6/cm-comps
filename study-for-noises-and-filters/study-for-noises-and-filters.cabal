@@ -34,7 +34,7 @@ Library
   build-depends:
     base >= 2.0 && < 5.0,
     containers -any,
-    hosc >= 0.11 && < 0.12,
-    hsc3 >= 0.11 && < 0.12,
-    hsc3-lepton >= 0.11 && < 0.12,
+    hosc >= 0.14,
+    hsc3 >= 0.14,
+    hsc3-lepton,
     random -any

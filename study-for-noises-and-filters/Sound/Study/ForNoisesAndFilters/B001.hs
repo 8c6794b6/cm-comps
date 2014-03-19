@@ -14,13 +14,13 @@
 --
 module Sound.Study.ForNoisesAndFilters.B001 where
 
-import Sound.OpenSoundControl
+import Sound.OSC
 import Sound.SC3
 import Sound.SC3.ID
-import Sound.SC3.Lepton hiding (limiter)
+import Sound.SC3.Lepton
 
-setup fd = do
-  mapM_ (\(n,u) -> loadSynthdef n u fd)
+setup = do
+  mapM_ (\(n,u) -> loadSynthdef n u)
     [("wn001",wn001),("pn001",pn001),("bn001",bn001)
     ,("lz001",lz001),("hn001",hn001),("cg001",cg001),("cp001",cp001)
     ,("lc001", lc001),("lc002",lc002)
@@ -33,7 +33,7 @@ setup fd = do
     ,("pan001",pan001),("pan002",pan002),("pan003",pan003),("pan004",pan004)
     ,("mix001",mix001)]
 
-go fd = addNode 0 rgGraph fd
+go = addNode 0 rgGraph
 
 rgGraph =
   grp 1
@@ -82,90 +82,90 @@ rgGraph =
     syn = Synth
 
 tr001 = mrg [d, out ("out"@@0) t] where
-  t = impulse kr ("freq"@@8) 0
-  d = line kr 0 1 215 RemoveSynth {- DoNothing -}
+  t = impulse KR ("freq"@@8) 0
+  d = line KR 0 1 215 RemoveSynth {- DoNothing -}
 
 lzf001 = out ("out"@@101) (o+20) where
-  o = envGen kr 1 (sampleRate-20) 0 1 RemoveSynth {-  DoNothing -} shp
+  o = envGen KR 1 (sampleRate-20) 0 1 RemoveSynth {-  DoNothing -} shp
   shp = env [0,0,1,0.5,1,0.125,1,1,0,1] [0,30,15,30,15,30,60,30,10]
         [EnvCub] (-1) 0
 
 lzf002 = out ("out"@@101) (o+20) where
-  o = linLin (lfdNoise3 'f' kr (1/exp pi) * 0.5 + 0.5) 0 1 0 sampleRate
+  o = linLin (lfdNoise3 'f' KR (1/exp pi) * 0.5 + 0.5) 0 1 0 sampleRate
 
 lzf003 = out ("out"@@101) (o+20) where
-  o = envGen kr 1 (sampleRate/2-20) 0 1 RemoveSynth {- DoNothing -} shp
+  o = envGen KR 1 (sampleRate/2-20) 0 1 RemoveSynth {- DoNothing -} shp
   shp = env [0,0,1,0.5,1,0.125,1,1,0,1] [0,30,15,30,15,30,60,30,10]
         [EnvCub] (-1) 0
 
-wn001 = out ("out"@@0) $ whiteNoise 'w' ar
+wn001 = out ("out"@@0) $ whiteNoise 'w' AR
 
-pn001 = out ("out"@@0) $ pinkNoise 'p' ar
+pn001 = out ("out"@@0) $ pinkNoise 'p' AR
 
-gn001 = out ("out"@@0) $ grayNoise 'g' ar
+gn001 = out ("out"@@0) $ grayNoise 'g' AR
 
-bn001 = out ("out"@@0) $ brownNoise 'b' ar
+bn001 = out ("out"@@0) $ brownNoise 'b' AR
 
 lz001 = out ("out"@@0) sig where
-  sig = lorenzL ar ("freq"@@48000) n0 n1 n2 0.05 0.1 0 0 * ("amp"@@1)
+  sig = lorenzL AR ("freq"@@48000) n0 n1 n2 0.05 0.1 0 0 * ("amp"@@1)
   n0 = n * 2 + 10
   n1 = n * 20 + 38
   n2 = n * 1.5 + 2
-  n = lfdNoise3 '0' kr 1
+  n = lfdNoise3 '0' KR 1
 
 hn001 = out ("out"@@0) sig where
-  sig = henonC ar hf n0 n1 0 0
+  sig = henonC AR hf n0 n1 0 0
   hf = ("freq"@@24000)
   n0 = n * 0.2 + 1.2
   n1 = n * 0.1 + 0.25
-  n = lfdNoise3 'h' kr 1
+  n = lfdNoise3 'h' KR 1
 
 cg001 = out ("out"@@0) sig where
-  sig = linCongC ar f n0 n1 n2 0
-  f = line kr 1 (sampleRate/2) 128 DoNothing
+  sig = linCongC AR f n0 n1 n2 0
+  f = line KR 1 (sampleRate/2) 128 DoNothing
   n0 = n * 1e-4 + 1e-4
   n1 = n * 0.5 + 1.4
   n2 = n * 0.1 + 0.1
-  n = lfdNoise3 'n' kr 1
+  n = lfdNoise3 'n' KR 1
 
 cp001 = out ("out"@@0) o where
-  o = cuspL ar f n0 n1 0
-  f = line kr 1 (sampleRate/2) 128 DoNothing
+  o = cuspL AR f n0 n1 0
+  f = line KR 1 (sampleRate/2) 128 DoNothing
   n0 = n * 0.5 + 0.6
   n1 = n * 0.9 + 1.1
-  n = lfdNoise3 'n' kr 1
+  n = lfdNoise3 'n' KR 1
 
 lc001 = out ("out"@@0) o where
-  o = latoocarfianC ar f a b c d 0.5 0.5
+  o = latoocarfianC AR f a b c d 0.5 0.5
   f = ("freq"@@24000)
   a = n 'a' * 1.5 + 1.5
   b = n 'b' * 1.5 + 1.5
   c = n 'c' * 0.5 + 1.5
   d = n 'd' * 0.5 + 1.5
-  n i = lfdNoise3 'n' kr 1
+  n i = lfdNoise3 'n' KR 1
 
 lc002 = out ("out"@@0) o where
-  o = latoocarfianC ar f a b c d 0.5 0.5
+  o = latoocarfianC AR f a b c d 0.5 0.5
   f = ("freq"@@24000)
   a = n 'a' * 0.5 + 1.5
   b = n 'b' * 0.5 + 1.5
   c = n 'c' * 0.5 + 1.5
   d = n 'd' * 0.5 + 1.5
-  n i = lfdNoise3 'n' kr 1
+  n i = lfdNoise3 'n' KR 1
 
-ck001 = out ("out"@@0) $ crackle ar 1.95
+ck001 = out ("out"@@0) $ crackle AR 1.95
 
 hit001 = replaceOut ("out"@@0) o where
   o = i * hit
-  hit = envGen kr tr 1 0 dur DoNothing shape
+  hit = envGen KR tr 1 0 dur DoNothing shape
   shape = env [1e-9,1e-9,1,1e-9] [0,atk,1-atk] [EnvExp] (-1) 0
-  atk = linExp (lfdNoise3 'k' kr (1/16) * 0.5 + 0.51) 0.1 1.01 1e-4 9999e-4
-  dur = linExp (lfdNoise3 'd' kr (1/16) * 0.5 + 0.51) 0.1 1.01 5e-3 2
+  atk = linExp (lfdNoise3 'k' KR (1/16) * 0.5 + 0.51) 0.1 1.01 1e-4 9999e-4
+  dur = linExp (lfdNoise3 'd' KR (1/16) * 0.5 + 0.51) 0.1 1.01 5e-3 2
   amp = tExpRand 'a' 0.1 1 tr
-  tr = coinGate 'd' prob itr + dust 't' kr dtf
+  tr = coinGate 'd' prob itr + dust 't' KR dtf
   itr = "t_trig"@@100
-  prob = linExp (lfdNoise3 'p' kr (1/32) * 0.5 + 0.51) 0.1 1.01 (1/3) 1
-  dtf = linLin (lfdNoise3 'r' kr (1/32) * 0.5 + 0.51) 0.1 1.01 1e-2 3
+  prob = linExp (lfdNoise3 'p' KR (1/32) * 0.5 + 0.51) 0.1 1.01 (1/3) 1
+  dtf = linLin (lfdNoise3 'r' KR (1/32) * 0.5 + 0.51) 0.1 1.01 1e-2 3
   i = "a_in"@@0
 
 hit002 = mrg [replaceOut ("lout"@@0) low
@@ -173,14 +173,14 @@ hit002 = mrg [replaceOut ("lout"@@0) low
              ,replaceOut ("hout"@@2) high] where
   -- o = low + mid + high
   low = lowi * lowe * 20
-  lowe = envGen kr trl 1 0 2600e-3 DoNothing $
+  lowe = envGen KR trl 1 0 2600e-3 DoNothing $
          env [0,0,1,0] [0,5e-3,995e-3] [EnvNum (-13)] (-1) 0
   mid = midi * mide * 10 * tExpRand 'm' 0.5 1 trm
-  mide = envGen kr trm 1 0 300e-3 DoNothing $
+  mide = envGen KR trm 1 0 300e-3 DoNothing $
          env [0,0,1,0] [0,edgem,1-edgem] [EnvNum (-13)] (-1) 0
   edgem = index durb (tIRand 'm' 0 4 trm)
   high = highi * highe * 8 * tExpRand 'h' 0.8 1 trh
-  highe = envGen kr trh 1 0 300e-3 DoNothing $
+  highe = envGen KR trh 1 0 300e-3 DoNothing $
           env [0,0,1,0] [0,edgeh,1-edgeh] [EnvNum (-13)] (-1) 0
   edgeh = index durb (tIRand 'h' 0 4 trm)
   trl = mix $ coinGate 'l' 0.9375 $ pulseDivider tin 64 (mce [0,32,34])
@@ -197,24 +197,24 @@ hit002 = mrg [replaceOut ("lout"@@0) low
 rng001 = mrg [replaceOut ("out_1"@@0) o, out ("out_2"@@1) o] where
   o = fadeOutEnv * (sum $ zipWith3 h fs ts as)
   h freq time amp = ringz sig (lag2 freq 8) time * amp
-  fs = [lfdNoise3 'a' kr (1/128) * 100 + 150
-       ,lfdNoise3 'b' kr (1/128) * 300 + 500
-       ,lfdNoise3 'c' kr (1/128) * 1200 + 2000
-       ,lfdNoise3 'd' kr (1/128) * 4800 + 8000]
-  ts = [lfdNoise3 'b' kr 1 * 0.5 + 0.6
-       ,lfdNoise3 'd' kr 1 * 0.8 + 0.9
-       ,lfdNoise3 'a' kr 1 * 0.5 + 0.6
-       ,lfdNoise3 'c' kr 1 * 0.8 + 0.9]
-  as = [lfdNoise3 'c' kr 1 * 0.25 + 0.24
-       ,lfdNoise3 'a' kr 1 * 0.25 + 0.24
-       ,lfdNoise3 'b' kr 1 * 0.25 + 0.24
-       ,lfdNoise3 'd' kr 1 * 0.25 + 0.24]
+  fs = [lfdNoise3 'a' KR (1/128) * 100 + 150
+       ,lfdNoise3 'b' KR (1/128) * 300 + 500
+       ,lfdNoise3 'c' KR (1/128) * 1200 + 2000
+       ,lfdNoise3 'd' KR (1/128) * 4800 + 8000]
+  ts = [lfdNoise3 'b' KR 1 * 0.5 + 0.6
+       ,lfdNoise3 'd' KR 1 * 0.8 + 0.9
+       ,lfdNoise3 'a' KR 1 * 0.5 + 0.6
+       ,lfdNoise3 'c' KR 1 * 0.8 + 0.9]
+  as = [lfdNoise3 'c' KR 1 * 0.25 + 0.24
+       ,lfdNoise3 'a' KR 1 * 0.25 + 0.24
+       ,lfdNoise3 'b' KR 1 * 0.25 + 0.24
+       ,lfdNoise3 'd' KR 1 * 0.25 + 0.24]
   sig = "a_in"@@0
 
 rzn001 = replaceOut ("out"@@0) o where
   o = resonz i freq rq * ("amp"@@1)
   freq = 200
-  rq = linLin (lfdNoise3 'q' kr (1/32)) (-1) 1 1e-9 1
+  rq = linLin (lfdNoise3 'q' KR (1/32)) (-1) 1 1e-9 1
   i = "a_in"@@0
 
 cmb001 = replaceOut ("out"@@0) o where
@@ -224,7 +224,7 @@ cmb001 = replaceOut ("out"@@0) o where
   dlt i = lag3 (tExpRand i (recip ("rmin"@@50)) (recip ("rmax"@@1)) tr) 28e-3
   dct i = lag3 (tExpRand i 120e-3 800e-3 tr) 28e-3
   tr = coinGate 't' prob tin
-  prob = linLin (lfdNoise3 'q' kr (1/64) * 0.5 + 0.51) 0.1 1.01 (1/32) (1/2)
+  prob = linLin (lfdNoise3 'q' KR (1/64) * 0.5 + 0.51) 0.1 1.01 (1/32) (1/2)
   m = lag ("mix"@@0.5) 0.2
   tin = "t_trig"@@100
   sig = "a_in"@@0
@@ -243,9 +243,9 @@ cmb002 = replaceOut ("out"@@0) o where
 
 rvb001 = mrg [lo, replaceOut ("out"@@0) (mix output)] where
   output = (input * dry) + (mce [delrd !!* 0, delrd !!* 1] * (1-dry))
-  dry = linLin (sinOsc kr dryf 0) (-1) 1 0 1
-  dryf = linLin (lfdNoise3 'w' kr (1/128)) (-1) 1 (1/16) 1024
-  delrd = localIn 4 ar
+  dry = linLin (sinOsc KR dryf 0) (-1) 1 0 1
+  dryf = linLin (lfdNoise3 'w' KR (1/128)) (-1) 1 (1/16) 1024
+  delrd = localIn 4 AR
   sig0 = mce [output !!* 0, output !!* 1, delrd !!* 2, delrd !!* 3]
   sig1 = mix $ mceEdit fn sig0
   sig2 = sig1 * mce [0.4, 0.37, 0.333, 0.3]
@@ -293,9 +293,9 @@ mkPan001 lid rid = replaceOut ("out"@@0) o where
   -- o = c * a
   -- o = mce [l,r] * a
   (l,r) = (f lid,f rid)
-  c = pan2 i (lfdNoise3 (fromEnum lid * fromEnum rid) kr (1/exp pi)) 1
+  c = pan2 i (lfdNoise3 (fromEnum lid * fromEnum rid) KR (1/exp pi)) 1
   f j = delayL i 5e-2 (lag dt 0.1) where
-    dt = linLin (cos $ pi * lfdNoise3 j kr (1/8.32324)) (-1) 1 1e-4 35e-3
+    dt = linLin (cos $ pi * lfdNoise3 j KR (1/8.32324)) (-1) 1 1e-4 35e-3
   i = "a_in"@@0
   a = ("amp"@@1) * fadeOutEnv
 
@@ -305,7 +305,7 @@ mix001 = replaceOut ("out"@@0) o where
   ls = ["a_l1"@@0,"a_l2"@@2,"a_l3"@@4]
   rs = ["a_r1"@@1,"a_r2"@@3,"a_r3"@@5]
 
-fadeOutEnv = envGen kr 1 1 0 1 {- RemoveSynth -} DoNothing $
+fadeOutEnv = envGen KR 1 1 0 1 {- RemoveSynth -} DoNothing $
              -- env [0,1,1,0] [0,226,5] [EnvCub] (-1) 0
              env [0,1,1,1] [0,226,5] [EnvCub] (-1) 0
 
@@ -317,3 +317,5 @@ prn = printRootNode
 ug !!* n = mceChannel n ug
 
 infixl 7 !!*
+
+env vs ts cs l r = Envelope vs ts cs (Just l) (Just r)
