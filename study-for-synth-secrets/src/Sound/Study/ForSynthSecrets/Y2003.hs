@@ -42,9 +42,9 @@ pfm03 = centeredOut sig
     fe   = envGen KR tr0 1 0 dur DoNothing
     ash  = envCoord alvs 1 1 (EnvNum en)
     alvs = [(0,0),(1e-3,1),(0.25,0.2),(0.75,1),(1,0)]
-    en   = lfNoise2 'E' KR (1/3) * 25
+    en   = lfNoise2 'E' KR (1/3) * 12
     tr0  = impulse KR hps 0
-    hps  = 0.5
+    hps  = 0.25
     dur  = recip hps * 0.9
 
 -- | Play 'pfm03' with rhythms from last year.
