@@ -748,11 +748,15 @@ gtr01 :: UGen
 gtr01 = centeredOut sig
   where
     nS      = 6
-    sig     = sum (map mks [1..nS]) * 0.3
+    sig     = UGen.resonz (UGen.resonz sig0 8000 0.8) 200 0.5 * 30
+    -- sig     = sig1
+    sig0    = UGen.clip2 (sig1*100) 1 * 0.3
+    sig1    = sum (map mks [1..nS]) * 0.3
     pchs    = foldr fp [] octs
     fp o ps = map (UGen.midiCPS . (+offset) . (+o)) degs ++ ps
     octs    = take 3 $ iterate (+24) 40
-    degs    = [0,7,12,16,19]
+    -- degs    = [0,7,12,16,19]
+    degs    = [-12,-5,0,7,12]
     offset  = UGen.select oidx (mce offs)
     offs    = [0,2,4,5,7,9,11]
     oidx    = ID.tRand 'O' 0 (UGen.constant $ length offs) tr1
@@ -761,7 +765,8 @@ gtr01 = centeredOut sig
     tr1     = ID.coinGate 'G' 0.4 tr0
     tr0     = UGen.impulse KR sps 0 +
               ID.coinGate '2' 0.3 (UGen.impulse KR (sps*2) 0)
-    sps     = 0.68
+    -- sps     = 0.68
+    sps     = 3.2
     mks :: Int -> UGen
     mks n = sigN * amp
       where
@@ -804,7 +809,8 @@ play_gtr02 = withSC3 $ do
                  [("freq",UGen.midiCPS f), ("amp",a),("dur",1.6)]
     void $ async $ Server.d_recv (Server.synthdef name gtr02)
     now <- time
-    let art  = 0.09915
+    let -- art  = 0.09915
+        art  = 0.04
         tmul = 1.785
         cI   = [  0, 7, 12, 16, 19, 24]
         cii7 = [  2, 5, 12, 14, 21, 24]
