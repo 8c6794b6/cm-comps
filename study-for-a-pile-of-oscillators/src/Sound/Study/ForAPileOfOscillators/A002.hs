@@ -12,33 +12,35 @@
 module Sound.Study.ForAPileOfOscillators.A002 where
 
 import Control.Monad (forM_)
+import Control.Monad.Reader (ask)
 import System.Random (mkStdGen, randomRs)
 import qualified Data.Map as M
 
-import Sound.OpenSoundControl
+import Sound.OSC
 import Sound.SC3
-import Sound.SC3.ID
+import Sound.SC3.UGen.ID
 import Sound.SC3.Lepton
 import Sound.SC3.Lepton.GUI
 
 import Sound.Study.ForAPileOfOscillators.Common
 
 main :: IO ()
-main = withSC3 $ \fd -> do
-  treeToGui (Group 0 [Group 1 afp2]) hints fd
+main = withSC3 $ do
+    fd <- ask
+    liftIO $ treeToGui (Group 0 [Group 1 afp2]) hints fd
 
 -- | Write synthdef, reload them, make nodes.
-setup :: (Transport t) => t -> IO ()
-setup fd = do
-  loadSynthdef "piece2" piece2 fd
-  addNode 0 a002Tree fd
+setup_a002 :: Transport m => m ()
+setup_a002 = do
+  liftIO $ loadSynthdef "piece2" piece2
+  addNode 0 a002Tree
 
 -- | Write OSC message to file.
-writeA002Score :: FilePath -> IO ()
-writeA002Score path = do
-  let os = zipWith (\t m -> Bundle (NTPr t) [m]) (repeat 0) (treeToNew 0 a002Tree)
-      end = Bundle (NTPr $ 321 * 60 / bpm) []
-  writeNRT path $ os ++ [end]
+-- writeA002Score :: FilePath -> IO ()
+-- writeA002Score path = do
+--   let os = zipWith (\t m -> Bundle (NTPr t) [m]) (repeat 0) (treeToNew 0 a002Tree)
+--       end = Bundle (NTPr $ 321 * 60 / bpm) []
+--   writeNRT path $ os ++ [end]
 
 -- | Synth nodes for this piece.
 a002Tree :: SCNode
@@ -81,31 +83,31 @@ piece2 :: UGen
 piece2 = mrg outs
   where
     outs = [outI amix $ e EnvLin 1 amixE
-           ,outI anfreq (0.68 * line kr 0 1 30e-3 DoNothing)
-           ,outI aedgey $ clip (sinOsc kr (1/(9*60/bpm)) 0 + 1) 1 0.5
+           ,outI anfreq (0.68 * line KR 0 1 30e-3 DoNothing)
+           ,outI aedgey $ clip (sinOsc KR (1/(9*60/bpm)) 0 + 1) 1 0.5
            ,outI aedur $ e EnvLin 1 edurE
            ,outI adel $ e EnvLin 1 delE
            ,outI achaos $ e EnvLin 1 achaosE
            ,outI atfreq $ e EnvLin 1 tfreqE
            ,outI atmul $ e EnvLin 1 tmulE
            ,outI atos $ e EnvLin 1 tosE
-           ,outI atrig (impulse kr 1 0)
+           ,outI atrig (impulse KR 1 0)
 
            ,outI fvc $ e (EnvNum (-2)) 14000 fvcE
            ,outI fvd $ e EnvCub 1 fvdE
            ,outI ffc $ e EnvLin 1 ffcE
            ,outI ffd $ e EnvLin 1 ffdE
-           ,outI fmix (1 * line kr 0 1 4 DoNothing)
+           ,outI fmix (1 * line KR 0 1 4 DoNothing)
            ,outI fptc 7
            ,outI fvib 0.1
-           ,outI fnoise (1 * line kr 0 1 4 DoNothing)
-           ,outI ftrig (impulse kr 1 0)
+           ,outI fnoise (1 * line KR 0 1 4 DoNothing)
+           ,outI ftrig (impulse KR 1 0)
 
            ,outI pvc $ constEnv 0.0
            ,outI pvd $ constEnv 0.99
            ,outI pfc $ constEnv 0.11
            ,outI pfd $ constEnv 0.9
-           ,outI ptrig (impulse kr 1 0)]
+           ,outI ptrig (impulse KR 1 0)]
 
     outI :: Int -> UGen -> UGen
     outI k ug = out (fromIntegral k) ug
@@ -159,7 +161,7 @@ writeBreakPoints file = writeFile file $ unlines $ concatMap f
   ,("ffd", ffdE)]
   where
     f (n,bps) = map (g n) bps
-    g n (t,v) = unwords [show $ constantValue t, '=':n, show $ constantValue v]
+    g n (t,v) = unwords [show $ t, '=':n, show $ v]
 
 amixE :: BreakPoints
 amixE =
@@ -254,4 +256,7 @@ ffdE =
   ,(202,0.99)]
 
 constEnv :: UGen -> UGen
-constEnv val = mkEnv EnvLin 1 (60/bpm) [(0,val),(1,val)]
+constEnv val = mkEnv EnvLin 1 (60/bpm) [(0,val'),(1,val')]
+  where
+    val' = realToFrac val_u
+    Constant_U (Constant val_u) = val
