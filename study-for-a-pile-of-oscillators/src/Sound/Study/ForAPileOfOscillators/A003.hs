@@ -15,7 +15,7 @@ module Sound.Study.ForAPileOfOscillators.A003 where
 import Control.Concurrent (threadDelay)
 import Control.Monad (zipWithM_)
 
-import Sound.OpenSoundControl
+import Sound.OSC
 import Sound.SC3
 import Sound.SC3.ID
 import Sound.SC3.Lepton
@@ -25,44 +25,43 @@ import Sound.Study.ForAPileOfOscillators.Common hiding (ampBus)
 
 -- | For showing gui
 main :: IO ()
-main = withSC3 $ \fd -> do
-  treeToGui (Group 0 (afp3++[smasterNode])) hints fd
+main = withSC3 $ treeToGui (Group 0 (afp3++[smasterNode])) hints
 
-setup :: (Transport t) => t -> IO ()
-setup fd = do
-  async fd $ d_recv $ synthdef "k003" k003
-  addNode 0 a003Nodes fd
+setup_a003 :: Transport m => m ()
+setup_a003 = do
+  async $ d_recv $ synthdef "k003" k003
+  addNode 0 a003Nodes
 
-go :: (Transport t) => t -> IO ()
-go fd = do
-  setup fd
-  ps <- runPIO q0
-  as <- runPIO a0
+go :: Transport m => m ()
+go = do
+  setup_a003
+  ps <- runLIO q0
+  as <- runLIO a0
   sequence_ $ zipWith3 f (repeat 1) as ps
   where
     f t a p = do
-      send fd $ Bundle immediately (aBundle a p)
-      threadDelay $ floor $ (60/bpm) * 1e6
+      sendOSC $ Bundle immediately (aBundle a p)
+      liftIO $ threadDelay $ floor $ (60/bpm) * 1e6
 
-writeA003Score :: FilePath -> IO ()
-writeA003Score path = do
-  writeSynthdef "k003" k003
-  ps <- runPIO q0
-  as <- runPIO a0
-  writeNRT path $
-    initial ++ zipWith3 f ts as ps ++ last
-  where
-    f t a p = Bundle (NTPr (t+0.1)) (aBundle a p)
-    ts = scanl (+) 0 (repeat (60/bpm))
-    initial = map (\m -> Bundle (NTPr 0) [m]) (treeToNew 0 a003Nodes)
-    last = [Bundle (NTPr 422) []]
-    bundleTime m = case m of Bundle (NTPr t) _ -> t; _ -> 0
+-- writeA003Score :: FilePath -> IO ()
+-- writeA003Score path = do
+--   writeSynthdef "k003" k003
+--   ps <- runPIO q0
+--   as <- runPIO a0
+--   writeNRT path $
+--     initial ++ zipWith3 f ts as ps ++ last
+--   where
+--     f t a p = Bundle (NTPr (t+0.1)) (aBundle a p)
+--     ts = scanl (+) 0 (repeat (60/bpm))
+--     initial = map (\m -> Bundle (NTPr 0) [m]) (treeToNew 0 a003Nodes)
+--     last = [Bundle (NTPr 422) []]
+--     bundleTime m = case m of Bundle (NTPr t) _ -> t; _ -> 0
 
 bpm :: (Num a) => a
 bpm = 48
 
 -- | Make a bundled OSC message.
-aBundle :: Double -> Double -> [OSC]
+aBundle :: Double -> Double -> [Message]
 aBundle a p =
   [n_set 1101 []
   ,n_set 1102 [("mix", p)]
@@ -145,7 +144,7 @@ writeBreakPoints file = writeFile file $ unlines $ concatMap f
   ,("amp", ampE)]
   where
     f (n,bps) = map (g n) bps
-    g n (t,v) = unwords [show $ constantValue t, '=':n, show $ constantValue v]
+    g n (t,v) = unwords [show $ t, '=':n, show $ v]
 
 fnoiseE = [(0,0),(800,0),(900,1),(980,1),(1080,0),(1110,0),(1200,1)]
 
@@ -179,4 +178,4 @@ q0 =
 q1 = [0.0, 0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7]
 q2 = [0.8, 0.8, 0.8, 0.8, 0.9, 0.9, 0.9, 0.9]
 
-a0 = pcycle [plist [1, 0, 0, 0, 0, 0, 0, 0]]
+a0 = pcycle [pseq 1 [1, 0, 0, 0, 0, 0, 0, 0]]
