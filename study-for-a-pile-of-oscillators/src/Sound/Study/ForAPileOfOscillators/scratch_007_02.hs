@@ -5,11 +5,11 @@
 :cd src
 :load Sound.Study.ForAPileOfOscillators.A007
 
-:m + Sound.SC3 Sound.SC3.Lepton Sound.OpenSoundControl Control.Concurrent
+:m + Sound.SC3 Sound.SC3.Lepton Sound.OSC Control.Concurrent
 :set -XNoMonomorphismRestriction
 
-w reset
-w setup
+withSC3 reset
+withSC3 setup_a007
 
 e <- initEnvTU 0.42
 dumpEnv e

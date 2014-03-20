@@ -21,7 +21,7 @@ import Data.Map (Map, (!))
 import System.Random
 import qualified Data.Map as M
 
-import Sound.OpenSoundControl
+import Sound.OSC
 import Sound.SC3
 import Sound.SC3.ID
 import Sound.SC3.Lepton
@@ -31,29 +31,32 @@ import Sound.Study.ForAPileOfOscillators.Common
 main :: IO ()
 main = putStrLn "Not yet."
 
-setup :: (Transport t) => t -> IO OSC
-setup fd = do
-  mapM_ (uncurry writeSynthdef)
+setup_a007 :: Transport m => m Message
+setup_a007 = do
+  liftIO $ mapM_ (uncurry writeSynthdef)
     [("oc71",oc71),("oc72",oc72),("pc71",pc71),("pc72",pc72)
     ,("ac71",ac71),("ac72",ac72),("ac73",ac73)
     ,("lmtr",lmtr)]
-  reloadSynthdef fd
-  addNode 0 a007Nodes fd
-  async fd $ b_free pitchBuf
-  async fd $ b_alloc pitchBuf 256 1
+  reloadSynthdef
+  addNode 0 a007Nodes
+  async $ b_free pitchBuf
+  async $ b_alloc pitchBuf 256 1
 
 a007Nodes :: SCNode
 a007Nodes =
-  grp 1
-    [grp 11
-      [syn pc72Id "pc72" ["lagt":=100e-3]
-      ,syn ac71Id "ac71" []
-      ,syn ac72Id "ac72" []
-      ,syn ac73Id "ac73" []
-      ,syn oc71Id "oc71" ["pan":=0.9,"dmax":=800e-3]
-      ,syn oc72Id "oc72" ["pan":=0.8,"dmax":=1200e-3]]
-    ,grp 12 oscs
-    ,grp 13 [syn lmtrId "lmtr" []]]
+  g 1
+    [g 11
+      [s pc72Id "pc72" ["lagt":=100e-3]
+      ,s ac71Id "ac71" []
+      ,s ac72Id "ac72" []
+      ,s ac73Id "ac73" []
+      ,s oc71Id "oc71" ["pan":=0.9,"dmax":=800e-3]
+      ,s oc72Id "oc72" ["pan":=0.8,"dmax":=1200e-3]]
+    ,g 12 oscs
+    ,g 13 [s lmtrId "lmtr" []]]
+  where
+    g = Group
+    s = Synth
 
 oc71Id = 1100
 oc72Id = 1101
@@ -66,36 +69,36 @@ lmtrId = 1301
 
 bpm = 120
 
-setFreqBus fd =
-  flip send $ c_setn [(head fBusses, take numOsc [100,200..])]
+setFreqBus =
+  send $ c_setn [(head fBusses, take numOsc [100,200..])]
 
 nsetP nid ps = do
-  ms <- act $ runPIO $ sequenceA $ M.fromList ps
+  ms <- act $ runLIO $ sequenceA $ M.fromList ps
   forM_ ms $ \m -> do
-    act $ utcr >>= \t -> withSC3 $ \fd ->
-      send fd $ Bundle (UTCr (t+0.1)) [n_set nid (M.assocs m)]
+    act $ time >>= \t -> withSC3 $
+      sendOSC $ Bundle (t+0.1) [n_set nid (M.assocs m)]
     rest (m!"del")
     pauseHere
 
-goAtk p i fd = do
-  ms <- runPIO . sequenceA $ p
+goAtk p i = do
+  ms <- liftIO . runLIO . sequenceA $ p
   forM_ ms $ \m -> do
-    now <- utcr
-    send fd $ Bundle (UTCr (now+0.1)) [n_set i (M.assocs m)]
-    threadDelay (floor $ (60/bpm) * 1e6 * m ! "del")
+    now <- liftIO time
+    sendOSC $ Bundle (now+0.1) [n_set i (M.assocs m)]
+    liftIO $ threadDelay (floor $ (60/bpm) * 1e6 * m ! "del")
 
 pAtk1 = M.fromList
-  [("t_trig",pforever (pchoose 1 [1,1,1,1,0]))
-  ,("edgey",pcycle [2e-3, pchoose (prange 5 13) [998e-3,993e-3,997e-3]])
-  ,("del",pforever (pchoose 1 [1/2, 1/4, 1/4, 1/4]))
-  ,("mamp",pforever (prange 15e-3 3e-2))]
+  [("t_trig",pforever (prand 1 [1,1,1,1,0]))
+  ,("edgey",pcycle [2e-3, prand (pirange 5 13) [998e-3,993e-3,997e-3]])
+  ,("del",pforever (prand 1 [1/2, 1/4, 1/4, 1/4]))
+  ,("mamp",pforever (pdrange 15e-3 3e-2))]
 
 pAtk2 = M.fromList
   [("t_trig",pforever 1)
-  ,("edgey",pforever (pchoose 1 [999e-3,800e-3,750e-3]))
-  ,("del",pforever (plist [1,1/2,1/2, 1,1/2,1/2]))
-  ,("mamp",pcycle [0.03, pchoose 2 [prange 1e-2 1.5e-2]
-                  ,0.04, pchoose 2 [prange 1e-2 1.5e-2]])]
+  ,("edgey",pforever (prand 1 [999e-3,800e-3,750e-3]))
+  ,("del",pforever (pseq 1 [1,1/2,1/2, 1,1/2,1/2]))
+  ,("mamp",pcycle [0.03, prand 2 [pdrange 1e-2 1.5e-2]
+                  ,0.04, prand 2 [pdrange 1e-2 1.5e-2]])]
 
 bank1 = filter even oscIds
 bank2 = filter odd oscIds
@@ -108,8 +111,9 @@ oc7x' oids t_trig mamp edgey pan dmax = mrg $ concatMap mkO oids
   where
     mkO i = [out (ampBus i) amp, out (panBus i) pan']
       where
-        amp = envGen kr t_trig mamp 0 dur DoNothing $
-              env [0,0,1,0] [0,1-edgey,edgey] [EnvNum (-10)] (-1) 0
+        amp = envGen KR t_trig mamp 0 dur DoNothing $
+              Envelope [0,0,1,0] [0,1-edgey,edgey] [EnvNum (-10)]
+              (Just (-1)) (Just 0)
         dur = tExpRand i 5e-3 dmax t_trig
         pan' = tRand i (-pan) pan t_trig
 
@@ -123,9 +127,10 @@ ac72' amp freq edgey dmax = mrg $ map mkO oscIds
   where
     mkO i = out (ampBus i) sig
       where
-        sig = envGen kr tr amp 0 dur DoNothing $
-              env [0,0,1,0] [0,1-edgey,edgey] [EnvNum (-13)] (-1) 0
-        tr = dust i kr freq
+        sig = envGen KR tr amp 0 dur DoNothing $
+              Envelope [0,0,1,0] [0,1-edgey,edgey] [EnvNum (-13)]
+              (Just (-1)) (Just 0)
+        tr = dust i KR freq
         dur = tExpRand i 1e-4 dmax tr
 
 ac73 = ac73' ("amp"=:0.003) ("freq"=:1) ("edgey"=:0.5) ("dmax"=:1000e-1)
@@ -133,10 +138,11 @@ ac73' amp freq edgey dmax = mrg $ map mkO oscIds
   where
     mkO i = out (ampBus i) sig
       where
-        sig = envGen kr tr amp 0 dur DoNothing $
-              env [0,0,1,0] [0,1-edgey,edgey] [EnvNum (-13)] (-1) 0
+        sig = envGen KR tr amp 0 dur DoNothing $
+              Envelope [0,0,1,0] [0,1-edgey,edgey] [EnvNum (-13)]
+              (Just (-1)) (Just 0)
         dur = tExpRand i 1e-4 dmax tr
-        tr = impulse kr freq phase
+        tr = impulse KR freq phase
         phase = rand i 0 1
 
 pc71 = pc71' oscIds
@@ -152,35 +158,35 @@ pc72' oids t_trig lagt = mrg $ map mkO oids
   where
     mkO i = out (freqBus i) freq
       where
-        freq = envGen kr t_trig 1 0 1 DoNothing $
-               env [0,0,index pitchBuf (("idx_"++show i)=:i')]
-               [0,lagt] [EnvNum (-3)] (-1) 0
+        freq = envGen KR t_trig 1 0 1 DoNothing $
+               Envelope [0,0,index pitchBuf (("idx_"++show i)=:i')]
+               [0,lagt] [EnvNum (-3)] (Just (-1)) (Just 0)
         i' = fromIntegral (i `mod` numOsc)
 
 lmtr = replaceOut 0 $ mce [sig0, sig1]
   where
-    sig0 = lmt $ in' 1 ar 0
-    sig1 = lmt $ in' 1 ar 1
+    sig0 = lmt $ in' 1 AR 0
+    sig1 = lmt $ in' 1 AR 1
     lmt x = limiter x 1 0.2
 
 pitchBuf = 10
 
-setPitchBuf vs = withSC3 $ \fd -> do
-  async fd $ b_free pitchBuf
-  async fd $ b_alloc pitchBuf 256 1
-  send fd $ b_setn pitchBuf [(0,vs)]
+setPitchBuf vs = withSC3 $ do
+  async $ b_free pitchBuf
+  async $ b_alloc pitchBuf 256 1
+  send $ b_setn pitchBuf [(0,vs)]
 
 pf1 n i = setPitchBuf $ map midiCPS $
           take numOsc $ cycle $ takeWhile (< 127) $ iterate (+n) i
 
 rec3 :: MVar Int -> MVar Int -> Map Int Double -> Map Int Double -> Double -> Act ()
 rec3 mvChg mvThr p1 p2 f = do
-  now <- getNow
-  act $ withSC3 $ \fd ->
-    send fd $ Bundle (UTCr (now+0.1))
+  now <- time
+  act $ withSC3 $
+    sendOSC $ Bundle (now+0.1)
     [b_setn pitchBuf [(0,map midiCPS $ M.elems p1)]
     ,n_set pc72Id [("t_trig",1)]]
-  rt <- act $ runPIO $ pchoose 1 [0.25,0.5,1,2,4]
+  rt <- act $ runLIO $ prand 1 [0.25,0.5,1,2,4]
   chg <- act $ readMVar mvChg
   thr <- act $ readMVar mvThr
   rest $ head rt
@@ -188,34 +194,34 @@ rec3 mvChg mvThr p1 p2 f = do
   let diff = length $ M.elems p1 \\ M.elems p2
   if diff <= thr
     then do
-      shift <- act $ runPIO $ pchoose 1 [2,5,7,10]
-      mjr <- act $ runPIO $ pchoose 1 [pval True, pval False]
+      shift <- act $ runLIO $ prand 1 [2,5,7,10]
+      mjr <- act $ runLIO $ prand 1 [pint 1, pint 0]
       let shift' = head shift
           f' = fromIntegral $ (floor $ f+shift') `mod` 12
       fs <- recSeeds f' (head mjr)
       -- act $ putStrLn $ "f': " ++ show f' ++ " shift': " ++ show shift'
       rec3 mvChg mvThr p2 (M.fromList $ zip [0..255] fs) f'
     else do
-      idxs <- act $ runPIO $ pchoose (pval thr) [prange 0 (pval (numOsc-1))]
+      idxs <- act $ runLIO $ prand (pint thr) [pirange 0 (pint (numOsc-1))]
       let p1' = foldr (\k m -> M.update (const $ M.lookup k p2) k m) p1 idxs
       rec3 mvChg mvThr p1' p2 f
 
-recSeeds :: Double -> Bool -> Act [Double]
+recSeeds :: Double -> Int -> Act [Double]
 recSeeds shift maj =
-  act $ runPIO $ pcycle $ map pval $
+  act $ runLIO $ pcycle $ map pdouble $
     takeWhile (< 138) $ dropWhile (< 20) $
     zipWith (+) (cycle ps) $
     concatMap (replicate $ length ps) (map (+shift) [0,12..])
   where
     -- ps = [0,3,5,7,10]
-    ps = if maj then psMjr else psMnr
+    ps = if maj == 1 then psMjr else psMnr
     psMjr = [0,4,7]
     psMnr = [0,3,7]
 
 goRec3 :: MVar Int -> MVar Int -> Act ()
 goRec3 mvChg mvThr = do
-  f1 <- recSeeds 0 True
-  f2 <- recSeeds 7 True
+  f1 <- recSeeds 0 1 -- True
+  f2 <- recSeeds 7 1 -- True
   let p1 = M.fromList $ zip [0..255] f1
       p2 = M.fromList $ zip [0..255] f2
   rec3 mvChg mvThr p1 p2 0
