@@ -23,8 +23,8 @@ module Graphics.UI.Threepenny.Extra
  , getStaticDir
  ) where
 
+import           Control.Concurrent (newMVar, modifyMVar_, readMVar)
 import           Control.Monad (replicateM, void, when)
-import           Data.IORef (newIORef, readIORef, writeIORef)
 import           Data.Maybe (catMaybes)
 import           System.FilePath ((</>))
 import           Text.Printf (printf)
@@ -33,7 +33,7 @@ import qualified Graphics.UI.Threepenny as UI
 import           Graphics.UI.Threepenny.Core
 
 import           Sound.OSC.FD
-import           Sound.SC3.FD (serverStatusData)
+import           Sound.SC3.FD (dumpOSC, serverStatusData)
 
 import           Paths_study_for_user_interfaces (getDataDir)
 
@@ -92,7 +92,7 @@ hrange name minv maxv stepv iniv act = do
             # set style [("width","128px")]
     on change cval $ \_v -> do
         v <- get value cval
-        v' <- act (read v)
+        v' <- act $ read v
         element clab # set text v'
     UI.div
         #. "hrange-wrapper"
@@ -128,7 +128,7 @@ vrange name minv maxv stepv iniv act = do
             #. "vrange-label"
     on input cval $ \_v -> do
         v' <- get value cval
-        v'' <- act (read v')
+        v'' <- act $ read v'
         element clab # set text v''
     cclear <- UI.div
     UI.div
@@ -163,12 +163,14 @@ xyarea name size fxy = do
             vlabel <- fxy (x,y)
             void $ element param # set text vlabel
 
-    activeRef <- liftIO $ newIORef False
+    activeVar <- liftIO $ newMVar False
     on UI.mousemove area $ \xy -> do
-        active <- liftIO $ readIORef activeRef
+        active <- liftIO $ readMVar activeVar
         when active $ setxy xy
-    on UI.mousedown area $ \xy -> liftIO (writeIORef activeRef True) >> setxy xy
-    on UI.mouseup area $ \_ -> liftIO $ writeIORef activeRef False
+    on UI.mousedown area $ \xy ->
+        liftIO (modifyMVar_ activeVar (const $ return True)) >> setxy xy
+    on UI.mouseup area $ \_ ->
+        liftIO $ modifyMVar_ activeVar (const $ return False)
 
     wrapper <- UI.div
         #. "xyarea-wrapper"
@@ -193,12 +195,18 @@ statusDiv fd = do
         void $ element stSynths # set text (show (ssSynths st) ++ "s")
         void $ element stGroups # set text (show (ssGroups st) ++ "g")
         void $ element stInstruments # set text (show (ssInstruments st) ++ "d")
+    sel <- UI.select
+           #. "status-printlevel"
+           #+ map (\s -> UI.option # set text s)
+           ["NoPrinter","TextPrinter","HexPrinter","AllPrinter"]
+    on UI.selectionChange sel $ \v ->
+        liftIO $ maybe (return ()) (\v' -> sendOSC fd $ dumpOSC $ toEnum v') v
     stext <- UI.div
              #. "status-text"
              # set text "scsynth"
     stWrapper <- UI.div
              #. "status"
-             # set UI.children (stext:ds)
+             # set UI.children (stext:sel:ds)
     return (timer, stWrapper)
 
 -- | Data type to hold scsynth server status.

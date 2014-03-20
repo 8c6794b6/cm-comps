@@ -57,9 +57,9 @@ setup fd window = do
 
     let vr :: String -> Int
               -> Double -> Double -> Double -> Double -> UI Element
-        vr l n minv maxv stepv iniv =
+        vr l nid minv maxv stepv iniv =
             Extra.vrange l minv maxv stepv iniv $ \v -> do
-                liftIO $ send fd $ n_set n [(l,v)]
+                liftIO $ send fd $ n_set nid [(l,v)]
                 return $ printf "%3.2f" v
 
         vrm :: String -> Int -> Double -> Double -> Double -> UI Element
@@ -144,6 +144,7 @@ trig00 = out (control KR "out" 0) sig0
     beat = control KR "beat" 4
     bpm  = control KR "bpm" 128
 
+-- | Simple additive synth.
 add01 :: UGen
 add01 = out (control KR "out" 0) sig0
   where
@@ -168,6 +169,7 @@ add01 = out (control KR "out" 0) sig0
     hps  = control KR "hps" 0.3 `lag` 0.1
     tr1  = control KR "tr1" 0
 
+-- | Simple saw tooth oscillator.
 osc02 :: UGen
 osc02 = out (control KR "out" 1) sig0
   where
@@ -190,6 +192,7 @@ osc02 = out (control KR "out" 1) sig0
     cfhi     = control KR "cfhi" 8000 `lag` 0.1
     ftrr     = control KR "ftrr" (1/16) `lag` 0.1
 
+-- | Simple mixer.
 mixer01 :: UGen
 mixer01 = replaceOut 0 (sigs * dbAmp mamp)
   where
