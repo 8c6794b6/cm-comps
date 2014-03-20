@@ -1,0 +1,123 @@
+/****************************************************************************
+ *
+ * CSS used in GUIs of "study for user interface" package
+ *
+ ****************************************************************************/
+
+/*
+ * Common classes
+ */
+
+body {
+    margin: 0px;
+    padding: 0px;
+    font-size: 12px;
+}
+
+.common-param-label {
+    font-size: 10px;
+}
+
+/*
+ * textbox
+ */
+
+.textbox-wrapper {
+    padding: 5px 10px;
+}
+
+.textbox-label {
+    font-size: 10px;
+}
+
+.textbox-inval {
+    float: left;
+}
+
+/*
+ * hrange
+ */
+
+.hrange-wrapper {
+    padding: 5px 10px;
+}
+
+.hrange-label {
+    float: left;
+    padding-right: 10px;
+    font-size: 10px;
+}
+
+.hrange-input {
+}
+
+/*
+ * vrange
+ */
+
+.vrange-wrapper {
+    width: 50px;
+    display: block;
+    float: left;
+    text-align: center;
+}
+
+.vrange-input {
+    -webkit-appearance: slider-vertical;
+    width: 5px;
+}
+
+.vrange-label {
+    font-size: 10px;
+}
+
+/*
+ * xyarea
+ */
+
+.xyarea-label {
+    font-size: 10px;
+    text-align: left;
+}
+
+.xyarea-param {
+    font-size: 10px;
+    text-align: right;
+}
+
+.xyarea-control {
+    border: solid #6f6f66 1px;
+    background-color: #fafaee;
+}
+
+.xyarea-line {
+    background-color: #6f6f66;
+    position: relative;
+}
+
+.xyarea-wrapper {
+    padding: 10px;
+    float: left;
+}
+
+/*
+ * statusDiv
+ */
+
+.status {
+    border-bottom: solid 1px;
+    height: 14px;
+    padding: 5px;
+    margin: 0;
+}
+
+.status-param {
+    float: left;
+    width: 50px;
+    margin: 0 10px;
+    text-align: right;
+}
+
+.status-text {
+    float: left;
+}

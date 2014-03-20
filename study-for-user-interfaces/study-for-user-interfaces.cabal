@@ -1,0 +1,61 @@
+name:                study-for-user-interfaces
+version:             0.1.0.0
+synopsis:            Experimental codes for user intefaces.
+description:         Experimental codes for user intefaces.
+license:             BSD3
+license-file:        LICENSE
+author:              8c6794b6
+maintainer:          8c6794b6@gmail.com
+category:            Sound
+build-type:          Simple
+cabal-version:       >=1.10
+
+data-dir:            data
+
+library
+  exposed-modules:   Graphics.UI.Threepenny.Extra
+                     Sound.Study.ForUserInterfaces.SimpleRange
+                     Sound.Study.ForUserInterfaces.SimpleStatus
+                     Sound.Study.ForUserInterfaces.SimpleXY
+                     Sound.Study.ForUserInterfaces.GUI01
+                     Paths_study_for_user_interfaces
+  build-depends:     base >=4.6 && <4.7,
+                     filepath,
+                     hosc >= 0.14,
+                     hsc3 >= 0.14,
+                     threepenny-gui
+  hs-source-dirs:    src/lib
+  default-language:  Haskell2010
+  ghc-options:       -Wall
+
+executable simple-range
+  main-is:           simple-range.hs
+  hs-source-dirs:    src/exec
+  default-language:  Haskell2010
+  ghc-options:       -Wall -threaded -rtsopts
+  build-depends:     base >= 4.6 && <4.7,
+                     study-for-user-interfaces
+
+executable simple-status
+  main-is:           simple-status.hs
+  hs-source-dirs:    src/exec
+  default-language:  Haskell2010
+  ghc-options:       -Wall -threaded -rtsopts
+  build-depends:     base >= 4.6 && <4.7,
+                     study-for-user-interfaces
+
+executable simple-xy
+  main-is:           simple-xy.hs
+  hs-source-dirs:    src/exec
+  default-language:  Haskell2010
+  ghc-options:       -Wall -threaded -rtsopts
+  build-depends:     base >= 4.6 && <4.7,
+                     study-for-user-interfaces
+
+executable gui01
+  main-is:           gui01.hs
+  hs-source-dirs:    src/exec
+  default-language:  Haskell2010
+  ghc-options:       -Wall -threaded -rtsopts
+  build-depends:     base >= 4.6 && <4.7,
+                     study-for-user-interfaces
