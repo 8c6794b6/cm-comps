@@ -38,22 +38,22 @@ main = withSC3 $
         [ParamRange "fc" 0 8000
         ,ParamRange "vc" 0 0.2])]
 
--- writeA004Score :: FilePath -> IO ()
--- writeA004Score path = do
---   ps <- runPIO $ pat000
---   m1s <- runPIO $ sequenceA patA00
---   m2s <- runPIO $ sequenceA patF01
---   writeNRT path $ initial ++ zipWith3 f (take 1664 ps) m1s m2s ++ last
---   where
---     f p m1 m2 = Bundle (NTPr (0.5+(p*(1/4)*beat))) (oscAddition p msgs)
---       where
---         msgs = [n_set 1001 (M.assocs m1),n_set 1105 m2',n_set 1106 m2']
---         m2' = M.assocs m2
---     initial = map (\m -> Bundle (NTPr 0) [m])
---               (b_alloc pitchBuf (length pitches) 1:
---                b_setn pitchBuf [(0,pitches)]:
---                treeToNew 0 a004Nodes)
---     last = [Bundle (NTPr ((1664 * beat * (1/4))+1)) []]
+writeA004Score :: FilePath -> IO ()
+writeA004Score path = do
+  ps <- runLIO $ pat000
+  m1s <- runLIO $ sequenceA patA00
+  m2s <- runLIO $ sequenceA patF01
+  writeNRT path $ NRT $ initial ++ zipWith3 f (take 1664 ps) m1s m2s ++ last
+  where
+    f p m1 m2 = Bundle (0.5+(p*(1/4)*beat)) (oscAddition p msgs)
+      where
+        msgs = [n_set 1001 (M.assocs m1),n_set 1105 m2',n_set 1106 m2']
+        m2' = M.assocs m2
+    initial = map (\m -> Bundle 0 [m])
+              (b_alloc pitchBuf (length pitches) 1:
+               b_setn pitchBuf [(0,pitches)]:
+               treeToNew 0 a004Nodes)
+    last = [Bundle ((1664 * beat * (1/4))+1) []]
 
 setup_a004 :: Transport m => m Message
 setup_a004 = do

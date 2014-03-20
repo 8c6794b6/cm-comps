@@ -34,11 +34,11 @@ setup_a002 = do
   addNode 0 a002Tree
 
 -- | Write OSC message to file.
--- writeA002Score :: FilePath -> IO ()
--- writeA002Score path = do
---   let os = zipWith (\t m -> Bundle (NTPr t) [m]) (repeat 0) (treeToNew 0 a002Tree)
---       end = Bundle (NTPr $ 321 * 60 / bpm) []
---   writeNRT path $ os ++ [end]
+writeA002Score :: FilePath -> IO ()
+writeA002Score path = do
+  let os = zipWith (\t m -> Bundle t [m]) (repeat 0) (treeToNew 0 a002Tree)
+      end = Bundle (321 * 60 / bpm) []
+  writeNRT path $ NRT (os ++ [end])
 
 -- | Synth nodes for this piece.
 a002Tree :: SCNode

@@ -43,19 +43,19 @@ go = do
       sendOSC $ Bundle immediately (aBundle a p)
       liftIO $ threadDelay $ floor $ (60/bpm) * 1e6
 
--- writeA003Score :: FilePath -> IO ()
--- writeA003Score path = do
---   writeSynthdef "k003" k003
---   ps <- runPIO q0
---   as <- runPIO a0
---   writeNRT path $
---     initial ++ zipWith3 f ts as ps ++ last
---   where
---     f t a p = Bundle (NTPr (t+0.1)) (aBundle a p)
---     ts = scanl (+) 0 (repeat (60/bpm))
---     initial = map (\m -> Bundle (NTPr 0) [m]) (treeToNew 0 a003Nodes)
---     last = [Bundle (NTPr 422) []]
---     bundleTime m = case m of Bundle (NTPr t) _ -> t; _ -> 0
+writeA003Score :: FilePath -> IO ()
+writeA003Score path = do
+  writeSynthdef "k003" k003
+  ps <- runLIO q0
+  as <- runLIO a0
+  writeNRT path $
+    NRT (initial ++ zipWith3 f ts as ps ++ last)
+  where
+    f t a p = Bundle (t+0.1) (aBundle a p)
+    ts = scanl (+) 0 (repeat (60/bpm))
+    initial = map (\m -> Bundle 0 [m]) (treeToNew 0 a003Nodes)
+    last = [Bundle 422 []]
+    bundleTime m = case m of Bundle t _ -> t; _ -> 0
 
 bpm :: (Num a) => a
 bpm = 48
