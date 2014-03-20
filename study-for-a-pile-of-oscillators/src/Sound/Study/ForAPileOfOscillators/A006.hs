@@ -32,7 +32,7 @@ module Sound.Study.ForAPileOfOscillators.A006 where
 
 import Prelude
   ( Num(..), Fractional(..), Floating(..), Enum(..), Eq(..), Ord(..)
-  , FilePath, IO, Int
+  , FilePath, IO, Int, Maybe(..)
   , (||), (&&), (^)
   , putStr, error, even, otherwise
   , fromRational, fromIntegral, show )
@@ -46,14 +46,10 @@ import Data.Word (Word8)
 import Data.Tuple
 import qualified Data.ByteString.Lazy as L
 
--- import Control.DeepSeq
--- import Control.Parallel
--- import Control.Parallel.Strategies
-
 import Codec.PBM.Parser
 import Codec.PBM.Types
 import Data.List.Stream
-import Sound.OpenSoundControl
+import Sound.OSC
 import Sound.SC3
 import Sound.SC3.ID
 import Sound.SC3.Lepton
@@ -64,35 +60,38 @@ import Sound.Study.ForAPileOfOscillators.Common
 main :: IO ()
 main = putStr "No gui for A006"
 
-setup :: (Transport t) => t -> IO OSC
-setup fd = do
-  writeSynthdef "ac6" ac6
-  reloadSynthdef fd
+setup :: Transport m => m Message
+setup = do
+  liftIO $ writeSynthdef "ac6" ac6
+  reloadSynthdef
 
 -- | Write score from pgm image file.
 writePGMScore :: FilePath -> FilePath -> IO ()
 writePGMScore src dest = do
   dat <- getPGM src
   let os = zipWith f [1..] (transpose $ map mkOSC dat)
-      f t ms = map (Bundle (NTPr (t*timeScale)) . (:[])) ms
-      ini = map (Bundle (NTPr 0) . (:[])) $ (treeToNew 0 a006Nodes ++ initOSC)
-  writeNRT dest $ ini ++ concat os
+      f t ms = map (Bundle (t*timeScale) . (:[])) ms
+      ini = map (Bundle 0 . (:[])) $ (treeToNew 0 a006Nodes ++ initOSC)
+  writeNRT dest $ NRT $ ini ++ concat os
 
 -- | Write score from ppm image file.
 writePPMScore :: FilePath -> FilePath -> IO ()
 writePPMScore src dest = do
   arr <- getPPM src
   let os = zipWith f [1..] . transpose .  applyToPixmap f3 $ arr
-      f t ms = map (\m -> Bundle (NTPr (t*timeScale)) [m]) ms
-      ini = map (Bundle (NTPr 0) . (:[])) $ (treeToNew 0 a006Nodes ++ initOSC)
-  writeNRT dest $ ini ++ concat os
+      f t ms = map (\m -> Bundle (t*timeScale) [m]) ms
+      ini = map (Bundle 0 . (:[])) $ (treeToNew 0 a006Nodes ++ initOSC)
+  writeNRT dest $ NRT (ini ++ concat os)
 
 a006Nodes :: SCNode
 a006Nodes =
-  grp 1
-    [grp 10 []
-    ,grp 11 [syn hitId "ac6" ["amp":=ampScale,"ts":=timeScale]]
-    ,grp 12 oscs]
+  g 1
+    [g 10 []
+    ,g 11 [s hitId "ac6" ["amp":=ampScale,"ts":=timeScale]]
+    ,g 12 oscs]
+  where
+    g = Group
+    s = Synth
 
 hitId = 1100
 
@@ -102,7 +101,7 @@ freqOffset = 50
 freqScale = 0.985
 panDist = 0.35
 
-initOSC :: [OSC]
+initOSC :: [Message]
 initOSC = map f oscIds
   where
     f i = c_set [(freqBus i,fd+freqOffset),(panBus i,pan)]
@@ -117,8 +116,9 @@ ac6 = ac6' ("amp"=:0.1) ("ts"=:timeScale)
 ac6' amp ts = mrg $ map mkO oscIds
   where
     mkO i = out (fromIntegral $ ampBus i) . (* amp) . (* ampi) .
-            envGen kr trgi 1 0 duri DoNothing $
-            env [0,0,1,0] [0,atki,1-atki] [EnvNum crvi] (-1) 0
+            envGen KR trgi 1 0 duri DoNothing $
+            Envelope [0,0,1,0] [0,atki,1-atki] [EnvNum crvi]
+            (Just (-1)) (Just 0)
       where
         ampi = (("amp_"++i')=:1)
         trgi = (("t_trig_"++i')=:0)
@@ -133,7 +133,7 @@ type RGBFunc
  -> Word8 -- ^ Red, from 0 to 255
  -> Word8 -- ^ Green, from 0 to 255
  -> Word8 -- ^ Blue, from 0 to 255
- -> OSC
+ -> Message
 
 -- | The actual function that converting RGB data to OSC message of this piece.
 f3 :: RGBFunc
@@ -162,18 +162,18 @@ getPPM file = do
     Left err -> error err
 
 -- | Applys given RGBFunc to Pixmap.
-applyToPixmap :: RGBFunc -> Pixmap -> [[OSC]]
+applyToPixmap :: RGBFunc -> Pixmap -> [[Message]]
 applyToPixmap f a =
   map (map (\((y,x), (r,g,b)) -> f (inv y) r g b)) .
   groupBy ((==) `on` (fst . fst)) . assocs $ a
   where
     inv i = let (_,(m,_)) = bounds a in m - i
 
--- | Make OSC for each row of image.
+-- | Make OSC message for each row of image.
 --
 -- Used with PGM image.
 --
-mkOSC :: (Int, [Word8]) -> [OSC]
+mkOSC :: (Int, [Word8]) -> [Message]
 mkOSC (i,ws) = map f ws
   where
     f w =
