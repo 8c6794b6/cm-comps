@@ -18,6 +18,7 @@ Executable sfapoo
     -Wall
     -fno-warn-unused-do-bind
     -O2
+    -rtsopts
   hs-source-dirs:
     src
   main-is:
