@@ -28,6 +28,14 @@
 -- Doing @parMap rpdeepseq@ and @parMap rpar@ inside @applyToPixmap@ function,
 -- writing OSC file with single core take around 7 seconds, 2 cores is 5 secs.
 --
+-- Input image could be created with @convert@ command from ImageMagick. Below
+-- is a sample sequence to convert @\"input.jpg\"@ and generate audio file
+-- @\"out.wav\"@ with scsynth:
+--
+-- > $ convert input.jpg -resize x256\! tmp.ppm
+-- > $ sfapoo readppm -i tmp.ppm -o tmp.osc
+-- > $ scsynth -N tmp.osc _ out.wav 48000 wav int32 -o 2
+--
 module Sound.Study.ForAPileOfOscillators.A006 where
 
 import Prelude
