@@ -60,8 +60,8 @@ import Sound.Study.ForAPileOfOscillators.Common
 main :: IO ()
 main = putStr "No gui for A006"
 
-setup :: Transport m => m Message
-setup = do
+setup_a006 :: Transport m => m Message
+setup_a006 = do
   liftIO $ writeSynthdef "ac6" ac6
   reloadSynthdef
 
