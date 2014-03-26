@@ -52,6 +52,7 @@ import Sound.SC3.FD
 import Sound.SC3.UGen.ID
 import Sound.SC3.Lepton hiding (bufSampleRate)
 import Sound.SC3.Lepton.GUI
+import Sound.SC3.Tree
 
 -- | Show GUI.
 showGUI :: Transport t => Connection t ()
