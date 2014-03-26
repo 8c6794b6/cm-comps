@@ -18,6 +18,7 @@ import Sound.OSC
 import Sound.SC3
 import Sound.SC3.ID
 import Sound.SC3.Lepton
+import Sound.SC3.Tree
 
 setup = do
   mapM_ (\(n,u) -> loadSynthdef n u)

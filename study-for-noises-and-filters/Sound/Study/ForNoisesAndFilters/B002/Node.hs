@@ -14,6 +14,8 @@ module Sound.Study.ForNoisesAndFilters.B002.Node where
 import Sound.OSC
 import Sound.SC3
 import Sound.SC3.Lepton
+import Sound.SC3.Tree
+
 import Sound.Study.ForNoisesAndFilters.B002.Synthdef
 
 go :: Transport m => m ()

@@ -19,6 +19,7 @@ import Sound.OSC
 import Sound.SC3
 import Sound.SC3.ID
 import Sound.SC3.Lepton hiding (tu)
+import Sound.SC3.Tree
 
 main :: IO ()
 main = do
@@ -180,7 +181,7 @@ n0 =
 bp03_n = syn "bp03" ["out"*=100]
 bp07_n = syn "bp07" ["out"*=102]
 
-bp05_n = syn' 3999 "bp05" ["amp2"*<-prmv bp07_n "out"]
+bp05_n = syn' 3999 "bp05" ["amp2"*<-bp07_n-*"out"]
 bp02_n = syn "bp02" ["in"*=0,"out"*=0]
 
 

@@ -38,4 +38,5 @@ Library
     hosc >= 0.14,
     hsc3 >= 0.14,
     hsc3-lepton,
+    hsc3-tree,
     random -any
