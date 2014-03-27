@@ -11,7 +11,6 @@ Simple example with xy coordinate area.
 -}
 module Sound.Study.ForUserInterfaces.SimpleXY where
 
-import           Control.Concurrent (forkIO, killThread)
 import           Control.Monad (void)
 import           Text.Printf (printf)
 
@@ -29,8 +28,7 @@ main = withSC3 $ \fd -> do
     mapM_ (async fd . d_recv . uncurry synthdef)
         [("noiz1", noiz1),("noiz2",noiz2),("noiz3",noiz3)]
     static <- Extra.getStaticDir
-    tid <- forkIO $ startGUI defaultConfig {tpStatic=Just static} (setup fd)
-    getChar >> killThread tid
+    startGUI defaultConfig {tpStatic=Just static} (setup fd)
 
 -- | Synth used in this example.
 noiz1 :: UGen
