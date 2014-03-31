@@ -27,6 +27,7 @@ library
                    , hosc >= 0.14
                    , hsc3 >= 0.14
                    , hsc3-db
+                   , hsc3-th
                    , hsc3-tree
                    , mtl
                    , random
