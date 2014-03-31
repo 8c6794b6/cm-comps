@@ -12,7 +12,7 @@ Graphical user interface, take 1.
 -}
 module Sound.Study.ForUserInterfaces.GUI01 where
 
-import           Control.Monad (forM, unless, void, when)
+import           Control.Monad (unless, void)
 import           Control.Monad.Reader (runReaderT)
 import           Data.Maybe (catMaybes)
 import           Text.Printf (printf)
@@ -132,23 +132,7 @@ setup fd window = do
         return $ printf "(%3.2f,%3.2f)" x' y'
 
     -- buffer --
-    -- let bufbox bnum = do
-    --         let lbl = "buf " ++ show bnum
-    --         (wrapper,chks) <- hcheckbox lbl 16 $ \n isChecked ->
-    --             liftIO $ send fd $ b_set bnum [(n,if isChecked then 1 else 0)]
-    --         vals <- liftIO $ queryBuffer bnum fd
-    --         zipWithM_ (\c v -> element c # set UI.checked (v==1)) chks vals
-    --         return wrapper
-
-    -- To query a node containing `"bufn":=100` parameter:
-    --
-    -- > queryN (params (id ==? "bufn":=100)) currentNodes
-    --
-    -- chk100 <- bufbox 0
-    -- chk101 <- bufbox 1
-
-    -- grid boxes --
-    (gridboxes, _boxes) <- toggleBoxes 32 12 $ \(i,j) val ->
+    (gridboxes, _boxes) <- Extra.toggleBoxes 32 12 $ \(i,j) val ->
         liftIO $ send fd $ b_set i [(j, fromIntegral val)]
 
     -- mixer --
@@ -164,7 +148,7 @@ setup fd window = do
 
     -- layout --
     mapM_ (\e -> element e # set style [("float","left")])
-        ([bpm, add01faf, add01hps, osc02xy {- , chk100, chk101 -}] ++ pos_x_amps)
+        ([bpm, add01faf, add01hps, osc02xy] ++ pos_x_amps)
     let divClear = UI.div # set style [("clear","both")]
     void $ getBody window #+
         [ element stDiv
@@ -184,7 +168,6 @@ setup fd window = do
             set style
             [("padding","5px"),("float","left"),("margin-bottom", "10px")] #+
             [element add01faf, element add01hps, element osc02xy
-            -- ,element chk100, element chk101
             ]
           , divClear
           , UI.new #
@@ -194,96 +177,6 @@ setup fd window = do
           ]
         ]
     UI.start tmr
-
--- | Returns checkbox in horizontal sequence.
-hcheckbox ::
-    String -- ^ Label name
-    -> Int -- ^ Number of checkboxes.
-    -> (Int -> Bool -> UI ())
-    -- ^ Action taken on check, with index value and 'True' on check, 'False' on
-    -- uncheck.
-    -> UI (Element, [Element])
-hcheckbox lbl n act = do
-    checks <- forM [0..n-1] $ \m -> do
-        cbox <- UI.input # set UI.type_ "checkbox"
-        on UI.checkedChange cbox $ act m
-        return cbox
-    lbldiv <- UI.div
-        # set text lbl
-        # set style [("float","left")
-                    ,("font-size","10px")
-                    ,("padding","4px 5px 0 5px")
-                    ]
-    wrapper <- UI.div
-        #+ (element lbldiv : map element checks)
-        # set style [("padding","10px 10px 0 10px")]
-    return (wrapper, checks)
-
--- | Returns grid of toggle boxes.
-toggleBoxes ::
-    Int
-    -> Int
-    -> ((Int,Int) -> Int -> UI ())
-    -> UI (Element, [((Int,Int), Element)])
-toggleBoxes w h act = do
-    let width = 25 :: Int
-        height = 20 :: Int
-    columns_x_boxes <- forM [0..h-1] $ \rowi -> do
-        columWrap <- UI.div # set style
-                     [("clear","both")
-                     ,("height",show height ++ "px")
-                     ]
-        boxes <- forM [0..w-1] $ \coli -> do
-            box <- UI.div
-                   # set style [("width",show width ++ "px")
-                               ,("height",show height ++ "px")
-                               ,("float","left")
-                               ,("border-right","solid 1px")
-                               ,("border-bottom","solid 1px")
-                               ,("font-size","8px")
-                               ]
-                   # set value "0"
-            when (coli `mod` 4 == 0 && rowi `mod` 4 == 0) $
-                void $ element box # set UI.text (show coli)
-            on UI.click box $ \_ -> do
-                val <- toggleBox box
-                void $ act (rowi,coli) val
-            return ((rowi,coli),box)
-        clm <- element columWrap #+ map (element . snd) boxes
-        return (clm, boxes)
-    wrapper <- UI.div # set style
-               [("border-top","solid 1px")
-               ,("border-left","solid 1px")
-               ,("width",show ((width+1) * w) ++ "px")
-               ,("float","left")
-               ]
-    let (columns, boxes) = unzip columns_x_boxes
-    wrapper' <- element wrapper #+ map element columns
-    return (wrapper', concat boxes)
-
--- | Toggle value and background colour of single box.
-toggleBox ::
-    Element   -- ^ Div element of box, returned from 'toggleBoxes'.
-    -> UI Int -- ^ Value after the toggle.
-toggleBox box = do
-    val <- box # get UI.value
-    if val == "0"
-       then turnOnBox box >> return 1
-       else turnOffBox box >> return 0
-
--- | Turn on the box element returned from 'toggleBoxes'.
-turnOnBox :: Element -> UI Element
-turnOnBox box =
-    element box
-        # set style [("background-color","#888")]
-        # set UI.value "1"
-
--- | Turn off the box element returned from 'toggleBoxes'.
-turnOffBox :: Element -> UI Element
-turnOffBox box =
-    element box
-        # set style [("background-color","#fff")]
-        # set UI.value "0"
 
 
 -- --------------------------------------------------------------------------

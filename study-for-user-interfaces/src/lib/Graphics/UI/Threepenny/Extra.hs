@@ -14,6 +14,11 @@ module Graphics.UI.Threepenny.Extra
    textbox
  , hrange
  , vrange
+ , hcheckbox
+ , toggleBoxes
+ , toggleBox
+ , turnOnBox
+ , turnOffBox
  , xyarea
  , statusDiv
    -- * Event
@@ -24,7 +29,7 @@ module Graphics.UI.Threepenny.Extra
  ) where
 
 import           Control.Concurrent (newMVar, modifyMVar_, readMVar)
-import           Control.Monad (replicateM, void, when)
+import           Control.Monad (forM, replicateM, void, when)
 import           Data.Maybe (catMaybes)
 import           System.FilePath ((</>))
 import           Text.Printf (printf)
@@ -135,6 +140,100 @@ vrange name minv maxv stepv iniv act = do
         #. "vrange-wrapper"
         # set style [("padding","10px 2px")]
         #+ map element [cnam, cval, cclear, clab]
+
+-- | Returns checkbox in horizontal sequence.
+hcheckbox ::
+    String -- ^ Label name
+    -> Int -- ^ Number of checkboxes.
+    -> (Int -> Bool -> UI ())
+    -- ^ Action taken on check, with index value and 'True' on check, 'False' on
+    -- uncheck.
+    -> UI (Element, [Element])
+hcheckbox lbl n act = do
+    checks <- forM [0..n-1] $ \m -> do
+        cbox <- UI.input # set UI.type_ "checkbox"
+        on UI.checkedChange cbox $ act m
+        return cbox
+    lbldiv <- UI.div
+        # set text lbl
+        # set style [("float","left")
+                    ,("font-size","10px")
+                    ,("padding","4px 5px 0 5px")
+                    ]
+    wrapper <- UI.div
+        #+ (element lbldiv : map element checks)
+        # set style [("padding","10px 10px 0 10px")]
+    return (wrapper, checks)
+
+-- | Returns grid of toggle boxes.
+toggleBoxes ::
+    Int    -- ^ Number of columns.
+    -> Int -- ^ Number of rows.
+    -> ((Int,Int) -> Int -> UI ())
+    -- ^ Action for each toggle box. Passed arguments are: (row index, column
+    -- index) and 0 for the box being off and 1 for being on.
+    -> UI (Element, [((Int,Int), Element)])
+    -- ^ A pair of whole wrapper contents and each toggle box with (row,column)
+    -- index.
+toggleBoxes ncol nrow act = do
+    let width = 25 :: Int
+        height = 20 :: Int
+    columns_x_boxes <- forM [0..nrow-1] $ \rowi -> do
+        columWrap <- UI.div # set style
+                     [("clear","both")
+                     ,("height",show height ++ "px")
+                     ]
+        boxes <- forM [0..ncol-1] $ \coli -> do
+            box <- UI.div
+                   # set style [("width",show width ++ "px")
+                               ,("height",show height ++ "px")
+                               ,("float","left")
+                               ,("border-right","solid 1px")
+                               ,("border-bottom","solid 1px")
+                               ,("font-size","8px")
+                               ]
+                   # set value "0"
+            when (coli `mod` 4 == 0 && rowi `mod` 4 == 0) $
+                void $ element box # set UI.text (show coli)
+            on UI.click box $ \_ -> do
+                val <- toggleBox box
+                void $ act (rowi,coli) val
+            return ((rowi,coli),box)
+        clm <- element columWrap #+ map (element . snd) boxes
+        return (clm, boxes)
+    wrapper <- UI.div # set style
+               [("border-top","solid 1px")
+               ,("border-left","solid 1px")
+               ,("width",show ((width+1) * ncol) ++ "px")
+               ,("float","left")
+               ]
+    let (columns, boxes) = unzip columns_x_boxes
+    wrapper' <- element wrapper #+ map element columns
+    return (wrapper', concat boxes)
+
+-- | Toggle value and background colour of single box.
+toggleBox ::
+    Element   -- ^ Div element of box, returned from 'toggleBoxes'.
+    -> UI Int -- ^ Value after the toggle.
+toggleBox box = do
+    val <- box # get UI.value
+    if val == "0"
+       then turnOnBox box >> return 1
+       else turnOffBox box >> return 0
+
+-- | Turn on the box element returned from 'toggleBoxes'.
+turnOnBox :: Element -> UI Element
+turnOnBox box =
+    element box
+        # set style [("background-color","#888")]
+        # set UI.value "1"
+
+-- | Turn off the box element returned from 'toggleBoxes'.
+turnOffBox :: Element -> UI Element
+turnOffBox box =
+    element box
+        # set style [("background-color","#fff")]
+        # set UI.value "0"
 
 -- | Returns a div element with controllable XY coordinates.
 xyarea ::
