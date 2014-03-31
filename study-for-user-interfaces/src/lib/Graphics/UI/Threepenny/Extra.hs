@@ -14,6 +14,8 @@ module Graphics.UI.Threepenny.Extra
    textbox
  , hrange
  , vrange
+ , hslider
+ , vslider
  , hcheckbox
  , toggleBoxes
  , toggleBox
@@ -28,9 +30,9 @@ module Graphics.UI.Threepenny.Extra
  , getStaticDir
  ) where
 
-import           Control.Concurrent (newMVar, modifyMVar_, readMVar)
 import           Control.Monad (forM, replicateM, void, when)
 import           Data.Maybe (catMaybes)
+import           Data.IORef (newIORef, readIORef, writeIORef)
 import           System.FilePath ((</>))
 import           Text.Printf (printf)
 
@@ -49,7 +51,7 @@ import           Paths_study_for_user_interfaces (getDataDir)
 --
 -- --------------------------------------------------------------------------
 
--- | Simple text box with @<input type="text">@.
+-- | Simple text box with @\<input type=\"text\"\>@.
 textbox ::
     String               -- ^ Label name.
     -> Int               -- ^ Width, in pixel.
@@ -69,7 +71,7 @@ textbox name width iniv fv = do
     UI.div #. "textbox-wrapper"
         #+ [element label, element inval]
 
--- | Horizontal slider with @<input type="range">@.
+-- | Horizontal slider with @\<input type=\"range\"\>@.
 hrange ::
     String    -- ^ Label to show.
     -> Double -- ^ Minimum value.
@@ -103,8 +105,7 @@ hrange name minv maxv stepv iniv act = do
         #. "hrange-wrapper"
         #+ [element cnam, element clab, UI.div, element cval]
 
-
--- | Vertical slider with @<input type="range">@.
+-- | Vertical slider with @\<input type=\"range\"\>@.
 vrange ::
     String    -- ^ Label to show.
     -> Double -- ^ Minimum value.
@@ -140,6 +141,81 @@ vrange name minv maxv stepv iniv act = do
         #. "vrange-wrapper"
         # set style [("padding","10px 2px")]
         #+ map element [cnam, cval, cclear, clab]
+
+-- | Vertical slider.
+vslider ::
+    String                   -- ^ Label to show.
+    -> Double                -- ^ Min value.
+    -> Double                -- ^ Max value.
+    -> Double                -- ^ Initial value.
+    -> (Double -> UI String) -- ^ Action to take with slider value.
+    -> UI Element
+vslider = mk_slider 'v'
+
+-- | Horizontal slider.
+hslider ::
+    String                   -- ^ Label to show.
+    -> Double                -- ^ Min value.
+    -> Double                -- ^ Max value.
+    -> Double                -- ^ Initial value.
+    -> (Double -> UI String) -- ^ Action to take with slider value.
+    -> UI Element
+hslider = mk_slider 'h'
+
+-- | Make slider.
+mk_slider ::
+    Char
+    -> String
+    -> Double
+    -> Double
+    -> Double
+    -> (Double -> UI String)
+    -> UI Element
+mk_slider axis label minv maxv iniv act = do
+    let fixedlen = 128 :: Int
+        (faxis,vallen) = case axis of
+            'v' -> (snd,"height")
+            'h' -> (fst,"width")
+            _   -> error ("Invalid axis: " ++ show axis)
+        inivallen = show inivallen'
+        fixedlen_d = fromIntegral fixedlen :: Double
+        inivallen' :: Int
+        inivallen' = ceiling (fixedlen_d * ((iniv - minv) / (maxv - minv)))
+
+    label' <- UI.div # set UI.text label
+    sld <- UI.div
+           #. (axis:"slider-sld")
+           # set UI.style [(vallen, show fixedlen ++ "px")]
+    val <- UI.div
+           #. (axis:"slider-val")
+           # set UI.style [(vallen, inivallen ++ "px")]
+    param <- UI.div # set UI.text (show iniv)
+
+    let setv v = do
+            let fixedlen' = case axis of
+                    'v' -> fixedlen - faxis v
+                    _   -> faxis v
+                fixedlen'_d = fromIntegral fixedlen'
+                v'  = minv + (maxv-minv) * fixedlen'_d / fromIntegral fixedlen
+            void $ element val #
+                set UI.style [(vallen, show fixedlen' ++ "px")]
+            v'' <- act v'
+            void $ element param # set UI.text v''
+
+    activeRef <- liftIO $ newIORef False
+
+    on UI.mousemove sld $ \xy -> do
+        active <- liftIO $ readIORef activeRef
+        when active $ setv xy
+    on UI.mousedown sld $ \xy ->
+        liftIO (writeIORef activeRef True) >> setv xy
+    on UI.mouseup sld $ \_ ->
+        liftIO $ writeIORef activeRef False
+
+    UI.div
+        #. (axis:"slider-wrapper")
+        #+ [ element label'
+           , element sld #+ [ element val ], element param ]
 
 -- | Returns checkbox in horizontal sequence.
 hcheckbox ::
@@ -262,14 +338,15 @@ xyarea name size fxy = do
             vlabel <- fxy (x,y)
             void $ element param # set text vlabel
 
-    activeVar <- liftIO $ newMVar False
+    activeRef <- liftIO $ newIORef False
     on UI.mousemove area $ \xy -> do
-        active <- liftIO $ readMVar activeVar
+        active <- liftIO $ readIORef activeRef
         when active $ setxy xy
-    on UI.mousedown area $ \xy ->
-        liftIO (modifyMVar_ activeVar (const $ return True)) >> setxy xy
+    on UI.mousedown area $ \xy -> do
+        liftIO $ writeIORef activeRef True
+        setxy xy
     on UI.mouseup area $ \_ ->
-        liftIO $ modifyMVar_ activeVar (const $ return False)
+        liftIO $ writeIORef activeRef False
 
     wrapper <- UI.div
         #. "xyarea-wrapper"

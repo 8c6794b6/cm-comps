@@ -12,6 +12,7 @@ Graphical user interface, take 1.
 -}
 module Sound.Study.ForUserInterfaces.GUI01 where
 
+import           Control.Concurrent (forkIO, killThread)
 import           Control.Monad (unless, void)
 import           Control.Monad.Reader (runReaderT)
 import           Data.Maybe (catMaybes)
@@ -42,11 +43,12 @@ main = withSC3 $ \fd -> do
     mapM_ (async fd . d_recv) $(synthdefGenerator)
     runReaderT (patchNode $ nodify nodes) fd
     static <- Extra.getStaticDir
-    startGUI defaultConfig {tpStatic=Just static} (setup fd)
+    tid <- forkIO $ startGUI defaultConfig {tpStatic=Just static} (setup fd)
+    getChar >> killThread tid
 
 nodes :: Nd
 nodes =
-  let t00 = syn "trig00" ["out"*=100,"bpm"*=128]
+  let t00 = syn "trig00" ["out"*=100,"bpm"*=128,"beat"*=4]
       rbufrd outn bufn =
           syn "rbufrd01" ["out"*=outn,"bufn"*=bufn,"len"*=32,"tr0"*<-t00-*"out"]
       t01 = rbufrd 101 0
@@ -54,21 +56,24 @@ nodes =
       t03 = rbufrd 103 2
   in  grp 0
       [ grp 1
-        [ t00, t01, t02, t03 ]
-      , grp 2
-        [ syn "add01"
-          ["out"*=0,"tr1"*<-t00-*"out","faf"*=9.45,"hps"*=2.80]
-        , syn "osc02"
-          ["out"*=1,"tr1"*<-t00-*"out","cfhi"*=7562,"ftrr"*=0.1]
-        , syn "bd01"
-          ["out"*=2,"freq"*=70,"dur"*=0.12,"t_tr0"*<-t01-*"out"]
-        , syn "hat01"
-          ["out"*=3,"t_tr0"*<-t02-*"out"]
-        , syn "snr01"
-          ["out"*=4,"t_tr0"*<-t03-*"out"]
+        [ grp 10
+          [ t00, t01, t02, t03 ]
+        , grp 11
+          [ syn "add01"
+            ["out"*=0,"tr1"*<-t00-*"out","faf"*=9.45,"hps"*=2.80]
+          , syn "osc02"
+            ["out"*=1,"tr1"*<-t00-*"out","cfhi"*=7562,"ftrr"*=0.1]
+          , syn "bd01"
+            ["out"*=2,"freq"*=70,"dur"*=0.12,"t_tr0"*<-t01-*"out"]
+          , syn "hat01"
+            ["out"*=3,"t_tr0"*<-t02-*"out"]
+          , syn "snr01"
+            ["out"*=4,"t_tr0"*<-t03-*"out"]
+          ]
+        , grp 12
+          [ syn "mixer01" [] ]
         ]
-      , grp 3
-        [ syn "mixer01" [] ]
+      , grp 2 []
       ]
 
 -- | Setup GUI with given 'Transport'.
@@ -84,7 +89,8 @@ setup fd window = do
         queryParam name node =
             case queryP' (paramName ==? name) node of
                 Just (name' := val) | name == name' -> val
-                _ -> error $ unwords ["no", name, "in", show node]
+                _                                   ->
+                    error $ unwords ["no", name, "found in", show node]
         tr00node = queryByName "trig00"
         tr00nid  = nodeId tr00node
         add01node = queryByName "add01"
@@ -98,9 +104,9 @@ setup fd window = do
     (tmr,stDiv) <- Extra.statusDiv fd
 
     let vr ::
-            String -> Int -> Double -> Double -> Double -> Double -> UI Element
-        vr l nid minv maxv stepv iniv =
-            Extra.vrange l minv maxv stepv iniv $ \v -> do
+            String -> Int -> Double -> Double -> Double -> UI Element
+        vr l nid minv maxv iniv =
+            Extra.vslider l minv maxv iniv $ \v -> do
                 liftIO $ send fd $ n_set nid [(l,v)]
                 return $ printf "%3.2f" v
 
@@ -111,7 +117,7 @@ setup fd window = do
         let vs = reads v
         unless (null vs) $ liftIO $
             send fd $ n_set tr00nid [("bpm",fst $ head vs)]
-    beat <- Extra.hrange "beat (2**(v/4))" 0 32 1 iniBeatVal $ \v -> do
+    beat <- Extra.hslider "beat (2**(v/4))" 0 32 iniBeatVal $ \v -> do
         liftIO $ send fd $ n_set tr00nid [("beat",2**(v/4))]
         return $ show v
     mapM_ (\e -> element e # set style [("float","left")]) [bpm, beat]
@@ -119,8 +125,10 @@ setup fd window = do
     -- add01 --
     let iniFafVal = queryParam "faf" add01node
         iniHpsVal = queryParam "hps" add01node
-    add01faf <- vr "faf" add01nid 0.2 30 0.05 iniFafVal
-    add01hps <- vr "hps" add01nid 0.1 10 0.05 iniHpsVal
+    add01faf <- vr "faf" add01nid 0.2 30
+                (read (printf "%3.2f" iniFafVal) :: Double)
+    add01hps <- vr "hps" add01nid 0.1 10
+                (read (printf "%3.2f" iniHpsVal) :: Double)
 
     -- osc01 --
     let xysiz :: Num a => a
@@ -136,9 +144,9 @@ setup fd window = do
         liftIO $ send fd $ b_set i [(j, fromIntegral val)]
 
     -- mixer --
-    mamp <- vr  "mamp" mixer01nid (-60) 25 0.1 0
+    mamp <- vr "mamp" mixer01nid (-60) 25 0
     let vrm :: String -> Int -> Double -> Double -> Double -> UI Element
-        vrm l n minv maxv iniv = vr (l++show n) mixer01nid minv maxv 0.01 iniv
+        vrm l n minv maxv iniv = vr (l++show n) mixer01nid minv maxv iniv
         pos_x_amp n = do
             pos <- vrm "pos" n (-1) 1 0
             amp <- vrm "amp" n (-60) 25 0
@@ -147,9 +155,11 @@ setup fd window = do
     mstr <- UI.new #+ map element (mamp : pos_x_amps)
 
     -- layout --
+    let divClear = UI.div # set style [("clear","both")]
+
     mapM_ (\e -> element e # set style [("float","left")])
         ([bpm, add01faf, add01hps, osc02xy] ++ pos_x_amps)
-    let divClear = UI.div # set style [("clear","both")]
+
     void $ getBody window #+
         [ element stDiv
         , UI.new #
@@ -167,7 +177,8 @@ setup fd window = do
           , UI.new #
             set style
             [("padding","5px"),("float","left"),("margin-bottom", "10px")] #+
-            [element add01faf, element add01hps, element osc02xy
+            [ element add01faf, element add01hps
+            , element osc02xy
             ]
           , divClear
           , UI.new #
@@ -246,11 +257,11 @@ synth_osc02 = out (control KR "out" 1) sig0
 synth_rbufrd01 :: UGen
 synth_rbufrd01 = out (control KR "out" 0) sig
   where
-    sig   = coinGate 'g' (bufRdN 1 KR bufn idx Loop) tr0
-    bufn  = control KR "bufn" 100
-    idx   = gate (stepper tr0 0 0 (len-1) 1 0) tr0
-    len   = control KR "len" 16
-    tr0   = control KR "tr0" 1
+    sig  = coinGate 'g' (bufRdN 1 KR bufn idx Loop) tr0
+    bufn = control KR "bufn" 100
+    idx  = gate (stepper tr0 0 0 (len-1) 1 0) tr0
+    len  = control KR "len" 16
+    tr0  = control KR "tr0" 1
 
 -- | Simple bass drum sound.
 synth_bd01 :: UGen
