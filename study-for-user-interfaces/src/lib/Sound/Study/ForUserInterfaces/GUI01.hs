@@ -106,7 +106,7 @@ setup fd window = do
     let vr ::
             String -> Int -> Double -> Double -> Double -> UI Element
         vr l nid minv maxv iniv =
-            Extra.vslider l minv maxv iniv $ \v -> do
+            Extra.vslider l 30 128 minv maxv iniv $ \v -> do
                 liftIO $ send fd $ n_set nid [(l,v)]
                 return $ printf "%3.2f" v
 
@@ -117,7 +117,7 @@ setup fd window = do
         let vs = reads v
         unless (null vs) $ liftIO $
             send fd $ n_set tr00nid [("bpm",fst $ head vs)]
-    beat <- Extra.hslider "beat (2**(v/4))" 0 32 iniBeatVal $ \v -> do
+    beat <- Extra.hslider "beat (2**(v/4))" 128 20 0 32 iniBeatVal $ \v -> do
         liftIO $ send fd $ n_set tr00nid [("beat",2**(v/4))]
         return $ show v
     mapM_ (\e -> element e # set style [("float","left")]) [bpm, beat]
@@ -144,45 +144,59 @@ setup fd window = do
         liftIO $ send fd $ b_set i [(j, fromIntegral val)]
 
     -- mixer --
+    let divClear = UI.div # set style [("clear","both")]
     mamp <- vr "mamp" mixer01nid (-60) 25 0
+            # set UI.style [("float","left")
+                           ,("margin","5px 0 0 0")
+                           ]
     let vrm :: String -> Int -> Double -> Double -> Double -> UI Element
         vrm l n minv maxv iniv = vr (l++show n) mixer01nid minv maxv iniv
-        pos_x_amp n = do
-            pos <- vrm "pos" n (-1) 1 0
+        amp_x_pan n = do
             amp <- vrm "amp" n (-60) 25 0
-            return [pos,amp]
-    pos_x_amps <- concat <$> mapM pos_x_amp [0..4]
-    mstr <- UI.new #+ map element (mamp : pos_x_amps)
+                   # set style [("float","left")
+                               ,("margin","5px 0 15px 5px")
+                               ]
+            pan <- Extra.hslider "pan" 40 12 (-1) 1 0 $ \v -> do
+                liftIO $ send fd $ n_set mixer01nid [("pos"++show n,v)]
+                return $ printf "%3.2f" v
+            element pan # set UI.style [("float","left")]
+            UI.new
+                #+ [element amp, divClear, element pan]
+                # set UI.style [("padding","0 10px 10px 0")]
+    amp_x_pans <- mapM amp_x_pan [0..4]
+    mstr <- UI.new #+ map element (mamp : amp_x_pans)
 
     -- layout --
-    let divClear = UI.div # set style [("clear","both")]
-
     mapM_ (\e -> element e # set style [("float","left")])
-        ([bpm, add01faf, add01hps, osc02xy] ++ pos_x_amps)
+        ([bpm, add01faf, add01hps, osc02xy] ++ amp_x_pans)
 
     void $ getBody window #+
         [ element stDiv
         , UI.new #
           set style
-          [("margin","0 auto"),("width", "960px"),("padding","20px")] #+
+          [("margin","0 auto"),("width", "960px"),("padding","5px")] #+
           [ UI.new #
             set style
-            [("padding","5px"),("float", "left"),("margin-bottom","10px")] #+
+            [("float","left")
+            ,("padding-bottom","5px"),("margin-bottom","5px")] #+
             [element bpm, element beat]
           , divClear
           , UI.new #
-            set style [("padding","5px"),("float","left"),("margin-bottom","10px")] #+
+            set style
+            [("float","left")
+            ,("padding-bottom","5px"),("margin-bottom","5px")] #+
             [element gridboxes]
           , divClear
           , UI.new #
             set style
-            [("padding","5px"),("float","left"),("margin-bottom", "10px")] #+
+            [("float","left")
+            ,("padding-bottom","5px"),("margin-bottom", "5px")] #+
             [ element add01faf, element add01hps
             , element osc02xy
             ]
           , divClear
           , UI.new #
-            set style [("padding","5px"),("float","left")] #+
+            set style [("padding-bottom","5px"),("float","left")] #+
             [element mstr]
           , divClear
           ]

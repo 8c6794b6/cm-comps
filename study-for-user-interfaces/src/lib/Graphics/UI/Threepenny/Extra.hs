@@ -145,6 +145,8 @@ vrange name minv maxv stepv iniv act = do
 -- | Vertical slider.
 vslider ::
     String                   -- ^ Label to show.
+    -> Int                   -- ^ Width.
+    -> Int                   -- ^ Height.
     -> Double                -- ^ Min value.
     -> Double                -- ^ Max value.
     -> Double                -- ^ Initial value.
@@ -155,6 +157,8 @@ vslider = mk_slider 'v'
 -- | Horizontal slider.
 hslider ::
     String                   -- ^ Label to show.
+    -> Int                   -- ^ Width.
+    -> Int                   -- ^ Height.
     -> Double                -- ^ Min value.
     -> Double                -- ^ Max value.
     -> Double                -- ^ Initial value.
@@ -166,16 +170,18 @@ hslider = mk_slider 'h'
 mk_slider ::
     Char
     -> String
+    -> Int    -- width
+    -> Int    -- height
     -> Double
     -> Double
     -> Double
     -> (Double -> UI String)
     -> UI Element
-mk_slider axis label minv maxv iniv act = do
-    let fixedlen = 128 :: Int
-        (faxis,vallen) = case axis of
-            'v' -> (snd,"height")
-            'h' -> (fst,"width")
+mk_slider axis label width height minv maxv iniv act = do
+    let -- fixedlen = 128 :: Int
+        (faxis,vname,fname,fixedlen,flen) = case axis of
+            'v' -> (snd,"height","width",height,width)
+            'h' -> (fst,"width","height",width,height)
             _   -> error ("Invalid axis: " ++ show axis)
         inivallen = show inivallen'
         fixedlen_d = fromIntegral fixedlen :: Double
@@ -185,10 +191,14 @@ mk_slider axis label minv maxv iniv act = do
     label' <- UI.div # set UI.text label
     sld <- UI.div
            #. (axis:"slider-sld")
-           # set UI.style [(vallen, show fixedlen ++ "px")]
+           # set UI.style [(vname, show fixedlen ++ "px")
+                          ,(fname, show (flen-2) ++ "px")
+                          ]
     val <- UI.div
            #. (axis:"slider-val")
-           # set UI.style [(vallen, inivallen ++ "px")]
+           # set UI.style [(vname, inivallen ++ "px")
+                          ,(fname, show (flen-2) ++ "px")
+                          ]
     param <- UI.div # set UI.text (show iniv)
 
     let setv v = do
@@ -198,7 +208,7 @@ mk_slider axis label minv maxv iniv act = do
                 fixedlen'_d = fromIntegral fixedlen'
                 v'  = minv + (maxv-minv) * fixedlen'_d / fromIntegral fixedlen
             void $ element val #
-                set UI.style [(vallen, show fixedlen' ++ "px")]
+                set UI.style [(vname, show fixedlen' ++ "px")]
             v'' <- act v'
             void $ element param # set UI.text v''
 
@@ -215,7 +225,13 @@ mk_slider axis label minv maxv iniv act = do
     UI.div
         #. (axis:"slider-wrapper")
         #+ [ element label'
-           , element sld #+ [ element val ], element param ]
+           , element sld
+             #+ [ element val ]
+           , element param
+           ]
+        # set UI.style [("width",show width ++ "px")
+                       ,("height",show height ++ "px")
+                       ]
 
 -- | Returns checkbox in horizontal sequence.
 hcheckbox ::
@@ -322,7 +338,7 @@ xyarea ::
 xyarea name size fxy = do
     let sizePx = show size ++ "px"
     label <- UI.div #. "xyarea-label" # set text name
-    param <- UI.div #. "xyarea-param" # set text ""
+    param <- UI.div #. "xyarea-param" # set text "(--,--)"
     xline <- UI.div #. "xyarea-line" #
              set style [("height",sizePx),("width","1px")]
     yline <- UI.div #. "xyarea-line"
