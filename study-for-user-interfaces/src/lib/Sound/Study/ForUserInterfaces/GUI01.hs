@@ -145,11 +145,7 @@ setup fd window = do
 
     -- mixer --
     let divClear = UI.div # set style [("clear","both")]
-    mamp <- vr "mamp" mixer01nid (-60) 25 0
-            # set UI.style [("float","left")
-                           ,("margin","5px 0 0 0")
-                           ]
-    let vrm :: String -> Int -> Double -> Double -> Double -> UI Element
+        vrm :: String -> Int -> Double -> Double -> Double -> UI Element
         vrm l n minv maxv iniv = vr (l++show n) mixer01nid minv maxv iniv
         amp_x_pan n = do
             amp <- vrm "amp" n (-60) 25 0
@@ -161,9 +157,17 @@ setup fd window = do
                 return $ printf "%3.2f" v
             element pan # set UI.style [("float","left")]
             UI.new
-                #+ [element amp, divClear, element pan]
+                #+ [ element amp
+                   , divClear
+                   , element pan
+                   ]
                 # set UI.style [("padding","0 10px 10px 0")]
-    amp_x_pans <- mapM amp_x_pan [0..4]
+
+    mamp <- vr "mamp" mixer01nid (-60) 25 0
+            # set UI.style [("float","left")
+                           ,("margin","5px 0 0 0")
+                           ]
+    amp_x_pans <- mapM amp_x_pan [0..12]
     mstr <- UI.new #+ map element (mamp : amp_x_pans)
 
     -- layout --
@@ -179,13 +183,13 @@ setup fd window = do
             set style
             [("float","left")
             ,("padding-bottom","5px"),("margin-bottom","5px")] #+
-            [element bpm, element beat]
+            [ element bpm, element beat ]
           , divClear
           , UI.new #
             set style
             [("float","left")
             ,("padding-bottom","5px"),("margin-bottom","5px")] #+
-            [element gridboxes]
+            [ element gridboxes ]
           , divClear
           , UI.new #
             set style
@@ -197,7 +201,7 @@ setup fd window = do
           , divClear
           , UI.new #
             set style [("padding-bottom","5px"),("float","left")] #+
-            [element mstr]
+            [ element mstr ]
           , divClear
           ]
         ]
@@ -330,11 +334,12 @@ synth_snr01 = out (control KR "out" 0) sig0
     ash2  = envCoord [(0,0),(1e-2,1),(0.2,0.8),(1,0)] 1 1 EnvCub
     tr0   = tr_control "t_tr0" 1
 
+
 -- | Simple mixer.
 synth_mixer01 :: UGen
 synth_mixer01 = replaceOut 0 (sigs * dbAmp mamp)
   where
-    sigs = sum $ map f [0..4::Int]
+    sigs = sum $ map f [0..12::Int]
     f n  = pan2 (in' 1 AR inn) posn (dbAmp ampn)
       where
         inn  = control KR ("in" ++ show n) (fromIntegral n)

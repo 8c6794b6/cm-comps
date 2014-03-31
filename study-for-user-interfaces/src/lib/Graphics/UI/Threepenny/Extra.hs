@@ -170,45 +170,44 @@ hslider = mk_slider 'h'
 mk_slider ::
     Char
     -> String
-    -> Int    -- width
-    -> Int    -- height
+    -> Int
+    -> Int
     -> Double
     -> Double
     -> Double
     -> (Double -> UI String)
     -> UI Element
 mk_slider axis label width height minv maxv iniv act = do
-    let -- fixedlen = 128 :: Int
-        (faxis,vname,fname,fixedlen,flen) = case axis of
+    let (faxis,valname,pivotname,vallen,pivotlen) = case axis of
             'v' -> (snd,"height","width",height,width)
             'h' -> (fst,"width","height",width,height)
             _   -> error ("Invalid axis: " ++ show axis)
-        inivallen = show inivallen'
-        fixedlen_d = fromIntegral fixedlen :: Double
+        vallen_d = fromIntegral vallen :: Double
         inivallen' :: Int
-        inivallen' = ceiling (fixedlen_d * ((iniv - minv) / (maxv - minv)))
+        inivallen' = ceiling (vallen_d * ((iniv - minv) / (maxv - minv)))
+        inivallen = show inivallen'
 
     label' <- UI.div # set UI.text label
     sld <- UI.div
            #. (axis:"slider-sld")
-           # set UI.style [(vname, show fixedlen ++ "px")
-                          ,(fname, show (flen-2) ++ "px")
+           # set UI.style [(valname, show vallen ++ "px")
+                          ,(pivotname, show (pivotlen-2) ++ "px")
                           ]
     val <- UI.div
            #. (axis:"slider-val")
-           # set UI.style [(vname, inivallen ++ "px")
-                          ,(fname, show (flen-2) ++ "px")
+           # set UI.style [(valname, inivallen ++ "px")
+                          ,(pivotname, show (pivotlen-2) ++ "px")
                           ]
     param <- UI.div # set UI.text (show iniv)
 
     let setv v = do
-            let fixedlen' = case axis of
-                    'v' -> fixedlen - faxis v
+            let vallen' = case axis of
+                    'v' -> vallen - faxis v
                     _   -> faxis v
-                fixedlen'_d = fromIntegral fixedlen'
-                v'  = minv + (maxv-minv) * fixedlen'_d / fromIntegral fixedlen
+                vallen'_d = fromIntegral vallen'
+                v'  = minv + (maxv-minv) * vallen'_d / fromIntegral vallen
             void $ element val #
-                set UI.style [(vname, show fixedlen' ++ "px")]
+                set UI.style [(valname, show vallen' ++ "px")]
             v'' <- act v'
             void $ element param # set UI.text v''
 
@@ -225,8 +224,7 @@ mk_slider axis label width height minv maxv iniv act = do
     UI.div
         #. (axis:"slider-wrapper")
         #+ [ element label'
-           , element sld
-             #+ [ element val ]
+           , element sld #+ [ element val ]
            , element param
            ]
         # set UI.style [("width",show width ++ "px")
