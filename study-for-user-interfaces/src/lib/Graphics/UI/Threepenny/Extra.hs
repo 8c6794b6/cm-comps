@@ -221,6 +221,9 @@ mk_slider axis label width height minv maxv iniv act = do
     on UI.mouseup sld $ \_ ->
         liftIO $ writeIORef activeRef False
 
+    v'' <- act iniv
+    void $ element param # set UI.text v''
+
     UI.div
         #. (axis:"slider-wrapper")
         #+ [ element label'
