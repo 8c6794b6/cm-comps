@@ -11,14 +11,15 @@ Miscellaneous functions.
 -}
 module Sound.Study.ForUserInterfaces.Misc where
 
+import Control.Concurrent (forkIO, killThread)
 import Data.Function (fix)
-import System.Random (newStdGen, randomRs)
+import System.Random (newStdGen, mkStdGen, randomR, randomRs)
 
 import Sound.OSC
 import Sound.SC3
 import Sound.SC3.ID
 
-import Sound.Study.ForUserInterfaces.GUI01
+import qualified Sound.Study.ForUserInterfaces.GUI01 as GUI01
 
 
 -- --------------------------------------------------------------------------
@@ -31,10 +32,7 @@ import Sound.Study.ForUserInterfaces.GUI01
 -- Change "len" in group 1.
 play_percs :: IO ()
 play_percs = withSC3 $ do
-    mapM_ (async . d_recv . uncurry synthdef)
-        [("rbufrd01",rbufrd01)
-        ,("bd01",bd01), ("hat01",hat01)
-        ]
+    mapM_ (async . d_recv) (GUI01.synthdefs)
     sendOSC $ bundle immediately
         [ s_new "trig00" 998 AddToHead 1 [("out",101),("beat",4),("bpm",128)]
         , s_new "rbufrd01" 2000  AddToTail 1
@@ -130,29 +128,39 @@ stepper_ex =
 -- | Simple 'sendTrig' example to schedule 's_new' message responding to @/tr@
 -- messages sent back from scsynth server.
 go_sendTrig01 :: IO ()
-go_sendTrig01 = withSC3 $ withNotifications $ do
-    let st01  = sendTrig tr0 1000 tcnt
-        tr0   = tr1 + dust 'A' KR df
-        tr1   = impulse KR 1 0
-        df    = linLin (lfdNoise3 'F' KR (1/32)) (-1) 1 0.5 32
-        tcnt  = pulseCount tr1 0
-        sin01 = out 0 (pan2 (sinOsc AR freq 0 * e) pos 1)
-        pos   = rand 'A' (-1) 1
-        freq  = midiCPS $ select idx (mce pchs)
-        idx   = iRand 'I' 0 (constant $ length pchs)
-        pchs  = foldr (\o acc -> map (+o) degs ++ acc) [] octs
-        octs  = take 4 $ iterate (+12) 48
-        degs  = [0,4,7,11]
-        e     = envGen KR 1 0.1 0 dur RemoveSynth esh
-        esh   = envCoord [(0,0),(atk,1),(1,0)] 1 1 EnvCub
-        dur   = expRand 'd' 0.3 3
-        atk   = expRand 'a' 0.001 0.999
-    _ <- mapM_ (async . d_recv . uncurry synthdef)
-         [("sin01",sin01),("st01",st01)]
-    send $ s_new "st01" (-1) AddToTail 1 []
-    fix $ \f -> do
-        [Int32 _nid, Int32 _tid, Float _val] <- waitDatum "/tr"
-        -- print _val
-        send $ s_new "sin01" (-1) AddToTail 1 []
-        f
-    -- getChar >> killThread tid
+go_sendTrig01 = do
+    g0 <- newStdGen
+    tid <- forkIO $ withSC3 $ withNotifications $ do
+        let -- trigger synth
+            st01  = sendTrig tr0 1000 tcnt
+            tr0   = tr1 + dust 'A' KR df
+            tr1   = impulse KR 1 0
+            df    = linLin (lfdNoise3 'F' KR (1/32)) (-1) 1 0.5 32
+            tcnt  = pulseCount tr1 0
+            -- sine tone synth
+            sin01 = out 0 (pan2 (sinOsc AR freq 0 * e) pos 1)
+            pos   = rand 'A' (-1) 1
+            freq  = control KR "freq" 440
+            e     = envGen KR 1 0.08 0 dur RemoveSynth esh
+            esh   = envCoord [(0,0),(atk,1),(1,0)] 1 1 EnvCub
+            dur   = control KR "dur" 1
+            atk   = control KR "atk" 0.001
+        mapM_ (async . d_recv . uncurry synthdef)
+            [("sin01",sin01),("st01",st01)]
+        send $ s_new "st01" (-1) AddToTail 1 []
+        let pchs = foldr (\o acc -> map (midiCPS . (+o)) degs ++ acc) [] octs
+            octs = take 6 $ iterate (+12) 36
+            degs = [0,4,7,11]
+        -- looping action responding to /tr message from scsynth server.
+        fix (\f gen -> do
+            [Int32 _nid, Int32 1000, Float val] <- waitDatum "/tr"
+            let pidx        = ceiling val `mod` (length pchs - 1)
+                frq         = pchs !! pidx
+                (latk,gen1) = randomR (log 0.001, log 0.999) gen
+                (ldur,gen2) = randomR (log 0.09, log 9) gen1
+                eatk        = exp latk
+                edur        = exp ldur
+            send $ s_new "sin01" (-1) AddToTail 1
+                [("freq",frq),("atk",eatk),("dur",edur)]
+            f gen2) g0
+    getChar >> killThread tid
