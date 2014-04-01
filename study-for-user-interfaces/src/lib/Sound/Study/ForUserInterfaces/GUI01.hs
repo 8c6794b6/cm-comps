@@ -40,7 +40,7 @@ import qualified Graphics.UI.Threepenny.Extra as Extra
 main :: IO ()
 main = withSC3 $ \fd -> do
     mapM_ (\x -> async fd $ b_alloc x 32 1) [0..8]
-    mapM_ (async fd . d_recv) $(synthdefGenerator)
+    mapM_ (async fd . d_recv) synthdefs
     runReaderT (patchNode $ nodify nodes) fd
     static <- Extra.getStaticDir
     tid <- forkIO $ startGUI defaultConfig {tpStatic=Just static} (setup fd)
@@ -49,11 +49,10 @@ main = withSC3 $ \fd -> do
 nodes :: Nd
 nodes =
   let t00 = syn "trig00" ["out"*=100,"bpm"*=128,"beat"*=4]
-      rbufrd outn bufn =
-          syn "rbufrd01" ["out"*=outn,"bufn"*=bufn,"len"*=32,"tr0"*<-t00-*"out"]
-      t01 = rbufrd 101 0
-      t02 = rbufrd 102 1
-      t03 = rbufrd 103 2
+      rb o b = syn "rbufrd01" ["out"*=o,"bufn"*=b,"len"*=32,"tr0"*<-t00-*"out"]
+      t01 = rb 101 0
+      t02 = rb 102 1
+      t03 = rb 103 2
   in  grp 0
       [ grp 1
         [ grp 10
@@ -117,8 +116,8 @@ setup fd window = do
         let vs = reads v
         unless (null vs) $ liftIO $
             send fd $ n_set tr00nid [("bpm",fst $ head vs)]
-    beat <- Extra.hslider "beat (2**(v/4))" 128 20 0 32 iniBeatVal $ \v -> do
-        liftIO $ send fd $ n_set tr00nid [("beat",2**(v/4))]
+    beat <- Extra.hslider "beat (2**(v/2))" 128 20 0 16 iniBeatVal $ \v -> do
+        liftIO $ send fd $ n_set tr00nid [("beat",2**(v/2))]
         return $ show v
     mapM_ (\e -> element e # set style [("float","left")]) [bpm, beat]
 
@@ -129,6 +128,11 @@ setup fd window = do
                 (read (printf "%3.2f" iniFafVal) :: Double)
     add01hps <- vr "hps" add01nid 0.1 10
                 (read (printf "%3.2f" iniHpsVal) :: Double)
+
+    -- reverb
+    revmix <- vr "mix" mixer01nid 0 1 0
+    revdamp <- vr "damp" mixer01nid 0 1 0
+    revroom <- vr "room" mixer01nid 0 1 0
 
     -- osc01 --
     let xysiz :: Num a => a
@@ -150,16 +154,26 @@ setup fd window = do
         amp_x_pan n = do
             amp <- vrm "amp" n (-60) 25 0
                    # set style [("float","left")
-                               ,("margin","5px 0 15px 5px")
+                               ,("margin","5px 0 15px 10px")
                                ]
-            pan <- Extra.hslider "pan" 40 12 (-1) 1 0 $ \v -> do
-                liftIO $ send fd $ n_set mixer01nid [("pos"++show n,v)]
-                return $ printf "%3.2f" v
-            element pan # set UI.style [("float","left")]
+            let fpan v = do
+                    liftIO $ send fd $ n_set mixer01nid [("pos"++show n,v)]
+                    return ""
+            pan <- Extra.hslider "pan" 40 12 (-1) 1 0 fpan
+                   # set UI.style [("float","left")
+                                  ,("margin-bottom","5px")
+                                  ]
+            let feff v = do
+                    liftIO $ send fd $ n_set mixer01nid [("efx"++show n,v)]
+                    return ""
+            eff <- Extra.hslider "eff" 40 12 0 1 0 feff
+                   # set UI.style [("float","left")]
             UI.new
                 #+ [ element amp
                    , divClear
                    , element pan
+                   , divClear
+                   , element eff
                    ]
                 # set UI.style [("padding","0 10px 10px 0")]
 
@@ -172,7 +186,8 @@ setup fd window = do
 
     -- layout --
     mapM_ (\e -> element e # set style [("float","left")])
-        ([bpm, add01faf, add01hps, osc02xy] ++ amp_x_pans)
+        ([bpm, add01faf, add01hps, revmix, revroom, revdamp, osc02xy] ++
+         amp_x_pans)
 
     void $ getBody window #+
         [ element stDiv
@@ -197,6 +212,7 @@ setup fd window = do
             ,("padding-bottom","5px"),("margin-bottom", "5px")] #+
             [ element add01faf, element add01hps
             , element osc02xy
+            , element revmix, element revdamp, element revroom
             ]
           , divClear
           , UI.new #
@@ -334,19 +350,28 @@ synth_snr01 = out (control KR "out" 0) sig0
     ash2  = envCoord [(0,0),(1e-2,1),(0.2,0.8),(1,0)] 1 1 EnvCub
     tr0   = tr_control "t_tr0" 1
 
-
 -- | Simple mixer.
 synth_mixer01 :: UGen
-synth_mixer01 = replaceOut 0 (sigs * dbAmp mamp)
+synth_mixer01 = replaceOut 0 (sigs0 * dbAmp mamp)
   where
-    sigs = sum $ map f [0..12::Int]
-    f n  = pan2 (in' 1 AR inn) posn (dbAmp ampn)
+    sigs0 = efx (sum sigsA) + sum sigsB
+    (sigsA, sigsB) = unzip $ map f [0..12::Int]
+    f n   = (sig0 * efxc, sig0 * (1-efxc))
       where
+        sig0 = pan2 sig1 posn (dbAmp ampn)
+        sig1 = in' 1 AR inn
         inn  = control KR ("in" ++ show n) (fromIntegral n)
         posn = control KR ("pos" ++ show n) 0
         ampn = control KR ("amp" ++ show n) 0.5
-    mamp = control KR "mamp" 0
+        efxc = control KR ("efx" ++ show n) 1
+    efx x = freeVerb x mix' room damp
+    mamp  = control KR "mamp" 0
+    mix'  = control KR "mix" 0.33
+    room  = control KR "room" 0.5
+    damp  = control KR "damp" 0.5
 
+synthdefs :: [Synthdef]
+synthdefs = $synthdefGenerator
 
 -- --------------------------------------------------------------------------
 --
