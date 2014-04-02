@@ -63,16 +63,16 @@ nodes =
         [ grp 10
           [ t00, t01, t02, t03 ]
         , grp 11
-          [ syn "add01"
-            ["out"*=0,"tr1"*<-t00-*"out","faf"*=9.45,"hps"*=2.80]
-          , syn "saw01"
-            ["out"*=1,"tr1"*<-t00-*"out","cfhi"*=7562,"ftrr"*=0.1]
-          , syn "bd01"
-            ["out"*=2,"freq"*=70,"dur"*=0.12,"t_tr0"*<-t01-*"out"]
+          [ syn "bd01"
+            ["out"*=0,"freq"*=70,"dur"*=0.12,"t_tr0"*<-t01-*"out"]
           , syn "hat01"
-            ["out"*=3,"t_tr0"*<-t02-*"out"]
+            ["out"*=1,"t_tr0"*<-t02-*"out"]
           , syn "snr01"
-            ["out"*=4,"t_tr0"*<-t03-*"out"]
+            ["out"*=2,"t_tr0"*<-t03-*"out"]
+          , syn "add01"
+            ["out"*=3,"tr1"*<-t00-*"out","faf"*=9.45,"hps"*=2.80]
+          , syn "saw01"
+            ["out"*=4,"tr1"*<-t00-*"out","cfhi"*=7562,"ftrr"*=0.1]
           ]
         , grp 12
           [ syn "mixer01" [] ]
