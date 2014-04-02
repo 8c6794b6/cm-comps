@@ -65,7 +65,7 @@ nodes =
         , grp 11
           [ syn "add01"
             ["out"*=0,"tr1"*<-t00-*"out","faf"*=9.45,"hps"*=2.80]
-          , syn "osc02"
+          , syn "saw01"
             ["out"*=1,"tr1"*<-t00-*"out","cfhi"*=7562,"ftrr"*=0.1]
           , syn "bd01"
             ["out"*=2,"freq"*=70,"dur"*=0.12,"t_tr0"*<-t01-*"out"]
@@ -99,8 +99,8 @@ setup fd window = do
         tr00nid  = nodeId tr00node
         add01node = queryByName "add01"
         add01nid  = nodeId add01node
-        osc02node = queryByName "osc02"
-        osc02nid  = nodeId osc02node
+        saw01node = queryByName "saw01"
+        saw01nid  = nodeId saw01node
         mixer01node = queryByName "mixer01"
         mixer01nid  = nodeId mixer01node
 
@@ -136,10 +136,10 @@ setup fd window = do
     -- osc01 --
     let xysiz :: Num a => a
         xysiz = 128
-    osc02xy <- Extra.xyarea "cfhi x ftrr" xysiz $ \(x,y) -> do
+    saw01xy <- Extra.xyarea "cfhi x ftrr" xysiz $ \(x,y) -> do
         let x' = (fromIntegral x / xysiz) * 8000
             y' = fromIntegral y / xysiz
-        liftIO $ send fd $ n_set osc02nid [("cfhi",x'),("ftrr",y')]
+        liftIO $ send fd $ n_set saw01nid [("cfhi",x'),("ftrr",y')]
         return $ printf "(%3.2f,%3.2f)" x' y'
 
     -- buffer --
@@ -240,7 +240,7 @@ setup fd window = do
 
     -- layout --
     mapM_ (\e -> element e # set style [("float","left")])
-        [bpm, beat, add01faf, add01hps, revrmix, revroom, revdamp, osc02xy]
+        [bpm, beat, add01faf, add01hps, revrmix, revroom, revdamp, saw01xy]
 
     void $ getBody window #+
         [ element stDiv
@@ -264,7 +264,7 @@ setup fd window = do
             [("float","left")
             ,("padding-bottom","5px"),("margin-bottom", "5px")] #+
             [ element add01faf, element add01hps
-            , element osc02xy
+            , element saw01xy
             , element revrmix, element revdamp, element revroom
             , element cf_x_rq
             ]
@@ -319,8 +319,8 @@ synth_add01 = out (control KR "out" 0) sig0
     tr1  = control KR "tr1" 0
 
 -- | Simple saw tooth oscillator.
-synth_osc02 :: UGen
-synth_osc02 = out (control KR "out" 1) sig0
+synth_saw01 :: UGen
+synth_saw01 = out (control KR "out" 1) sig0
   where
     sig0     = rlpf sig1 cf rq * aenv * 0.3
     sig1     = mix (saw AR (mce [freq+vib, freq*0.998, freq*1.002]))
