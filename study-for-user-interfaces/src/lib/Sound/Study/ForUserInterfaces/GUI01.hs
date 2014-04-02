@@ -13,7 +13,7 @@ Graphical user interface, take 1.
 module Sound.Study.ForUserInterfaces.GUI01 where
 
 import           Control.Concurrent (forkIO, killThread)
-import           Control.Monad (unless, void)
+import           Control.Monad (forM, unless, void)
 import           Control.Monad.Reader (runReaderT)
 import           Data.Maybe (catMaybes)
 import           Text.Printf (printf)
@@ -40,12 +40,17 @@ import qualified Graphics.UI.Threepenny.Extra as Extra
 main :: IO ()
 main = withSC3 $ \fd -> do
     mapM_ (\x -> async fd $ b_alloc x 32 1) [0..8]
+
+    -- buffers for grouping mute/unmute
+    mapM_ (\x -> async fd $ b_alloc x 12 1) [100,101,102]
+
     mapM_ (async fd . d_recv) synthdefs
     runReaderT (patchNode $ nodify nodes) fd
     static <- Extra.getStaticDir
     tid <- forkIO $ startGUI defaultConfig {tpStatic=Just static} (setup fd)
     getChar >> killThread tid
 
+-- | Node arrangement for GUI.
 nodes :: Nd
 nodes =
   let t00 = syn "trig00" ["out"*=100,"bpm"*=128,"beat"*=4]
@@ -119,7 +124,6 @@ setup fd window = do
     beat <- Extra.hslider "beat (2**(v/2))" 128 20 0 16 iniBeatVal $ \v -> do
         liftIO $ send fd $ n_set tr00nid [("beat",2**(v/2))]
         return $ show v
-    mapM_ (\e -> element e # set style [("float","left")]) [bpm, beat]
 
     -- add01 --
     let iniFafVal = queryParam "faf" add01node
@@ -128,11 +132,6 @@ setup fd window = do
                 (read (printf "%3.2f" iniFafVal) :: Double)
     add01hps <- vr "hps" add01nid 0.1 10
                 (read (printf "%3.2f" iniHpsVal) :: Double)
-
-    -- reverb
-    revmix <- vr "mix" mixer01nid 0 1 0
-    revdamp <- vr "damp" mixer01nid 0 1 0
-    revroom <- vr "room" mixer01nid 0 1 0
 
     -- osc01 --
     let xysiz :: Num a => a
@@ -144,56 +143,110 @@ setup fd window = do
         return $ printf "(%3.2f,%3.2f)" x' y'
 
     -- buffer --
-    (gridboxes, _boxes) <- Extra.toggleBoxes 32 12 $ \(i,j) val ->
+    (gridboxes, _boxes) <- Extra.toggleGrids 32 12 $ \(i,j) val ->
         liftIO $ send fd $ b_set i [(j, fromIntegral val)]
 
-    -- mixer --
+    -- effects
+    revrmix <- vr "rmix" mixer01nid 0 1 0
+    revdamp <- vr "damp" mixer01nid 0 1 0
+    revroom <- vr "room" mixer01nid 0 1 0
+    cf_x_rq <- Extra.xyarea "cf x rq" xysiz $ \(x,y) -> do
+        let x' = (exp ((fromIntegral x + 0.001) / xysiz) - 1) * 10000
+            y' = fromIntegral y / xysiz
+        liftIO $ send fd $ n_set mixer01nid [("cf",x'),("rq",y')]
+        return $ printf "(%3.2f,%3.2f)" x' y'
+
+    -- mixer
     let divClear = UI.div # set style [("clear","both")]
         vrm :: String -> Int -> Double -> Double -> Double -> UI Element
         vrm l n minv maxv iniv = vr (l++show n) mixer01nid minv maxv iniv
         amp_x_pan n = do
-            amp <- vrm "amp" n (-60) 25 0
-                   # set style [("float","left")
-                               ,("margin","5px 0 15px 10px")
-                               ]
             let fpan v = do
                     liftIO $ send fd $ n_set mixer01nid [("pos"++show n,v)]
                     return ""
-            pan <- Extra.hslider "pan" 40 12 (-1) 1 0 fpan
-                   # set UI.style [("float","left")
-                                  ,("margin-bottom","5px")
-                                  ]
-            let feff v = do
-                    liftIO $ send fd $ n_set mixer01nid [("efx"++show n,v)]
-                    return ""
-            eff <- Extra.hslider "eff" 40 12 0 1 0 feff
-                   # set UI.style [("float","left")]
-            UI.new
-                #+ [ element amp
-                   , divClear
-                   , element pan
-                   , divClear
-                   , element eff
-                   ]
-                # set UI.style [("padding","0 10px 10px 0")]
+                feff v =
+                    liftIO $ send fd $
+                    n_set mixer01nid [("efx"++show n,if v then 1 else 0)]
+                fmute k v = liftIO $ do
+                    let v' = if v then 1 else 0
+                    send fd $ b_setn1 (100+k) n [v']
+            UI.new #+
+                [ Extra.toggleBox "" 15 15 (fmute 0)
+                  # set style [("float","center")
+                              ,("margin","5px auto 0 auto")]
+                , divClear
+                , Extra.toggleBox "" 15 15 (fmute 1)
+                  # set style [("float","center")
+                              ,("margin","5px auto 0 auto")]
+                , divClear
+                , Extra.toggleBox "" 15 15 (fmute 2)
+                  # set style [("float","center")
+                              ,("margin","5px auto 0 auto")]
+                , divClear
+                , Extra.hslider "pan" 40 12 (-1) 1 0 fpan
+                  # set style [("float","left")
+                              ,("margin-bottom","5px")
+                              ]
+                , divClear
+                , Extra.toggleBox "fx" 15 15 feff
+                  # set style [("float","center")
+                              ,("margin","5px auto 0 auto")]
+                , divClear
+                , vrm "amp" n (-60) 25 0
+                  # set style [("float","center")
+                              ,("margin","5px auto 15px auto")
+                              ]
+                ] # set style [("float","left")]
 
-    mamp <- vr "mamp" mixer01nid (-60) 25 0
-            # set UI.style [("float","left")
-                           ,("margin","5px 0 0 0")
-                           ]
-    amp_x_pans <- mapM amp_x_pan [0..12]
-    mstr <- UI.new #+ map element (mamp : amp_x_pans)
+    -- mutes
+    mutes <- do
+        radios <- forM [100,101,102::Int] $ \n -> do
+            radio <- UI.input
+                # set UI.type_ "radio"
+                # set UI.name "set"
+                # set UI.value (show n)
+            on UI.click radio $ \_ -> do
+                bufn <- radio # get UI.value
+                liftIO $ do
+                    vals <- queryBuffer (read bufn) fd
+                    sendOSC fd $ n_set mixer01nid $
+                        zipWith (\i v -> ("mute"++show i,realToFrac v))
+                        [(0::Int)..] vals
+            return radio
+        lagt <- Extra.textbox "lag" 50 "4" $ \str -> do
+            let val = reads str
+            unless (null val) $ liftIO $
+                send fd $ n_set mixer01nid [("lagt", fst (head val))]
+        UI.new #+ [ element lagt
+                    # set style [("float","center")]
+                  , divClear
+                  , UI.new
+                    #+ map element radios
+                    # set style [("float","center")
+                                ,("margin","5px")
+                                ]
+                  ]
+            -- # set style [("float","left")]
+
+    mstr <- UI.new #+
+            ( UI.div #+
+              [ element mutes
+              , vr "mamp" mixer01nid (-60) 25 0
+                # set style [("float","center")
+                            ,("margin","5px auto")
+                            ]
+              ] # set style [("float", "left")]
+            : map amp_x_pan [0..11])
 
     -- layout --
     mapM_ (\e -> element e # set style [("float","left")])
-        ([bpm, add01faf, add01hps, revmix, revroom, revdamp, osc02xy] ++
-         amp_x_pans)
+        [bpm, beat, add01faf, add01hps, revrmix, revroom, revdamp, osc02xy]
 
     void $ getBody window #+
         [ element stDiv
         , UI.new #
           set style
-          [("margin","0 auto"),("width", "960px"),("padding","5px")] #+
+          [("margin","0 auto"),("width", "980px"),("padding","5px")] #+
           [ UI.new #
             set style
             [("float","left")
@@ -212,7 +265,8 @@ setup fd window = do
             ,("padding-bottom","5px"),("margin-bottom", "5px")] #+
             [ element add01faf, element add01hps
             , element osc02xy
-            , element revmix, element revdamp, element revroom
+            , element revrmix, element revdamp, element revroom
+            , element cf_x_rq
             ]
           , divClear
           , UI.new #
@@ -356,19 +410,26 @@ synth_mixer01 = replaceOut 0 (sigs0 * dbAmp mamp)
   where
     sigs0 = efx (sum sigsA) + sum sigsB
     (sigsA, sigsB) = unzip $ map f [0..12::Int]
-    f n   = (sig0 * efxc, sig0 * (1-efxc))
+    f n   = (sig0*efxc, sig0*(1-efxc))
       where
-        sig0 = pan2 sig1 posn (dbAmp ampn)
+        sig0 = pan2 sig1 posn (dbAmp ampn) * mute
         sig1 = in' 1 AR inn
-        inn  = control KR ("in" ++ show n) (fromIntegral n)
-        posn = control KR ("pos" ++ show n) 0
-        ampn = control KR ("amp" ++ show n) 0.5
-        efxc = control KR ("efx" ++ show n) 1
-    efx x = freeVerb x mix' room damp
-    mamp  = control KR "mamp" 0
-    mix'  = control KR "mix" 0.33
-    room  = control KR "room" 0.5
-    damp  = control KR "damp" 0.5
+        inn  = k ("in" ++ show n) (fromIntegral n)
+        posn = k ("pos" ++ show n) 0
+        ampn = k ("amp" ++ show n) 0.5
+        efxc = k ("efx" ++ show n) 0
+        mute = control KR ("mute" ++ show n) 1 `lag3` lagt
+        lagt = control KR "lagt" 2
+    efx x = freeVerb sig0 rmix room damp
+      where
+        sig0 = rlpf x cf rq
+    mamp  = k "mamp" 0
+    rmix  = k "rmix" 0.33
+    room  = k "room" 0.5
+    damp  = k "damp" 0.5
+    cf    = k "cf" 2800
+    rq    = k "rq" 0.999
+    k n v = control KR n v `lag` 0.2
 
 synthdefs :: [Synthdef]
 synthdefs = $synthdefGenerator

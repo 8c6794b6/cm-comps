@@ -17,10 +17,11 @@ module Graphics.UI.Threepenny.Extra
  , hslider
  , vslider
  , hcheckbox
- , toggleBoxes
+ , toggleGrids
  , toggleBox
- , turnOnBox
- , turnOffBox
+ , toggleSingleGrid
+ , turnOnGrid
+ , turnOffGrid
  , xyarea
  , statusDiv
    -- * Event
@@ -40,7 +41,7 @@ import qualified Graphics.UI.Threepenny as UI
 import           Graphics.UI.Threepenny.Core
 
 import           Sound.OSC.FD
-import           Sound.SC3.FD (dumpOSC, serverStatusData)
+import           Sound.SC3.FD (dumpOSC, serverStatusData, withSC3)
 
 import           Paths_study_for_user_interfaces (getDataDir)
 
@@ -258,8 +259,39 @@ hcheckbox lbl n act = do
         # set style [("padding","10px 10px 0 10px")]
     return (wrapper, checks)
 
+toggleBox ::
+    String -- ^ Label.
+    -> Int -- ^ Width.
+    -> Int -- ^ Height.
+    -> (Bool -> UI ()) -- ^ Action to take on toggle.
+    -> UI Element
+toggleBox label width height act = do
+    label' <- UI.div
+              # set text label
+              # set style [("font-size","10px")]
+    box <- UI.div
+        # set style [("border", "solid 1px #888")
+                    ,("width", show (width-2) ++ "px")
+                    ,("height", show (height-2) ++ "px")
+                    ]
+        # set value "0"
+    on UI.click box $ \_ -> do
+        val <- get value box
+        let val' = if val == "1" then False else True
+        void $ if not val'
+           then element box
+                # set value "0"
+                # set style [("background-color","#fff")]
+           else element box
+                # set value "1"
+                # set style [("background-color","#888")]
+        act val'
+    UI.div
+        #+ map element [label', box]
+        # set style [("width", show (width-2) ++ "px")]
+
 -- | Returns grid of toggle boxes.
-toggleBoxes ::
+toggleGrids ::
     Int    -- ^ Number of columns.
     -> Int -- ^ Number of rows.
     -> ((Int,Int) -> Int -> UI ())
@@ -268,16 +300,16 @@ toggleBoxes ::
     -> UI (Element, [((Int,Int), Element)])
     -- ^ A pair of whole wrapper contents and each toggle box with (row,column)
     -- index.
-toggleBoxes ncol nrow act = do
+toggleGrids ncol nrow act = do
     let width = 25 :: Int
         height = 20 :: Int
-    columns_x_boxes <- forM [0..nrow-1] $ \rowi -> do
+    columns_x_grds <- forM [0..nrow-1] $ \rowi -> do
         columWrap <- UI.div # set style
                      [("clear","both")
                      ,("height",show height ++ "px")
                      ]
-        boxes <- forM [0..ncol-1] $ \coli -> do
-            box <- UI.div
+        grds <- forM [0..ncol-1] $ \coli -> do
+            grd <- UI.div
                    # set style [("width",show width ++ "px")
                                ,("height",show height ++ "px")
                                ,("float","left")
@@ -287,43 +319,43 @@ toggleBoxes ncol nrow act = do
                                ]
                    # set value "0"
             when (coli `mod` 4 == 0 && rowi `mod` 4 == 0) $
-                void $ element box # set UI.text (show coli)
-            on UI.click box $ \_ -> do
-                val <- toggleBox box
+                void $ element grd # set UI.text (show coli)
+            on UI.click grd $ \_ -> do
+                val <- toggleSingleGrid grd
                 void $ act (rowi,coli) val
-            return ((rowi,coli),box)
-        clm <- element columWrap #+ map (element . snd) boxes
-        return (clm, boxes)
+            return ((rowi,coli),grd)
+        clm <- element columWrap #+ map (element . snd) grds
+        return (clm, grds)
     wrapper <- UI.div # set style
                [("border-top","solid 1px")
                ,("border-left","solid 1px")
                ,("width",show ((width+1) * ncol) ++ "px")
                ,("float","left")
                ]
-    let (columns, boxes) = unzip columns_x_boxes
+    let (columns, grds) = unzip columns_x_grds
     wrapper' <- element wrapper #+ map element columns
-    return (wrapper', concat boxes)
+    return (wrapper', concat grds)
 
 -- | Toggle value and background colour of single box.
-toggleBox ::
-    Element   -- ^ Div element of box, returned from 'toggleBoxes'.
+toggleSingleGrid ::
+    Element   -- ^ Div element of box, returned from 'toggleGrids'.
     -> UI Int -- ^ Value after the toggle.
-toggleBox box = do
-    val <- box # get UI.value
+toggleSingleGrid grd = do
+    val <- grd # get UI.value
     if val == "0"
-       then turnOnBox box >> return 1
-       else turnOffBox box >> return 0
+       then turnOnGrid grd >> return 1
+       else turnOffGrid grd >> return 0
 
--- | Turn on the box element returned from 'toggleBoxes'.
-turnOnBox :: Element -> UI Element
-turnOnBox box =
+-- | Turn on the box element returned from 'toggleGrids'.
+turnOnGrid :: Element -> UI Element
+turnOnGrid box =
     element box
         # set style [("background-color","#888")]
         # set UI.value "1"
 
--- | Turn off the box element returned from 'toggleBoxes'.
-turnOffBox :: Element -> UI Element
-turnOffBox box =
+-- | Turn off the box element returned from 'toggleGrids'.
+turnOffGrid :: Element -> UI Element
+turnOffGrid box =
     element box
         # set style [("background-color","#fff")]
         # set UI.value "0"
@@ -377,11 +409,12 @@ statusDiv ::
     => t -- ^ Transport of scsynth.
     -> UI (UI.Timer, Element)
 statusDiv fd = do
-    timer <- UI.timer # set UI.interval 500
+    timer <- UI.timer # set UI.interval 1000
     ds@[stCPUp,stCPUa,stUGens,stSynths,stGroups,stInstruments] <-
         replicateM 6 $ UI.div #. "status-param"
     onEvent (UI.tick timer) $ \_ -> do
-        st <- liftIO $ getStatus fd
+        -- st <- liftIO $ getStatus fd
+        st <- liftIO (withSC3 $ getStatus)
         void $ element stCPUp # set text (printf "%2.2f%%" (ssCPUPeak st))
         void $ element stCPUa # set text (printf "%2.2f%%" (ssCPUAverage st))
         void $ element stUGens # set text (show (ssUGens st) ++ "u")
