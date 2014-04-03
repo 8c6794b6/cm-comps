@@ -58,10 +58,12 @@ nodes =
       t01 = rb 101 0
       t02 = rb 102 1
       t03 = rb 103 2
+      t04 = rb 104 3
+      t05 = rb 105 4
   in  grp 0
       [ grp 1
         [ grp 10
-          [ t00, t01, t02, t03 ]
+          [ t00, t01, t02, t03, t04, t05 ]
         , grp 11
           [ syn "bd01"
             ["out"*=0,"freq"*=70,"dur"*=0.12,"t_tr0"*<-t01-*"out"]
@@ -69,10 +71,14 @@ nodes =
             ["out"*=1,"t_tr0"*<-t02-*"out"]
           , syn "snr01"
             ["out"*=2,"t_tr0"*<-t03-*"out"]
+          , syn "prc01"
+            ["out"*=3,"t_tr0"*<-t04-*"out"]
           , syn "add01"
-            ["out"*=3,"tr1"*<-t00-*"out","faf"*=9.45,"hps"*=2.80]
+            ["out"*=4,"tr1"*<-t00-*"out","faf"*=9.45,"hps"*=2.80]
           , syn "saw01"
-            ["out"*=4,"tr1"*<-t00-*"out","cfhi"*=7562,"ftrr"*=0.1]
+            ["out"*=5,"tr1"*<-t00-*"out","cfhi"*=7562,"ftrr"*=0.1]
+          , syn "sine01"
+            ["out"*=6,"t_tr0"*<-t05-*"out"]
           ]
         , grp 12
           [ syn "mixer01" [] ]
@@ -104,7 +110,7 @@ setup fd window = do
         mixer01node = queryByName "mixer01"
         mixer01nid  = nodeId mixer01node
 
-    -- status div --
+    -- status div
     (tmr,stDiv) <- Extra.statusDiv fd
 
     let vr ::
@@ -114,7 +120,7 @@ setup fd window = do
                 liftIO $ send fd $ n_set nid [(l,v)]
                 return $ printf "%3.2f" v
 
-    -- common trigger --
+    -- common trigger
     let iniBpmVal  = queryParam "bpm" tr00node
         iniBeatVal = queryParam "beat" tr00node
     bpm <- Extra.textbox "bpm" 50 (show (ceiling iniBpmVal :: Int)) $ \v -> do
@@ -125,7 +131,7 @@ setup fd window = do
         liftIO $ send fd $ n_set tr00nid [("beat",2**(v/2))]
         return $ show v
 
-    -- add01 --
+    -- add01
     let iniFafVal = queryParam "faf" add01node
         iniHpsVal = queryParam "hps" add01node
     add01faf <- vr "faf" add01nid 0.2 30
@@ -133,7 +139,7 @@ setup fd window = do
     add01hps <- vr "hps" add01nid 0.1 10
                 (read (printf "%3.2f" iniHpsVal) :: Double)
 
-    -- osc01 --
+    -- saw01
     let xysiz :: Num a => a
         xysiz = 128
     saw01xy <- Extra.xyarea "cfhi x ftrr" xysiz $ \(x,y) -> do
@@ -142,7 +148,7 @@ setup fd window = do
         liftIO $ send fd $ n_set saw01nid [("cfhi",x'),("ftrr",y')]
         return $ printf "(%3.2f,%3.2f)" x' y'
 
-    -- buffer --
+    -- buffer
     (gridboxes, _boxes) <- Extra.toggleGrids 32 12 $ \(i,j) val ->
         liftIO $ send fd $ b_set i [(j, fromIntegral val)]
 
@@ -293,6 +299,16 @@ synth_trig00 = out (control KR "out" 0) sig0
     beat = control KR "beat" 4
     bpm  = control KR "bpm" 128
 
+-- | 'bufRdN' with 'coinGate'.
+synth_rbufrd01 :: UGen
+synth_rbufrd01 = out (control KR "out" 0) sig
+  where
+    sig  = coinGate 'g' (bufRdN 1 KR bufn idx Loop) tr0
+    bufn = control KR "bufn" 100
+    idx  = gate (stepper tr0 0 0 (len-1) 1 0) tr0
+    len  = control KR "len" 16
+    tr0  = control KR "tr0" 1
+
 -- | Simple additive synth.
 synth_add01 :: UGen
 synth_add01 = out (control KR "out" 0) sig0
@@ -341,16 +357,6 @@ synth_saw01 = out (control KR "out" 1) sig0
     cfhi     = control KR "cfhi" 8000 `lag` 0.1
     ftrr     = control KR "ftrr" (1/16) `lag` 0.1
 
--- | 'bufRdN' with 'coinGate'.
-synth_rbufrd01 :: UGen
-synth_rbufrd01 = out (control KR "out" 0) sig
-  where
-    sig  = coinGate 'g' (bufRdN 1 KR bufn idx Loop) tr0
-    bufn = control KR "bufn" 100
-    idx  = gate (stepper tr0 0 0 (len-1) 1 0) tr0
-    len  = control KR "len" 16
-    tr0  = control KR "tr0" 1
-
 -- | Simple bass drum sound.
 synth_bd01 :: UGen
 synth_bd01 = out (control KR "out" 0) sig0
@@ -381,11 +387,12 @@ synth_hat01 = out (control KR "out" 0) (mix sig0)
     sig2  = pulse AR (freq * pulse AR (freq*1.83) 0.5) 0.5
     sig3  = rhpf sig2 9000 aenv2 * aenv2 * 0.5
     freq  = mce [803, 1729, 2532, 3783]
-    aenv0 = envGen KR tr0 1 0 dur DoNothing ash0 * aenv1
+    aenv0 = envGen KR tr0 amp 0 dur DoNothing ash0 * aenv1
     ash0  = envPerc 1e-3 1
     aenv1 = lfdNoise3 'A' KR aef1 * 0.5 + 0.5
     aenv2 = decay2 tr0 1e-3 0.2
     aef1  = decay2 tr0 1e-2 3 * 10
+    amp   = tExpRand 'a' 0.8 1 tr0
     dur   = 0.1
     tr0   = tr_control "t_tr0" 1
 
@@ -403,6 +410,40 @@ synth_snr01 = out (control KR "out" 0) sig0
     aenv2 = envGen KR tr0 1 0 0.1 DoNothing ash2
     ash2  = envCoord [(0,0),(1e-2,1),(0.2,0.8),(1,0)] 1 1 EnvCub
     tr0   = tr_control "t_tr0" 1
+
+-- | Simple percussive sound.
+synth_prc01 :: UGen
+synth_prc01 = out (control KR "out" 0) sig0
+  where
+    sig0  = mix (rhpf sig2 (freqs*0.759) (aenv1+1e-3)) * aenv0 * 0.1
+    freqs = mce [  889 + (lfdNoise3 'a' KR (1/100) * 200)
+                , 1829 + (lfdNoise3 'b' KR (1/200) * 800)
+                , 2803 + (lfdNoise3 'c' KR (1/300) * 1820)
+                , 5231 + (lfdNoise3 'd' KR (1/400) * 3800)
+                ]
+    sig2  = whiteNoise 'W' AR
+    aenv0 = envGen KR tr0 1 0 dur DoNothing ash0
+    ash0  = envCoord [(0,0),(1e-4,1),(1,0)] 1 1 EnvCub
+    aenv1 = decay2 tr0 1e-4 0.1
+    dur   = 0.3
+    tr0   = tr_control "t_tr0" 1
+
+-- | Simple sines, percussive chords with impulse triggers.
+synth_sine01 :: UGen
+synth_sine01 = out (control KR "out" 0) sig0
+  where
+    sig0 = mix (sinOsc AR freq 0) * aenv * 0.06
+    freq = select (mce idx) (mce pchs)
+    idx  = [tIRand n 0 (constant $ length pchs - 1) tr0 | n <-"alskdf*&%"]
+    pchs = foldr (\o acc -> map (midiCPS . (+o)) degs ++ acc) [] octs
+    octs = take 5 $ iterate (+12) 48
+    degs = [0,2,4,5,7,11]
+    aenv = decay2 tr1 1e-4 dur
+    dur  = 0.125
+    tr1  = impulse KR df 0 + tr0
+    df   = linLin (lfdNoise0 'f' KR dff) (-1) 1 1 32
+    dff  = tExpRand 'd' 1 8 tr0
+    tr0  = tr_control "t_tr0" 1
 
 -- | Simple mixer.
 synth_mixer01 :: UGen
@@ -431,6 +472,7 @@ synth_mixer01 = replaceOut 0 (sigs0 * dbAmp mamp)
     rq    = k "rq" 0.999
     k n v = control KR n v `lag` 0.2
 
+-- | All 'Synthdef's starting with /synth_/ in this module.
 synthdefs :: [Synthdef]
 synthdefs = $synthdefGenerator
 
