@@ -62,10 +62,15 @@ nodes =
       t05 = rb 105 4
       t06 = rb 106 5
       t07 = rb 107 6
+      t08 = rb 108 7
+      t09 = rb 109 8
+      t10 = rb 110 9
+      t11 = rb 111 10
+      t12 = rb 112 11
   in  grp 0
       [ grp 1
         [ grp 10
-          [ t00, t01, t02, t03, t04, t05, t06, t07 ]
+          [t00, t01, t02, t03, t04, t05, t06, t07, t08, t09, t10, t11, t12]
         , grp 11
           [ syn "bd01"
             ["out"*=0,"freq"*=70,"dur"*=0.12,"t_tr0"*<-t01-*"out"]
@@ -85,6 +90,8 @@ nodes =
             ["out"*=7,"t_tr0"*<-t06-*"out"]
           , syn "sine02"
             ["out"*=8,"t_tr0"*<-t07-*"out"]
+          , syn "pulse01"
+            ["out"*=9,"t_tr0"*<-t08-*"out"]
           ]
         , grp 12
           [ syn "mixer01" [] ]
@@ -362,6 +369,26 @@ synth_saw01 = out (control KR "out" 1) sig0
     tr3      = coinGate 'G' 0.38 tr1
     cfhi     = control KR "cfhi" 8000 `lag` 0.1
     ftrr     = control KR "ftrr" (1/16) `lag` 0.1
+
+-- | Simple pulse chord.
+synth_pulse01 :: UGen
+synth_pulse01 = out (control KR "out" 0) sig0
+  where
+    sig0 = bLowPass sig1 cf rq * aenv * 0.3
+    sig1 = mix (pulse AR (mce freq) wdt)
+    freq = map (\i -> select (tIRand i 0 (constant (length pchs) - 1) tr0)
+                      (mce pchs))
+           [0..3::Int]
+    pchs = foldr (\o acc -> map (midiCPS . (+o)) degs ++ acc) [] octs
+    octs = take 3 $ iterate (+12) 48
+    degs = [0,2,5,7]
+    wdt  = linLin (lfdNoise3 'W' KR 0.25) (-1) 1 0 0.5
+    cf   = linLin (lfdNoise3 'C' KR 3) (-1) 1 100 2000
+    rq   = linLin (lfdNoise3 'Q' KR 5) (-1) 1 0.1 0.9
+    aenv = envGen KR tr0 1 0 dur DoNothing ash
+    ash  = Envelope [0,1,1,0.3,0] [0.001,0.1,0.9,0.1] [EnvCub] Nothing Nothing
+    dur  = 8
+    tr0  = tr_control "t_tr0" 1
 
 -- | Simple bass drum sound.
 synth_bd01 :: UGen
