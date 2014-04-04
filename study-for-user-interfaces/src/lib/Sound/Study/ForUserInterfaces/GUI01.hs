@@ -61,10 +61,11 @@ nodes =
       t04 = rb 104 3
       t05 = rb 105 4
       t06 = rb 106 5
+      t07 = rb 107 6
   in  grp 0
       [ grp 1
         [ grp 10
-          [ t00, t01, t02, t03, t04, t05, t06 ]
+          [ t00, t01, t02, t03, t04, t05, t06, t07 ]
         , grp 11
           [ syn "bd01"
             ["out"*=0,"freq"*=70,"dur"*=0.12,"t_tr0"*<-t01-*"out"]
@@ -82,6 +83,8 @@ nodes =
             ["out"*=6,"tr1"*<-t00-*"out","cfhi"*=7562,"ftrr"*=0.1]
           , syn "sine01"
             ["out"*=7,"t_tr0"*<-t06-*"out"]
+          , syn "sine02"
+            ["out"*=8,"t_tr0"*<-t07-*"out"]
           ]
         , grp 12
           [ syn "mixer01" [] ]
@@ -462,6 +465,21 @@ synth_sine01 = out (control KR "out" 0) sig0
     tr1  = impulse KR df 0 + tr0
     df   = linLin (lfdNoise0 'f' KR dff) (-1) 1 1 32
     dff  = tExpRand 'd' 1 8 tr0
+    tr0  = tr_control "t_tr0" 1
+
+-- | Simple sine, with echo.
+synth_sine02 :: UGen
+synth_sine02 = out (control KR "out" 0) sig0
+  where
+    sig0 = combC (sinOsc AR freq 0 * aenv) 0.15 0.15 8 * 0.3
+    freq = select idx (mce pchs)
+    pchs = foldr (\o acc -> map (midiCPS . (+o)) degs ++ acc) [] octs
+    octs = take 3 $ iterate (+12) 60
+    degs = [0,2,4,5,7,9,11]
+    idx  = tIRand 'p' 0 (constant $ length pchs - 1) tr0
+    aenv = envGen KR tr0 1 0 dur DoNothing ash
+    ash  = Envelope [0,1,0.8,0] [0.001,0.099,0.9] [EnvCub] Nothing Nothing
+    dur  = 0.3
     tr0  = tr_control "t_tr0" 1
 
 -- | Simple mixer.
