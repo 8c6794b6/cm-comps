@@ -39,13 +39,14 @@ import qualified Graphics.UI.Threepenny.Extra as Extra
 -- | Main entry point.
 main :: IO ()
 main = withSC3 $ \fd -> do
-    mapM_ (\x -> async fd $ b_alloc x 32 1) [0..11]
 
+    -- buffers for toggled sequences
+    mapM_ (\x -> async fd $ b_alloc x 32 1) [0..11]
     -- buffers for grouping mute/unmute
     mapM_ (\x -> async fd $ b_alloc x 12 1) [100,101,102]
-
     mapM_ (async fd . d_recv) synthdefs
     runReaderT (patchNode $ nodify nodes) fd
+
     static <- Extra.getStaticDir
     tid <- forkIO $ startGUI defaultConfig {tpStatic=Just static} (setup fd)
     getChar >> killThread tid
@@ -83,15 +84,17 @@ nodes =
           , syn "nz01"
             ["out"*=4,"t_tr0"*<-t05-*"out"]
           , syn "add01"
-            ["out"*=5,"tr1"*<-t00-*"out","faf"*=9.45,"hps"*=2.80]
+            ["out"*=5,"t_tr0"*<-t06-*"out","tr1"*<-t00-*"out"
+            ,"faf"*=9.45,"hps"*=2.80]
           , syn "saw01"
-            ["out"*=6,"tr1"*<-t00-*"out","cfhi"*=7562,"ftrr"*=0.1]
+            ["out"*=6,"t_tr0"*<-t07-*"out","tr1"*<-t00-*"out"
+            ,"cfhi"*=7562,"ftrr"*=0.1]
           , syn "sine01"
-            ["out"*=7,"t_tr0"*<-t06-*"out"]
+            ["out"*=7,"t_tr0"*<-t08-*"out"]
           , syn "sine02"
-            ["out"*=8,"t_tr0"*<-t07-*"out"]
+            ["out"*=8,"t_tr0"*<-t09-*"out"]
           , syn "pulse01"
-            ["out"*=9,"t_tr0"*<-t08-*"out"]
+            ["out"*=9,"t_tr0"*<-t10-*"out"]
           ]
         , grp 12
           [ syn "mixer01" [] ]
@@ -341,7 +344,7 @@ synth_add01 = out (control KR "out" 0) sig0
     ash  = envCoord [(0,0),(atk,1),(sus,1),(1,0)] 1 1 EnvCub
     atk  = tExpRand 'A' 0.01 0.999 tr0
     sus  = tExpRand 's' 0.01 (1-atk) tr0
-    tr0  = coinGate 'G' 0.8 (impulse KR hps 0)
+    tr0  = control KR "t_tr0" 1
     dur  = recip hps
     faf  = control KR "faf" 9.23 `lag` 0.1
     hps  = control KR "hps" 0.3 `lag` 0.1
@@ -366,7 +369,7 @@ synth_saw01 = out (control KR "out" 1) sig0
     zo0      = toggleFF (dust 'D' KR 1)
     tr1      = control KR "tr1" 0
     tr2      = coinGate 'g' ftrr tr1
-    tr3      = coinGate 'G' 0.38 tr1
+    tr3      = tr_control "t_tr0" 1
     cfhi     = control KR "cfhi" 8000 `lag` 0.1
     ftrr     = control KR "ftrr" (1/16) `lag` 0.1
 
@@ -374,8 +377,8 @@ synth_saw01 = out (control KR "out" 1) sig0
 synth_pulse01 :: UGen
 synth_pulse01 = out (control KR "out" 0) sig0
   where
-    sig0 = bLowPass sig1 cf rq * aenv * 0.3
-    sig1 = mix (pulse AR (mce freq) wdt)
+    sig0 = bLowPass sig1 cf rq * aenv * 0.15
+    sig1 = mix (pulse AR (mce freq `lag2` 0.05) wdt)
     freq = map (\i -> select (tIRand i 0 (constant (length pchs) - 1) tr0)
                       (mce pchs))
            [0..3::Int]
