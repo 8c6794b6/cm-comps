@@ -39,7 +39,7 @@ import qualified Graphics.UI.Threepenny.Extra as Extra
 -- | Main entry point.
 main :: IO ()
 main = withSC3 $ \fd -> do
-    mapM_ (\x -> async fd $ b_alloc x 32 1) [0..8]
+    mapM_ (\x -> async fd $ b_alloc x 32 1) [0..11]
 
     -- buffers for grouping mute/unmute
     mapM_ (\x -> async fd $ b_alloc x 12 1) [100,101,102]
@@ -60,10 +60,11 @@ nodes =
       t03 = rb 103 2
       t04 = rb 104 3
       t05 = rb 105 4
+      t06 = rb 106 5
   in  grp 0
       [ grp 1
         [ grp 10
-          [ t00, t01, t02, t03, t04, t05 ]
+          [ t00, t01, t02, t03, t04, t05, t06 ]
         , grp 11
           [ syn "bd01"
             ["out"*=0,"freq"*=70,"dur"*=0.12,"t_tr0"*<-t01-*"out"]
@@ -73,12 +74,14 @@ nodes =
             ["out"*=2,"t_tr0"*<-t03-*"out"]
           , syn "prc01"
             ["out"*=3,"t_tr0"*<-t04-*"out"]
+          , syn "nz01"
+            ["out"*=4,"t_tr0"*<-t05-*"out"]
           , syn "add01"
-            ["out"*=4,"tr1"*<-t00-*"out","faf"*=9.45,"hps"*=2.80]
+            ["out"*=5,"tr1"*<-t00-*"out","faf"*=9.45,"hps"*=2.80]
           , syn "saw01"
-            ["out"*=5,"tr1"*<-t00-*"out","cfhi"*=7562,"ftrr"*=0.1]
+            ["out"*=6,"tr1"*<-t00-*"out","cfhi"*=7562,"ftrr"*=0.1]
           , syn "sine01"
-            ["out"*=6,"t_tr0"*<-t05-*"out"]
+            ["out"*=7,"t_tr0"*<-t06-*"out"]
           ]
         , grp 12
           [ syn "mixer01" [] ]
@@ -416,16 +419,32 @@ synth_prc01 :: UGen
 synth_prc01 = out (control KR "out" 0) sig0
   where
     sig0  = mix (rhpf sig2 (freqs*0.759) (aenv1+1e-3)) * aenv0 * 0.1
-    freqs = mce [  889 + (lfdNoise3 'a' KR (1/100) * 200)
-                , 1829 + (lfdNoise3 'b' KR (1/200) * 800)
-                , 2803 + (lfdNoise3 'c' KR (1/300) * 1820)
-                , 5231 + (lfdNoise3 'd' KR (1/400) * 3800)
+    freqs = mce [  889 + (lfdNoise3 'a' KR (1/30) * 200)
+                , 1829 + (lfdNoise3 'b' KR (1/60) * 800)
+                , 2803 + (lfdNoise3 'c' KR (1/120) * 1820)
+                , 5231 + (lfdNoise3 'd' KR (1/240) * 3800)
                 ]
     sig2  = whiteNoise 'W' AR
     aenv0 = envGen KR tr0 1 0 dur DoNothing ash0
     ash0  = envCoord [(0,0),(1e-4,1),(1,0)] 1 1 EnvCub
     aenv1 = decay2 tr0 1e-4 0.1
     dur   = 0.3
+    tr0   = tr_control "t_tr0" 1
+
+-- | Simple filtered white noise sound.
+synth_nz01 :: UGen
+synth_nz01 = out (control KR "out" 0) sig0
+  where
+    sig0  = mix (resonz sig1 cf rq) * aenv0 * 0.1
+    sig1  = whiteNoise 'ω' AR
+    fenv  = envGen KR tr0 1 0 dur DoNothing
+    aenv0 = fenv ash0
+    ash0  = Envelope [0,1,1,0] [0.7,0.2,0.1] [EnvNum 2] Nothing Nothing
+    cf    = mce [2000,4100,6300,8800] * fenv0
+    fenv0 = fenv fsh0
+    fsh0  = Envelope [0.001,1] [1] [EnvExp] Nothing Nothing
+    rq    = aenv0 * 3 + 0.001
+    dur   = 0.4
     tr0   = tr_control "t_tr0" 1
 
 -- | Simple sines, percussive chords with impulse triggers.
@@ -474,7 +493,7 @@ synth_mixer01 = replaceOut 0 (sigs0 * dbAmp mamp)
 
 -- | All 'Synthdef's starting with /synth_/ in this module.
 synthdefs :: [Synthdef]
-synthdefs = $synthdefGenerator
+synthdefs = $(synthdefGenerator)
 
 -- --------------------------------------------------------------------------
 --
