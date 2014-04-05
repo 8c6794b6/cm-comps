@@ -95,6 +95,8 @@ nodes =
             ["out"*=8,"t_tr0"*<-t09-*"out"]
           , syn "pulse01"
             ["out"*=9,"t_tr0"*<-t10-*"out"]
+          , syn "add02"
+            ["out"*=10,"t_tr0"*<-t11-*"out"]
           ]
         , grp 12
           [ syn "mixer01" [] ]
@@ -349,6 +351,41 @@ synth_add01 = out (control KR "out" 0) sig0
     faf  = control KR "faf" 9.23 `lag` 0.1
     hps  = control KR "hps" 0.3 `lag` 0.1
     tr1  = control KR "tr1" 0
+
+-- | Simple additive synth with 'clip2'.
+synth_add02 :: UGen
+synth_add02 = out (control KR "out" 0) sig0
+  where
+    sig0  = rlpf (sig1+sig2+sig3) 8000 0.1 * 0.1 * aenv1
+    sig1  = resonz sig4 12000 0.3
+    sig2  = bBandStop sig4 1000 0.9
+    sig3  = resonz sig4 125 0.6
+    sig4  = sig5 + sig6
+    sig5  = clip2 (mix (sinOsc AR freq 0 * aenv0 * pamp)) 1
+    sig6  = rlpf sig7 14000 0.8 * aenv2
+    sig7  = brownNoise 'B' AR
+    freq  = tChoose 'T' tr1 (mce [frq 0,frq 5,frq 7]) `lag2` 0.01
+    frq x = mce $ concat
+            [[y,y*2.999,y*6.001,y*8.999]|y<-map midiCPS [x+36,x+43,x+48]]
+    pamp  = 20
+    aenv0 = envGen KR tr0 amp 0 dur DoNothing ash0
+    ash0  = Envelope [0,1,0.1,0.005,0] [0.002,0.08,0.85,0.08] [EnvNum (-2)]
+            Nothing Nothing
+    aenv1 = envGen KR tr0 1 0 0.4 DoNothing ash1
+    ash1  = Envelope [1,1,1,0] [0.005,0.99,0.005] [EnvCub] (Just 0) Nothing
+    aenv2 = envGen KR tr0 1 0 0.1 DoNothing $
+            Envelope [0,1,0] [0.1,0.9] [EnvSqr] (Just 0) Nothing
+    dur   = 3
+    amp   = tExpRand 'A' 0.5 1 tr0
+    tr0   = tr_control "t_tr0" 1
+    tr1   = coinGate 'g' 0.125 tr0
+
+-- | Plays 'synth_add02' with 'synth_trig00'.
+go_add02 :: IO ()
+go_add02 = withSC3 $ \fd -> do
+    play fd synth_add02
+    send fd $ n_map (-1) [("t_tr0",100)]
+    send fd $ s_new "trig00" (-1) AddBefore (-1) [("out",100)]
 
 -- | Simple saw tooth oscillator.
 synth_saw01 :: UGen
