@@ -414,7 +414,7 @@ synth_saw01 = out (control KR "out" 1) sig0
 synth_pulse01 :: UGen
 synth_pulse01 = out (control KR "out" 0) sig0
   where
-    sig0 = bLowPass sig1 cf rq * aenv * 0.15
+    sig0 = rlpf sig1 cf rq * aenv * 0.1
     sig1 = mix (pulse AR (mce freq `lag2` 0.05) wdt)
     freq = map (\i -> select (tIRand i 0 (constant (length pchs) - 1) tr0)
                       (mce pchs))
@@ -423,7 +423,7 @@ synth_pulse01 = out (control KR "out" 0) sig0
     octs = take 3 $ iterate (+12) 48
     degs = [0,2,5,7]
     wdt  = linLin (lfdNoise3 'W' KR 0.25) (-1) 1 0 0.5
-    cf   = linLin (lfdNoise3 'C' KR 3) (-1) 1 100 2000
+    cf   = linExp (lfdNoise3 'C' KR 3 + 2) 1 3 400 12000
     rq   = linLin (lfdNoise3 'Q' KR 5) (-1) 1 0.1 0.9
     aenv = envGen KR tr0 1 0 dur DoNothing ash
     ash  = Envelope [0,1,1,0.3,0] [0.001,0.1,0.9,0.1] [EnvCub] Nothing Nothing
@@ -523,7 +523,8 @@ synth_sine01 = out (control KR "out" 0) sig0
   where
     sig0 = mix (sinOsc AR freq 0) * aenv * 0.06
     freq = select (mce idx) (mce pchs)
-    idx  = [tIRand n 0 (constant $ length pchs - 1) tr0 | n <-"alskdf*&%"]
+    idx  = [ tIRand n 0 (constant $ length pchs - 1) (coinGate n 0.5 tr0)
+           | n <-"alskdf*&%" ]
     pchs = foldr (\o acc -> map (midiCPS . (+o)) degs ++ acc) [] octs
     octs = take 5 $ iterate (+12) 48
     degs = [0,2,4,5,7,11]
