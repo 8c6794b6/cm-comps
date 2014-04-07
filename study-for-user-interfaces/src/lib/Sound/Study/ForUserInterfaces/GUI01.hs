@@ -97,6 +97,8 @@ nodes =
             ["out"*=9,"t_tr0"*<-t10-*"out"]
           , syn "add02"
             ["out"*=10,"t_tr0"*<-t11-*"out"]
+          , syn "fm01"
+            ["out"*=11,"t_tr0"*<-t12-*"out"]
           ]
         , grp 12
           [ syn "mixer01" [] ]
@@ -549,6 +551,33 @@ synth_sine02 = out (control KR "out" 0) sig0
     ash  = Envelope [0,1,0.8,0] [0.001,0.099,0.9] [EnvCub] Nothing Nothing
     dur  = 0.3
     tr0  = tr_control "t_tr0" 1
+
+-- | Simple FM bass.
+synth_fm01 :: UGen
+synth_fm01 = out (control KR "out" 0) (mix sig0)
+  where
+    sig0  = mix (sinOsc AR freq phase) * amp0 * 0.005
+    -- freq  = demand tr2 0 (midiCPS dfs) `lag2` lagt
+    -- dfs   = dseq 'a' dinf (dshuf 'b' 1 (mce $ map (+36) [0,5,7]))
+    freq  = midiCPS (36 + df) `lag2` lagt
+    df    = tWChoose 'F' tr0 (mce [0,2,5,7]) (mce [0.95, 0.1, 0.1, 0.3]) 0
+    phase = mce
+            [ sinOsc AR (freq*x) 0 *
+              envGen KR tr1 mi 0 (f*0.1) DoNothing
+              (envCoord [(0,0),(tExpRand i 0.001 1 tr1,1),(1,0)] 1 1 EnvCub)
+            | x <- [0.9999, 2.003, 3.999, 6.001, 8.001]
+            , i <- "abcde"
+            , f <- [0.15, 0.24, 0.12, 0.41, 0.08]]
+    mi    = linExp (lfdNoise3 'M' KR 0.3 + 2) 1 3 1 maxi
+    maxi  = control KR "maxi" 8
+    lagt  = (1/64) * (2 ** tIRand 'L' 0 4 tr0)
+    amp0  = envGen KR tr0 amp 0 dur DoNothing $
+            envCoord [(0,0),(0.001,1),(0.2,0.2),(1,0.1)] 1 1 EnvCub
+    dur   = control KR "dur" 2
+    amp   = tExpRand 'A' 0.5 1 tr0
+    tr0   = tr_control "t_tr0" 1
+    tr1   = coinGate 'G' 0.6 tr0
+    tr2   = coinGate 'F' (1/128) tr0 + tr_control "ini" 1
 
 -- | Simple mixer.
 synth_mixer01 :: UGen
