@@ -225,7 +225,7 @@ setup fd window = do
                 ] # set style [("float","left")]
 
     -- mutes
-    mutes <- do
+    (mutes, _radios) <- do
         radios <- forM [100,101,102::Int] $ \n -> do
             radio <- UI.input
                 # set UI.type_ "radio"
@@ -243,15 +243,16 @@ setup fd window = do
             let val = reads str
             unless (null val) $ liftIO $
                 send fd $ n_set mixer01nid [("lagt", fst (head val))]
-        UI.new #+ [ element lagt
-                    # set style [("float","center")]
-                  , divClear
-                  , UI.new
-                    #+ map element radios
-                    # set style [("float","center")
-                                ,("margin","5px")
-                                ]
-                  ]
+        mutes <- UI.new #+ [ element lagt
+                            # set style [("float","center")]
+                          , divClear
+                          , UI.new
+                            #+ map element radios
+                            # set style [("float","center")
+                                        ,("margin","5px")
+                                        ]
+                          ]
+        return (mutes, radios)
             -- # set style [("float","left")]
 
     mstr <- UI.new #+
@@ -557,8 +558,6 @@ synth_fm01 :: UGen
 synth_fm01 = out (control KR "out" 0) (mix sig0)
   where
     sig0  = mix (sinOsc AR freq phase) * amp0 * 0.005
-    -- freq  = demand tr2 0 (midiCPS dfs) `lag2` lagt
-    -- dfs   = dseq 'a' dinf (dshuf 'b' 1 (mce $ map (+36) [0,5,7]))
     freq  = midiCPS (36 + df) `lag2` lagt
     df    = tWChoose 'F' tr0 (mce [0,2,5,7]) (mce [0.95, 0.1, 0.1, 0.3]) 0
     phase = mce
@@ -577,7 +576,6 @@ synth_fm01 = out (control KR "out" 0) (mix sig0)
     amp   = tExpRand 'A' 0.5 1 tr0
     tr0   = tr_control "t_tr0" 1
     tr1   = coinGate 'G' 0.6 tr0
-    tr2   = coinGate 'F' (1/128) tr0 + tr_control "ini" 1
 
 -- | Simple mixer.
 synth_mixer01 :: UGen
