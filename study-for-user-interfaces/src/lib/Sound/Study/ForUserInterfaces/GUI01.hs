@@ -74,7 +74,7 @@ nodes =
           [t00, t01, t02, t03, t04, t05, t06, t07, t08, t09, t10, t11, t12]
         , grp 11
           [ syn "bd01"
-            ["out"*=0,"freq"*=70,"dur"*=0.12,"t_tr0"*<-t01-*"out"]
+            ["out"*=0,"freq"*=63,"dur"*=0.09,"t_tr0"*<-t01-*"out"]
           , syn "hat01"
             ["out"*=1,"t_tr0"*<-t02-*"out"]
           , syn "snr01"
@@ -442,7 +442,7 @@ synth_bd01 = out (control KR "out" 0) sig0
     phase = sinOsc AR (freq*5.29) 0 * aenv0 * 9
     aenv0 = envGen KR tr0 1 0 0.01 DoNothing $ ash0
     aenv1 = envGen KR tr0 1 0 dur DoNothing $ ash0
-    ash0  = envCoord [(0,0),(1e-4,1),(4e-1,0.8),(1,0)] 1 1 EnvCub
+    ash0  = envCoord [(0,0),(1e-4,1),(5e-1,0.8),(1,0)] 1 1 EnvCub
     freqs = mce $ map (*freq) [1, 1.32, 1.732, 2.79]
     cf    = 20000 * aenv0 + freq
     rq    = 0.99
@@ -524,12 +524,12 @@ synth_sine01 = out (control KR "out" 0) sig0
     sig0 = mix (sinOsc AR freq 0) * aenv * 0.06
     freq = select (mce idx) (mce pchs)
     idx  = [ tIRand n 0 (constant $ length pchs - 1) (coinGate n 0.5 tr0)
-           | n <-"alskdf*&%" ]
+           | n <-"alskdf*&%@1289-+" ]
     pchs = foldr (\o acc -> map (midiCPS . (+o)) degs ++ acc) [] octs
-    octs = take 5 $ iterate (+12) 48
+    octs = take 6 $ iterate (+12) 48
     degs = [0,2,4,5,7,11]
     aenv = decay2 tr1 1e-4 dur
-    dur  = 0.125
+    dur  = (recip df * 1.25) `lag2` 0.15
     tr1  = impulse KR df 0 + tr0
     df   = linLin (lfdNoise0 'f' KR dff) (-1) 1 1 32
     dff  = tExpRand 'd' 1 8 tr0
