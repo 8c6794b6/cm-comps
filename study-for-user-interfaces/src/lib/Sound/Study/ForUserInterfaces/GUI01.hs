@@ -13,7 +13,7 @@ Graphical user interface, take 1.
 module Sound.Study.ForUserInterfaces.GUI01 where
 
 import           Control.Concurrent (forkIO, killThread)
-import           Control.Monad (forM, unless, void)
+import           Control.Monad (foldM_, forM, unless, void, when)
 import           Control.Monad.Reader (runReaderT)
 import           Data.Maybe (catMaybes)
 import           Text.Printf (printf)
@@ -182,50 +182,11 @@ setup fd window = do
         liftIO $ send fd $ n_set mixer01nid [("cf",x'),("rq",y')]
         return $ printf "(%3.2f,%3.2f)" x' y'
 
-    -- mixer
+    -- div for layout
     let divClear = UI.div # set style [("clear","both")]
-        vrm :: String -> Int -> Double -> Double -> Double -> UI Element
-        vrm l n minv maxv iniv = vr (l++show n) mixer01nid minv maxv iniv
-        amp_x_pan n = do
-            let fpan v = do
-                    liftIO $ send fd $ n_set mixer01nid [("pos"++show n,v)]
-                    return ""
-                feff v =
-                    liftIO $ send fd $
-                    n_set mixer01nid [("efx"++show n,if v then 1 else 0)]
-                fmute k v = liftIO $ do
-                    let v' = if v then 1 else 0
-                    send fd $ b_setn1 (100+k) n [v']
-            UI.new #+
-                [ Extra.toggleBox "" 15 15 (fmute 0)
-                  # set style [("float","center")
-                              ,("margin","5px auto 0 auto")]
-                , divClear
-                , Extra.toggleBox "" 15 15 (fmute 1)
-                  # set style [("float","center")
-                              ,("margin","5px auto 0 auto")]
-                , divClear
-                , Extra.toggleBox "" 15 15 (fmute 2)
-                  # set style [("float","center")
-                              ,("margin","5px auto 0 auto")]
-                , divClear
-                , Extra.hslider "pan" 40 12 (-1) 1 0 fpan
-                  # set style [("float","left")
-                              ,("margin-bottom","5px")
-                              ]
-                , divClear
-                , Extra.toggleBox "fx" 15 15 feff
-                  # set style [("float","center")
-                              ,("margin","5px auto 0 auto")]
-                , divClear
-                , vrm "amp" n (-60) 25 0
-                  # set style [("float","center")
-                              ,("margin","5px auto 15px auto")
-                              ]
-                ] # set style [("float","left")]
 
     -- mutes
-    (mutes, _radios) <- do
+    (mutes, radios) <- do
         radios <- forM [100,101,102::Int] $ \n -> do
             radio <- UI.input
                 # set UI.type_ "radio"
@@ -254,6 +215,54 @@ setup fd window = do
                           ]
         return (mutes, radios)
             -- # set style [("float","left")]
+
+    -- mixer
+    let vrm :: String -> Int -> Double -> Double -> Double -> UI Element
+        vrm l n minv maxv iniv = vr (l++show n) mixer01nid minv maxv iniv
+        amp_x_pan n = do
+            let fpan v = do
+                    liftIO $ send fd $ n_set mixer01nid [("pos"++show n,v)]
+                    return ""
+                feff v =
+                    liftIO $ send fd $
+                    n_set mixer01nid [("efx"++show n,if v then 1 else 0)]
+                fmute k v = do
+                    let v' = if v then 1 else 0
+                        fradio _ radio = do
+                            isChecked <- get UI.checked radio
+                            radioValue <- get value radio
+                            when (isChecked && radioValue == show (100+k)) $
+                                liftIO $ send fd $ n_set mixer01nid
+                                    [("mute"++show n, realToFrac v')]
+                    liftIO $ send fd $ b_setn1 (100+k) n [v']
+                    foldM_ fradio () radios
+            UI.new #+
+                [ Extra.toggleBox "" 15 15 (fmute 0)
+                  # set style [("float","center")
+                              ,("margin","5px auto 0 auto")]
+                , divClear
+                , Extra.toggleBox "" 15 15 (fmute 1)
+                  # set style [("float","center")
+                              ,("margin","5px auto 0 auto")]
+                , divClear
+                , Extra.toggleBox "" 15 15 (fmute 2)
+                  # set style [("float","center")
+                              ,("margin","5px auto 0 auto")]
+                , divClear
+                , Extra.hslider "pan" 40 12 (-1) 1 0 fpan
+                  # set style [("float","left")
+                              ,("margin-bottom","5px")
+                              ]
+                , divClear
+                , Extra.toggleBox "fx" 15 15 feff
+                  # set style [("float","center")
+                              ,("margin","5px auto 0 auto")]
+                , divClear
+                , vrm "amp" n (-60) 25 0
+                  # set style [("float","center")
+                              ,("margin","5px auto 15px auto")
+                              ]
+                ] # set style [("float","left")]
 
     mstr <- UI.new #+
             ( UI.div #+
