@@ -16,6 +16,7 @@ import           Control.Concurrent (forkIO, killThread)
 import           Control.Monad (foldM_, forM, unless, void, when)
 import           Control.Monad.Reader (runReaderT)
 import           Data.Maybe (catMaybes)
+import           System.Random (newStdGen, randomRs)
 import           Text.Printf (printf)
 
 import           Sound.OSC.FD
@@ -219,7 +220,7 @@ setup fd window = do
         return (mutes, radios)
 
     -- mixer and sequence grids
-    let fgrids lbl n = do
+    let track lbl n = do
             (grids, _boxes) <- Extra.toggleGrids 32 1 $ \(_i,j) val ->
                 liftIO $ send fd $ b_set n [(j, fromIntegral val)]
             let fpan v = do
@@ -243,8 +244,33 @@ setup fd window = do
                     foldM_ fr () radios
                 muteBox m = Extra.toggleBox "" 15 15 (fmute m)
                             # set style [("float","left")
-                                        ,("margin","12px 3px 0")
+                                        ,("margin","12px 4px 0")
                                         ]
+                mkbtn val act = do
+                    btn <- UI.input
+                        # set UI.type_ "button"
+                        # set value val
+                        # set style [("font-size","10px")
+                                    ,("margin","12px 3px 0 3px")
+                                    ,("float", "left")
+                                    ]
+                    on UI.click btn $ act
+                    return btn
+
+                (_,boxes) = unzip _boxes
+
+            clearButton <- mkbtn "c" $ \_ -> do
+                mapM_ Extra.turnOffGrid boxes
+                liftIO $ send fd $ b_setn1 n 0 (replicate 32 0)
+
+            randButton <- mkbtn "r" $ \_ -> do
+                g0 <- liftIO newStdGen
+                let vals = take 32 $ randomRs (0,1::Int) g0
+                mapM_ (\(v,b) -> if v == 1 then Extra.turnOnGrid b
+                                 else Extra.turnOffGrid b)
+                    (zip vals boxes)
+                liftIO $ send fd $ b_setn1 n 0 (map realToFrac vals)
+
             UI.new #+
                 [ muteBox 0
                 , muteBox 1
@@ -256,6 +282,8 @@ setup fd window = do
                               ,("margin","2px 3px 0")]
                 , Extra.hslider ("amp"++show n) 40 12 (-60) 25 0 famp
                   # set style [("float", "left")]
+                , element clearButton
+                , element randButton
                 , element grids
                   # set style [("margin-top","6px")]
                 , divClear
@@ -277,7 +305,7 @@ setup fd window = do
         [ element stDiv
         , UI.new #
           set style
-          [("margin","0 auto"),("width", "1020px"),("padding","5px")] #+
+          [("margin","0 auto"),("width", "1100px"),("padding","5px")] #+
           ([ UI.new #
             set style [("float","left")] #+
             [ element mutes, element lmt, element mamp
@@ -285,7 +313,7 @@ setup fd window = do
             ]
           , divClear
           ] ++
-           concatMap (\(lbl,n) -> [fgrids lbl n, divClear])
+           concatMap (\(lbl,n) -> [track lbl n, divClear])
            (zip synths [0..11]) ++
           [ UI.new #
             set style
