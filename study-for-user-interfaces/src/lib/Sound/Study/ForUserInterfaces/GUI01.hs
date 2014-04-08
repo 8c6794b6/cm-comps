@@ -153,6 +153,10 @@ setup fd window = do
     mamp <- Extra.hslider "mamp" 128 20 (-60) 25 0 (\v -> do
         liftIO $ send fd $ n_set mixer01nid [("mamp",v)]
         return $ printf "%3.2f" v) # set style [("float","left")]
+    lmt <- do
+        Extra.toggleBox "lmt" 15 15 (\checked ->
+            liftIO $ send fd $ n_set mixer01nid [("lmt",if checked then 1 else 0)])
+            # set style [("margin","10px 5px 0px 5px")]
 
     -- add01
     let iniFafVal = queryParam "faf" add01node
@@ -262,7 +266,7 @@ setup fd window = do
 
     -- layout --
     mapM_ (\e -> element e # set style [("float","left")])
-        [bpm, beat, add01faf, add01hps, revrmix, revroom, revdamp, saw01xy]
+        [bpm, beat, lmt, add01faf, add01hps, revrmix, revroom, revdamp, saw01xy]
 
     let synths = map synthName $ queryN (not . null . synthName) g11
         g11    = case queryN' (nodeId ==? 11) (nodify nodes) of
@@ -276,7 +280,9 @@ setup fd window = do
           [("margin","0 auto"),("width", "1020px"),("padding","5px")] #+
           ([ UI.new #
             set style [("float","left")] #+
-            [ element mutes, element mamp, element bpm, element beat ]
+            [ element mutes, element lmt, element mamp
+            , element bpm, element beat
+            ]
           , divClear
           ] ++
            concatMap (\(lbl,n) -> [fgrids lbl n, divClear])
@@ -572,7 +578,8 @@ synth_fm01 = out (control KR "out" 0) (mix sig0)
 synth_mixer01 :: UGen
 synth_mixer01 = replaceOut 0 (sigs0 * dbAmp mamp)
   where
-    sigs0 = efx (sum sigsA) + sum sigsB
+    sigs0 = (lmt * limiter sigs1 1 0.01) + ((1-lmt) * sigs1)
+    sigs1 = efx (sum sigsA) + sum sigsB
     (sigsA, sigsB) = unzip $ map f [0..12::Int]
     f n   = (sig0*efxc, sig0*(1-efxc))
       where
@@ -593,6 +600,7 @@ synth_mixer01 = replaceOut 0 (sigs0 * dbAmp mamp)
     damp  = k "damp" 0.5
     cf    = k "cf" 2800
     rq    = k "rq" 0.999
+    lmt   = k "lmt" 1
     k n v = control KR n v `lag` 0.2
 
 -- | All 'Synthdef's starting with /synth_/ in this module.
