@@ -86,16 +86,16 @@ nodes =
           , syn "add01"
             ["out"*=5,"t_tr0"*<-t06-*"out","tr1"*<-t00-*"out"
             ,"faf"*=9.45,"hps"*=2.80]
+          , syn "add02"
+            ["out"*=6,"t_tr0"*<-t07-*"out"]
           , syn "saw01"
-            ["out"*=6,"t_tr0"*<-t07-*"out","tr1"*<-t00-*"out"
+            ["out"*=7,"t_tr0"*<-t08-*"out","tr1"*<-t00-*"out"
             ,"cfhi"*=7562,"ftrr"*=0.1]
           , syn "sine01"
-            ["out"*=7,"t_tr0"*<-t08-*"out"]
-          , syn "sine02"
             ["out"*=8,"t_tr0"*<-t09-*"out"]
-          , syn "pulse01"
+          , syn "sine02"
             ["out"*=9,"t_tr0"*<-t10-*"out"]
-          , syn "add02"
+          , syn "pulse01"
             ["out"*=10,"t_tr0"*<-t11-*"out"]
           , syn "fm01"
             ["out"*=11,"t_tr0"*<-t12-*"out"]
@@ -150,6 +150,9 @@ setup fd window = do
     beat <- Extra.hslider "beat (2**(v/2))" 128 20 0 16 iniBeatVal $ \v -> do
         liftIO $ send fd $ n_set tr00nid [("beat",2**(v/2))]
         return $ show v
+    mamp <- Extra.hslider "mamp" 128 20 (-60) 25 0 (\v -> do
+        liftIO $ send fd $ n_set mixer01nid [("mamp",v)]
+        return $ printf "%3.2f" v) # set style [("float","left")]
 
     -- add01
     let iniFafVal = queryParam "faf" add01node
@@ -167,10 +170,6 @@ setup fd window = do
             y' = fromIntegral y / xysiz
         liftIO $ send fd $ n_set saw01nid [("cfhi",x'),("ftrr",y')]
         return $ printf "(%3.2f,%3.2f)" x' y'
-
-    -- buffer
-    (gridboxes, _boxes) <- Extra.toggleGrids 32 12 $ \(i,j) val ->
-        liftIO $ send fd $ b_set i [(j, fromIntegral val)]
 
     -- effects
     revrmix <- vr "rmix" mixer01nid 0 1 0
@@ -204,98 +203,85 @@ setup fd window = do
             let val = reads str
             unless (null val) $ liftIO $
                 send fd $ n_set mixer01nid [("lagt", fst (head val))]
-        mutes <- UI.new #+ [ element lagt
-                            # set style [("float","center")]
-                          , divClear
-                          , UI.new
-                            #+ map element radios
-                            # set style [("float","center")
-                                        ,("margin","5px")
-                                        ]
-                          ]
+        mutes <- UI.new #+ [ UI.new
+                             #+ map element radios
+                             # set style [("float","left")
+                                         ,("margin-top","18px")
+                                         ]
+                           , element lagt
+                             # set style [("float","left")]
+                           ] # set style [("float","left")]
+        void $ element lagt # set style [("float","left")]
         return (mutes, radios)
-            -- # set style [("float","left")]
 
-    -- mixer
-    let vrm :: String -> Int -> Double -> Double -> Double -> UI Element
-        vrm l n minv maxv iniv = vr (l++show n) mixer01nid minv maxv iniv
-        amp_x_pan n = do
+    -- mixer and sequence grids
+    let fgrids lbl n = do
+            (grids, _boxes) <- Extra.toggleGrids 32 1 $ \(_i,j) val ->
+                liftIO $ send fd $ b_set n [(j, fromIntegral val)]
             let fpan v = do
                     liftIO $ send fd $ n_set mixer01nid [("pos"++show n,v)]
                     return ""
-                feff v =
-                    liftIO $ send fd $
-                    n_set mixer01nid [("efx"++show n,if v then 1 else 0)]
+                famp v = do
+                    liftIO $ send fd $ n_set mixer01nid [("amp"++show n,v)]
+                    return ""
+                feff v = do
+                    liftIO $ send fd $ n_set mixer01nid
+                        [("efx"++show n, if v then 1 else 0)]
                 fmute k v = do
                     let v' = if v then 1 else 0
-                        fradio _ radio = do
+                        fr  _ radio = do
                             isChecked <- get UI.checked radio
-                            radioValue <- get value radio
-                            when (isChecked && radioValue == show (100+k)) $
+                            radioVal  <- get value radio
+                            when (isChecked && radioVal == show (100+k)) $
                                 liftIO $ send fd $ n_set mixer01nid
                                     [("mute"++show n, realToFrac v')]
                     liftIO $ send fd $ b_setn1 (100+k) n [v']
-                    foldM_ fradio () radios
+                    foldM_ fr () radios
+                muteBox m = Extra.toggleBox "" 15 15 (fmute m)
+                            # set style [("float","left")
+                                        ,("margin","12px 3px 0")
+                                        ]
             UI.new #+
-                [ Extra.toggleBox "" 15 15 (fmute 0)
-                  # set style [("float","center")
-                              ,("margin","5px auto 0 auto")]
-                , divClear
-                , Extra.toggleBox "" 15 15 (fmute 1)
-                  # set style [("float","center")
-                              ,("margin","5px auto 0 auto")]
-                , divClear
-                , Extra.toggleBox "" 15 15 (fmute 2)
-                  # set style [("float","center")
-                              ,("margin","5px auto 0 auto")]
-                , divClear
+                [ muteBox 0
+                , muteBox 1
+                , muteBox 2
                 , Extra.hslider "pan" 40 12 (-1) 1 0 fpan
-                  # set style [("float","left")
-                              ,("margin-bottom","5px")
-                              ]
-                , divClear
+                  # set style [("float", "left")]
                 , Extra.toggleBox "fx" 15 15 feff
-                  # set style [("float","center")
-                              ,("margin","5px auto 0 auto")]
+                  # set style [("float", "left")
+                              ,("margin","2px 3px 0")]
+                , Extra.hslider ("amp"++show n) 40 12 (-60) 25 0 famp
+                  # set style [("float", "left")]
+                , element grids
+                  # set style [("margin-top","6px")]
                 , divClear
-                , vrm "amp" n (-60) 25 0
-                  # set style [("float","center")
-                              ,("margin","5px auto 15px auto")
-                              ]
-                ] # set style [("float","left")]
-
-    mstr <- UI.new #+
-            ( UI.div #+
-              [ element mutes
-              , vr "mamp" mixer01nid (-60) 25 0
-                # set style [("float","center")
-                            ,("margin","5px auto")
-                            ]
-              ] # set style [("float", "left")]
-            : map amp_x_pan [0..11])
+                , UI.new
+                  # set text lbl
+                  # set style [("font-size","10px")]
+                ]
 
     -- layout --
     mapM_ (\e -> element e # set style [("float","left")])
         [bpm, beat, add01faf, add01hps, revrmix, revroom, revdamp, saw01xy]
 
+    let synths = map synthName $ queryN (not . null . synthName) g11
+        g11    = case queryN' (nodeId ==? 11) (nodify nodes) of
+            Just node -> node
+            Nothing   -> error "node id 11 not found"
+
     void $ getBody window #+
         [ element stDiv
         , UI.new #
           set style
-          [("margin","0 auto"),("width", "980px"),("padding","5px")] #+
+          [("margin","0 auto"),("width", "1020px"),("padding","5px")] #+
+          ([ UI.new #
+            set style [("float","left")] #+
+            [ element mutes, element mamp, element bpm, element beat ]
+          , divClear
+          ] ++
+           concatMap (\(lbl,n) -> [fgrids lbl n, divClear])
+           (zip synths [0..11]) ++
           [ UI.new #
-            set style
-            [("float","left")
-            ,("padding-bottom","5px"),("margin-bottom","5px")] #+
-            [ element bpm, element beat ]
-          , divClear
-          , UI.new #
-            set style
-            [("float","left")
-            ,("padding-bottom","5px"),("margin-bottom","5px")] #+
-            [ element gridboxes ]
-          , divClear
-          , UI.new #
             set style
             [("float","left")
             ,("padding-bottom","5px"),("margin-bottom", "5px")] #+
@@ -305,11 +291,7 @@ setup fd window = do
             , element cf_x_rq
             ]
           , divClear
-          , UI.new #
-            set style [("padding-bottom","5px"),("float","left")] #+
-            [ element mstr ]
-          , divClear
-          ]
+          ])
         ]
     UI.start tmr
 
@@ -582,7 +564,7 @@ synth_fm01 = out (control KR "out" 0) (mix sig0)
     amp0  = envGen KR tr0 amp 0 dur DoNothing $
             envCoord [(0,0),(0.001,1),(0.2,0.2),(1,0.1)] 1 1 EnvCub
     dur   = control KR "dur" 2
-    amp   = tExpRand 'A' 0.5 1 tr0
+    amp   = tExpRand 'A' 0.3 1 tr0
     tr0   = tr_control "t_tr0" 1
     tr1   = coinGate 'G' 0.6 tr0
 
