@@ -12,8 +12,9 @@ Graphical user interface, take 1.
 -}
 module Sound.Study.ForUserInterfaces.GUI01 where
 
+import           Control.Arrow (first)
 import           Control.Concurrent (forkIO, killThread)
-import           Control.Monad (foldM_, forM, unless, void, when)
+import           Control.Monad (foldM, foldM_, forM, forM_, unless, void, when)
 import           Control.Monad.Reader (runReaderT)
 import           Data.Maybe (catMaybes)
 import           System.Random (newStdGen, randomRs)
@@ -29,6 +30,8 @@ import qualified Graphics.UI.Threepenny as UI
 import           Graphics.UI.Threepenny.Core hiding (stepper)
 
 import qualified Graphics.UI.Threepenny.Extra as Extra
+import qualified Sound.Study.ForUserInterfaces.JS as JS
+import           Paths_study_for_user_interfaces (getDataDir)
 
 
 -- --------------------------------------------------------------------------
@@ -107,11 +110,14 @@ nodes =
       , grp 2 []
       ]
 
+type PatternFormat = [(String,[Double])]
+
 -- | Setup GUI with given 'Transport'.
 setup :: Transport t => t -> Window -> UI ()
 setup fd window = do
     void $ return window # set title "gui 01"
     UI.addStyleSheet window "ui.css"
+    Extra.addJavaScript window "ui.js"
 
     currentNodes <- liftIO $ runReaderT getRootNode fd
     let queryByName name =
@@ -134,8 +140,7 @@ setup fd window = do
     -- status div
     (tmr,stDiv) <- Extra.statusDiv fd
 
-    let vr ::
-            String -> Int -> Double -> Double -> Double -> UI Element
+    let vr :: String -> Int -> Double -> Double -> Double -> UI Element
         vr l nid minv maxv iniv =
             Extra.vslider l 30 128 minv maxv iniv $ \v -> do
                 liftIO $ send fd $ n_set nid [(l,v)]
@@ -154,10 +159,10 @@ setup fd window = do
     mamp <- Extra.hslider "mamp" 128 20 (-60) 25 0 (\v -> do
         liftIO $ send fd $ n_set mixer01nid [("mamp",v)]
         return $ printf "%3.2f" v) # set style [("float","left")]
-    lmt <- do
-        Extra.toggleBox "lmt" 15 15 (\checked ->
+    lmt <- Extra.toggleBox "lmt" 15 15 (\checked ->
             liftIO $ send fd $ n_set mixer01nid [("lmt",if checked then 1 else 0)])
             # set style [("margin","10px 5px 0px 5px")]
+
 
     -- add01
     let iniFafVal = queryParam "faf" add01node
@@ -247,9 +252,8 @@ setup fd window = do
                                         ,("margin","12px 4px 0")
                                         ]
                 mkbtn val act = do
-                    btn <- UI.input
-                        # set UI.type_ "button"
-                        # set value val
+                    btn <- UI.button
+                        # set text val
                         # set style [("font-size","10px")
                                     ,("margin","12px 3px 0 3px")
                                     ,("float", "left")
@@ -271,7 +275,7 @@ setup fd window = do
                     (zip vals boxes)
                 liftIO $ send fd $ b_setn1 n 0 (map realToFrac vals)
 
-            UI.new #+
+            wrapper <- UI.new #+
                 [ muteBox 0
                 , muteBox 1
                 , muteBox 2
@@ -291,41 +295,80 @@ setup fd window = do
                   # set text lbl
                   # set style [("font-size","10px")]
                 ]
+            return (wrapper, (lbl,(n,boxes)))
 
     -- layout --
     mapM_ (\e -> element e # set style [("float","left")])
-        [bpm, beat, lmt, add01faf, add01hps, revrmix, revroom, revdamp, saw01xy]
+        [ bpm, beat, lmt, add01faf, add01hps, revrmix, revroom, revdamp
+        , saw01xy
+        ]
 
     let synths = map synthName $ queryN (not . null . synthName) g11
         g11    = case queryN' (nodeId ==? 11) (nodify nodes) of
             Just node -> node
             Nothing   -> error "node id 11 not found"
 
+        tracksM :: UI ([Element],[(String,(Int,[Element]))])
+        tracksM =
+            let go (ts,ps) (lbl,n) =
+                    track lbl n >>= \(t,p) -> return (t:ts,p:ps)
+            in  first reverse <$> foldM go ([],[]) (zip synths [0..11])
+
+    (tracks,lbl_bufn_boxes) <- tracksM
+
+    let openFile act = do
+            btn <- UI.input
+                   # set UI.type_ "file"
+                   # set UI.name "files[]"
+                   # set style [("font-size","10px")
+                               ,("float","left")
+                               ,("width", "150px")
+                               ,("margin","18px 3px 0 3px")
+                               ]
+            on Extra.change btn $ \_ -> act =<< JS.getFileName btn
+            return btn
+
+        fillPatternFormat :: PatternFormat -> UI ()
+        fillPatternFormat pf =
+            forM_ pf $ \(n1,vs) ->
+              forM_ lbl_bufn_boxes $ \(n2,(bufn,boxes)) -> when (n1 == n2) $ do
+                liftIO $ send fd $ b_setn1 bufn 0 vs
+                forM_ (zip vs boxes) $ \(v,b) ->
+                    if v == 1 then Extra.turnOnGrid b else Extra.turnOffGrid b
+
+    -- button to load grid patterns
+    loadButton <- openFile $ \filename -> unless (null filename) $ do
+        datadir <- liftIO getDataDir
+        contents <- liftIO $ readFile (datadir ++ "/buffer/" ++ filename)
+        let vs :: [(PatternFormat ,String)]
+            vs = reads contents
+        case vs of
+            (pf,_):_  -> fillPatternFormat pf
+            _         -> liftIO $ print "malformed pattern"
+
     void $ getBody window #+
         [ element stDiv
         , UI.new #
           set style
-          [("margin","0 auto"),("width", "1100px"),("padding","5px")] #+
+          [("margin","0 auto"),("width", "1180px"),("padding","5px")] #+
           ([ UI.new #
             set style [("float","left")] #+
             [ element mutes, element lmt, element mamp
-            , element bpm, element beat
+            , element bpm, element beat, element loadButton
             ]
-          , divClear
-          ] ++
-           concatMap (\(lbl,n) -> [track lbl n, divClear])
-           (zip synths [0..11]) ++
-          [ UI.new #
-            set style
-            [("float","left")
-            ,("padding-bottom","5px"),("margin-bottom", "5px")] #+
-            [ element add01faf, element add01hps
-            , element saw01xy
-            , element revrmix, element revdamp, element revroom
-            , element cf_x_rq
-            ]
-          , divClear
-          ])
+           , divClear
+           ] ++ map element tracks ++
+           [ UI.new #
+             set style
+             [("float","left")
+             ,("padding-bottom","5px"),("margin-bottom", "5px")] #+
+             [ element add01faf, element add01hps
+             , element saw01xy
+             , element revrmix, element revdamp, element revroom
+             , element cf_x_rq
+             ]
+           , divClear
+           ])
         ]
     UI.start tmr
 
@@ -555,11 +598,11 @@ synth_sine01 = out (control KR "out" 0) sig0
            | n <-"alskdf*&%@1289-+" ]
     pchs = foldr (\o acc -> map (midiCPS . (+o)) degs ++ acc) [] octs
     octs = take 6 $ iterate (+12) 48
-    degs = [0,2,4,5,7,11]
+    degs = [0,2,4,5,7,9,11]
     aenv = decay2 tr1 1e-4 dur
-    dur  = (recip df * 1.25) `lag2` 0.15
+    dur  = (recip df) `lag2` 0.05
     tr1  = impulse KR df 0 + tr0
-    df   = linLin (lfdNoise0 'f' KR dff) (-1) 1 1 32
+    df   = linLin (lfdNoise0 'f' KR dff) (-1) 1 0.25 32
     dff  = tExpRand 'd' 1 8 tr0
     tr0  = tr_control "t_tr0" 1
 

@@ -38,15 +38,16 @@ play_percs = withSC3 $ do
         , s_new "rbufrd01" 2000  AddToTail 1
           [("out",102),("bufn",100),("len",16)]
         , n_map 2000 [("tr0",101)]
-        , s_new "bd01" 2001 AddToTail 1
-          [("out",0),("freq",69),("dur",0.18)]
+        , s_new "bd01" 2001 AddToTail 1 [("out",0),("freq",69),("dur",0.18)]
         , n_map 2001 [("t_tr0",102)]
-        , s_new "rbufrd01" 2002 AddToTail 1
-          [("out",103),("bufn",101)]
+        , s_new "rbufrd01" 2002 AddToTail 1 [("out",103),("bufn",101)]
         , n_map 2002 [("tr0",101)]
-        , s_new "hat01" 2003 AddToTail 1
-          [("out",0)]
+        , s_new "hat01" 2003 AddToTail 1 [("out",0)]
         , n_map 2003 [("t_tr0",103)]
+        , s_new "rbufrd01" 2004 AddToTail 1 [("out",104),("bufn",102)]
+        , n_map 2004 [("tr0",101)]
+        , s_new "snr01" 2005 AddToTail 1 [("out",0)]
+        , n_map 2005 [("t_tr0",104)]
         ]
 
 alloc_buf_100 :: IO Message
@@ -137,11 +138,14 @@ go_sendTrig01 = do
             tr1   = impulse KR 1 0
             df    = linLin (lfdNoise3 'F' KR (1/32)) (-1) 1 0.5 32
             tcnt  = pulseCount tr1 0
-            -- sine tone synth
-            sin01 = out 0 (pan2 (sinOsc AR freq 0 * e) pos 1)
+            -- fm sine tone synth
+            sin01 = out 0 (pan2 (sinOsc AR freq phs * e * 0.08) pos 1)
             pos   = rand 'A' (-1) 1
             freq  = control KR "freq" 440
-            e     = envGen KR 1 0.08 0 dur RemoveSynth esh
+            -- phs   = 0
+            phs   = rlpf (saw AR (freq*2.9998)) (freq*4*e) 0.8 *
+                    e * rand 'B' 1 6
+            e     = envGen KR 1 1 0 dur RemoveSynth esh
             esh   = envCoord [(0,0),(atk,1),(1,0)] 1 1 EnvCub
             dur   = control KR "dur" 1
             atk   = control KR "atk" 0.001

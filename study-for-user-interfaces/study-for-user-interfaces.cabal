@@ -1,7 +1,8 @@
 name:                study-for-user-interfaces
 version:             0.1.0.0
 synopsis:            Experimental codes for user intefaces.
-description:         Experimental codes for user intefaces.
+description:         Experimental codes for realtime audio performance
+                     user interface.
 license:             BSD3
 license-file:        LICENSE
 author:              8c6794b6
@@ -12,6 +13,8 @@ cabal-version:       >=1.10
 
 data-dir:            data
 extra-source-files:  data/static/css/ui.css
+                     data/static/js/ui.js
+                     data/buffer/*.txt
 
 library
   hs-source-dirs:    src/lib
@@ -22,6 +25,7 @@ library
                      Sound.Study.ForUserInterfaces.SimpleStatus
                      Sound.Study.ForUserInterfaces.SimpleXY
                      Sound.Study.ForUserInterfaces.GUI01
+                     Sound.Study.ForUserInterfaces.JS
                      Paths_study_for_user_interfaces
   build-depends:     base >=4.6 && <4.7
                    , filepath

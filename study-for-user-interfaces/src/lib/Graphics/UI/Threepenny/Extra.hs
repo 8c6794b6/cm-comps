@@ -11,7 +11,8 @@ Extra elements for threepenny-gui. See @data/static/ui.css@ for CSS values.
 -}
 module Graphics.UI.Threepenny.Extra
  ( -- * Element
-   textbox
+   addJavaScript
+ , textbox
  , hrange
  , vrange
  , hslider
@@ -51,6 +52,12 @@ import           Paths_study_for_user_interfaces (getDataDir)
 -- * Elements
 --
 -- --------------------------------------------------------------------------
+
+addJavaScript :: Window -> FilePath -> UI ()
+addJavaScript w filename = void $ do
+    el <- mkElement "script"
+          # set (attr "src") ("/static/js/" ++ filename)
+    getHead w #+ [element el]
 
 -- | Simple text box with @\<input type=\"text\"\>@.
 textbox ::
@@ -220,6 +227,8 @@ mk_slider axis label width height minv maxv iniv act = do
     on UI.mousedown sld $ \xy ->
         liftIO (writeIORef activeRef True) >> setv xy
     on UI.mouseup sld $ \_ ->
+        liftIO $ writeIORef activeRef False
+    on UI.leave sld $ \_ ->
         liftIO $ writeIORef activeRef False
 
     v'' <- act iniv
@@ -395,6 +404,8 @@ xyarea name size fxy = do
         liftIO $ writeIORef activeRef True
         setxy xy
     on UI.mouseup area $ \_ ->
+        liftIO $ writeIORef activeRef False
+    on UI.leave area $ \_ ->
         liftIO $ writeIORef activeRef False
 
     wrapper <- UI.div
