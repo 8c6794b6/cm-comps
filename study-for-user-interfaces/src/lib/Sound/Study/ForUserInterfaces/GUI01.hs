@@ -51,58 +51,51 @@ main = withSC3 $ \fd -> do
     mapM_ (async fd . d_recv) synthdefs
     runReaderT (patchNode $ nodify nodes) fd
 
-    static <- Extra.getStaticDir
-    tid <- forkIO $ startGUI defaultConfig {tpStatic=Just static} (setup fd)
+    -- static <- Extra.getStaticDir
+    dataDir <- getDataDir
+    tid <- forkIO $ startGUI
+           defaultConfig { tpStatic=Just (dataDir ++ "/static")
+                         , tpCustomHTML=Just (dataDir ++ "/gui01.html")
+                         } (setup fd)
     getChar >> killThread tid
 
 -- | Node arrangement for GUI.
 nodes :: Nd
 nodes =
   let t00 = syn "trig00" ["out"*=100,"bpm"*=128,"beat"*=4]
-      rb o b = syn "rbufrd01" ["out"*=o,"bufn"*=b,"len"*=32,"tr0"*<-t00-*"out"]
-      t01 = rb 101 0
-      t02 = rb 102 1
-      t03 = rb 103 2
-      t04 = rb 104 3
-      t05 = rb 105 4
-      t06 = rb 106 5
-      t07 = rb 107 6
-      t08 = rb 108 7
-      t09 = rb 109 8
-      t10 = rb 110 9
-      t11 = rb 111 10
-      t12 = rb 112 11
+      rb o b = syn "rbufrd01"
+               ["out"*=Ival o,"bufn"*=Dval b, "len"*=32,"tr0"*<-t00-*"out"]
+      ts = zipWith rb [101..] [0..11]
   in  grp 0
       [ grp 1
-        [ grp 10
-          [t00, t01, t02, t03, t04, t05, t06, t07, t08, t09, t10, t11, t12]
+        [ grp 10 (t00:ts)
         , grp 11
           [ syn "bd01"
-            ["out"*=0,"freq"*=63,"dur"*=0.09,"t_tr0"*<-t01-*"out"]
+            ["out"*=0,"freq"*=48,"dur"*=0.09,"t_tr0"*<-ts!!0-*"out"]
           , syn "hat01"
-            ["out"*=1,"t_tr0"*<-t02-*"out"]
+            ["out"*=1,"t_tr0"*<-ts!!1-*"out"]
           , syn "snr01"
-            ["out"*=2,"t_tr0"*<-t03-*"out"]
+            ["out"*=2,"t_tr0"*<-ts!!2-*"out"]
           , syn "prc01"
-            ["out"*=3,"t_tr0"*<-t04-*"out"]
+            ["out"*=3,"t_tr0"*<-ts!!3-*"out"]
           , syn "nz01"
-            ["out"*=4,"t_tr0"*<-t05-*"out"]
+            ["out"*=4,"t_tr0"*<-ts!!4-*"out"]
           , syn "add01"
-            ["out"*=5,"t_tr0"*<-t06-*"out","tr1"*<-t00-*"out"
+            ["out"*=5,"t_tr0"*<-ts!!5-*"out","tr1"*<-t00-*"out"
             ,"faf"*=9.45,"hps"*=2.80]
           , syn "add02"
-            ["out"*=6,"t_tr0"*<-t07-*"out"]
+            ["out"*=6,"t_tr0"*<-ts!!6-*"out"]
           , syn "saw01"
-            ["out"*=7,"t_tr0"*<-t08-*"out","tr1"*<-t00-*"out"
+            ["out"*=7,"t_tr0"*<-ts!!7-*"out","tr1"*<-t00-*"out"
             ,"cfhi"*=7562,"ftrr"*=0.1]
           , syn "sine01"
-            ["out"*=8,"t_tr0"*<-t09-*"out"]
+            ["out"*=8,"t_tr0"*<-ts!!8-*"out"]
           , syn "sine02"
-            ["out"*=9,"t_tr0"*<-t10-*"out"]
+            ["out"*=9,"t_tr0"*<-ts!!9-*"out"]
           , syn "pulse01"
-            ["out"*=10,"t_tr0"*<-t11-*"out"]
+            ["out"*=10,"t_tr0"*<-ts!!10-*"out"]
           , syn "fm01"
-            ["out"*=11,"t_tr0"*<-t12-*"out"]
+            ["out"*=11,"t_tr0"*<-ts!!11-*"out"]
           ]
         , grp 12
           [ syn "mixer01" [] ]
@@ -117,7 +110,6 @@ setup :: Transport t => t -> Window -> UI ()
 setup fd window = do
     void $ return window # set title "gui 01"
     UI.addStyleSheet window "ui.css"
-    Extra.addJavaScript window "ui.js"
 
     currentNodes <- liftIO $ runReaderT getRootNode fd
     let queryByName name =
@@ -627,7 +619,7 @@ synth_fm01 = out (control KR "out" 0) (mix sig0)
   where
     sig0  = mix (sinOsc AR freq phase) * amp0 * 0.005
     freq  = midiCPS (36 + df) `lag2` lagt
-    df    = tWChoose 'F' tr0 (mce [0,2,5,7]) (mce [0.95, 0.1, 0.1, 0.3]) 0
+    df    = tWChoose 'F' tr0 (mce [0,2,5,7]) (mce [0.95,0.1,0.1,0.3]) 0
     phase = mce
             [ sinOsc AR (freq*x) 0 *
               envGen KR tr1 mi 0 (f*0.1) DoNothing
