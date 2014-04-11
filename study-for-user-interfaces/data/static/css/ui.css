@@ -171,3 +171,25 @@ body {
     float: left;
     margin: 0 10px 0 20px;
 }
+
+/** knobjs */
+
+.knobjs-bg {
+    fill: rgba(0,0,0,0);
+}
+
+.knobjs-arcbg {
+    fill: rgba(0,0,0,0);
+    stroke-width: 0.1;
+    stroke: #555;
+}
+
+.knobjs-arc {
+    fill: #888;
+}
+
+x-knobjs-knob {
+  display: inline-block;
+  height: 100px;
+  width: 100px;
+}

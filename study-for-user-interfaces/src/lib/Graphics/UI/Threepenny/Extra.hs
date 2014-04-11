@@ -24,6 +24,7 @@ module Graphics.UI.Threepenny.Extra
  , turnOnGrid
  , turnOffGrid
  , xyarea
+ , knob
  , statusDiv
    -- * Event
  , change
@@ -413,6 +414,36 @@ xyarea name size fxy = do
         #+ [element label, element area, element param]
 
     return wrapper
+
+-- | Simple knob with /knobjs/.
+knob :: String -> Int -> Int -> Int -> (Double -> UI ()) -> UI Element
+knob lbl size minv maxv act = do
+    let sizePx  = show size ++ "px"
+    k <- mkElement "x-knobjs-knob"
+         # set UI.style [("width",sizePx)
+                        ,("height",sizePx)
+                        ]
+         # set (attr "throw") (show (size * 2))
+         # set (attr "min") (show minv)
+         # set (attr "max") (show maxv)
+    on change k $ \_ -> do
+        v <- get value k
+        case reads v of
+            (v',""):_ -> act v'
+            _         -> return ()
+    UI.new
+        #+ [ element k
+           , UI.div
+             # set UI.text lbl
+             # set UI.style [("font-size","10px")
+                            ,("margin-top","-10px")
+                            ,("text-align","center")
+                            ]
+           ]
+        # set UI.style [("float","left")
+                       ,("margin-right","5px")
+                       ]
+
 
 -- | Returns timer and div to show scsynth server status.
 statusDiv ::

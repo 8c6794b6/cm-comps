@@ -51,7 +51,6 @@ main = withSC3 $ \fd -> do
     mapM_ (async fd . d_recv) synthdefs
     runReaderT (patchNode $ nodify nodes) fd
 
-    -- static <- Extra.getStaticDir
     dataDir <- getDataDir
     tid <- forkIO $ startGUI
            defaultConfig { tpStatic=Just (dataDir ++ "/static")
@@ -128,6 +127,10 @@ setup fd window = do
         saw01nid  = nodeId saw01node
         mixer01node = queryByName "mixer01"
         mixer01nid  = nodeId mixer01node
+        sine01node = queryByName "sine01"
+        sine01nid  = nodeId sine01node
+        pulse01node = queryByName "pulse01"
+        pulse01nid  = nodeId pulse01node
 
     -- status div
     (tmr,stDiv) <- Extra.statusDiv fd
@@ -154,7 +157,6 @@ setup fd window = do
     lmt <- Extra.toggleBox "lmt" 15 15 (\checked ->
             liftIO $ send fd $ n_set mixer01nid [("lmt",if checked then 1 else 0)])
             # set style [("margin","10px 5px 0px 5px")]
-
 
     -- add01
     let iniFafVal = queryParam "faf" add01node
@@ -338,6 +340,18 @@ setup fd window = do
             (pf,_):_  -> fillPatternFormat pf
             _         -> liftIO $ print "malformed pattern"
 
+    knob031 <- Extra.knob "dff" 40 0 10 $ \v ->
+        liftIO $ send fd $ n_set sine01nid [("dff",v)]
+
+    knob032 <- Extra.knob "dmax" 40 0 100 $ \v ->
+        liftIO $ send fd $ n_set sine01nid [("dmax", v)]
+
+    knob041 <- Extra.knob "lagt" 40 0 5 $ \v ->
+        liftIO $ send fd $ n_set pulse01nid [("lagt",v)]
+
+    knob042 <- Extra.knob "wfrq" 40 0 20 $ \v ->
+        liftIO $ send fd $ n_set pulse01nid [("wfrq",v)]
+
     void $ getBody window #+
         [ element stDiv
         , UI.new #
@@ -358,6 +372,8 @@ setup fd window = do
              , element saw01xy
              , element revrmix, element revdamp, element revroom
              , element cf_x_rq
+             , element knob031, element knob032
+             , element knob041, element knob042
              ]
            , divClear
            ])
@@ -434,11 +450,12 @@ synth_add02 = out (control KR "out" 0) sig0
     aenv0 = envGen KR tr0 amp 0 dur DoNothing ash0
     ash0  = Envelope [0,1,0.1,0.005,0] [0.002,0.08,0.85,0.08] [EnvNum (-2)]
             Nothing Nothing
-    aenv1 = envGen KR tr0 1 0 0.4 DoNothing ash1
-    ash1  = Envelope [1,1,1,0] [0.005,0.99,0.005] [EnvCub] (Just 0) Nothing
+    aenv1 = envGen KR tr0 1 0 dur1 DoNothing ash1
+    ash1  = Envelope [1,1,1,0] [0.0005,0.9999,0.0005] [EnvCub] (Just 0) Nothing
     aenv2 = envGen KR tr0 1 0 0.1 DoNothing $
-            Envelope [0,1,0] [0.1,0.9] [EnvSqr] (Just 0) Nothing
+            Envelope [0,1,0] [0.01,0.99] [EnvSqr] (Just 0) Nothing
     dur   = 3
+    dur1  = control KR "dur1" 0.4
     amp   = tExpRand 'A' 0.5 1 tr0
     tr0   = tr_control "t_tr0" 1
     tr1   = coinGate 'g' 0.125 tr0
@@ -478,20 +495,24 @@ synth_pulse01 :: UGen
 synth_pulse01 = out (control KR "out" 0) sig0
   where
     sig0 = rlpf sig1 cf rq * aenv * 0.1
-    sig1 = mix (pulse AR (mce freq `lag2` 0.05) wdt)
+    sig1 = mix (pulse AR (mce freq `lag2` lagt) wdt)
     freq = map (\i -> select (tIRand i 0 (constant (length pchs) - 1) tr0)
                       (mce pchs))
            [0..3::Int]
     pchs = foldr (\o acc -> map (midiCPS . (+o)) degs ++ acc) [] octs
     octs = take 3 $ iterate (+12) 48
     degs = [0,2,5,7]
-    wdt  = linLin (lfdNoise3 'W' KR 0.25) (-1) 1 0 0.5
-    cf   = linExp (lfdNoise3 'C' KR 3 + 2) 1 3 400 12000
-    rq   = linLin (lfdNoise3 'Q' KR 5) (-1) 1 0.1 0.9
+    wdt  = linLin (lfdNoise3 'W' KR wfrq) (-1) 1 0 0.5
+    cf   = linExp (lfdNoise3 'C' KR cfrq + 2) 1 3 400 12000
+    rq   = linLin (lfdNoise3 'Q' KR rfrq) (-1) 1 0.1 0.9
     aenv = envGen KR tr0 1 0 dur DoNothing ash
     ash  = Envelope [0,1,1,0.3,0] [0.001,0.1,0.9,0.1] [EnvCub] Nothing Nothing
     dur  = 8
     tr0  = tr_control "t_tr0" 1
+    lagt = control KR "lagt" 0.05
+    wfrq = control KR "wfrq" 0.25
+    cfrq = control KR "cfrq" 3
+    rfrq = control KR "rfrq" 5
 
 -- | Simple bass drum sound.
 synth_bd01 :: UGen
@@ -594,8 +615,9 @@ synth_sine01 = out (control KR "out" 0) sig0
     aenv = decay2 tr1 1e-4 dur
     dur  = (recip df) `lag2` 0.05
     tr1  = impulse KR df 0 + tr0
-    df   = linLin (lfdNoise0 'f' KR dff) (-1) 1 0.25 32
-    dff  = tExpRand 'd' 1 8 tr0
+    df   = linLin (lfdNoise0 'f' KR dff) (-1) 1 0.25 dmax
+    dmax = control KR "dmax" 32
+    dff  = control KR "dff" 8
     tr0  = tr_control "t_tr0" 1
 
 -- | Simple sine, with echo.
