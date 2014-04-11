@@ -121,25 +121,16 @@ setup fd window = do
                     error $ unwords ["no", name, "found in", show node]
         tr00node = queryByName "trig00"
         tr00nid  = nodeId tr00node
-        add01node = queryByName "add01"
-        add01nid  = nodeId add01node
-        saw01node = queryByName "saw01"
-        saw01nid  = nodeId saw01node
         mixer01node = queryByName "mixer01"
         mixer01nid  = nodeId mixer01node
-        sine01node = queryByName "sine01"
-        sine01nid  = nodeId sine01node
-        pulse01node = queryByName "pulse01"
-        pulse01nid  = nodeId pulse01node
 
     -- status div
     (tmr,stDiv) <- Extra.statusDiv fd
 
-    let vr :: String -> Int -> Double -> Double -> Double -> UI Element
-        vr l nid minv maxv iniv =
-            Extra.vslider l 30 128 minv maxv iniv $ \v -> do
+    let kb :: String -> Int -> Double -> Double -> UI Element
+        kb l nid minv maxv =
+            Extra.knob l 40 minv maxv $ \v ->
                 liftIO $ send fd $ n_set nid [(l,v)]
-                return $ printf "%3.2f" v
 
     -- common trigger
     let iniBpmVal  = queryParam "bpm" tr00node
@@ -151,39 +142,17 @@ setup fd window = do
     beat <- Extra.hslider "beat (2**(v/2))" 128 20 0 16 iniBeatVal $ \v -> do
         liftIO $ send fd $ n_set tr00nid [("beat",2**(v/2))]
         return $ show v
+
+    -- mixer controls
     mamp <- Extra.hslider "mamp" 128 20 (-60) 25 0 (\v -> do
         liftIO $ send fd $ n_set mixer01nid [("mamp",v)]
         return $ printf "%3.2f" v) # set style [("float","left")]
     lmt <- Extra.toggleBox "lmt" 15 15 (\checked ->
             liftIO $ send fd $ n_set mixer01nid [("lmt",if checked then 1 else 0)])
             # set style [("margin","10px 5px 0px 5px")]
-
-    -- add01
-    let iniFafVal = queryParam "faf" add01node
-        iniHpsVal = queryParam "hps" add01node
-    add01faf <- vr "faf" add01nid 0.2 30
-                (read (printf "%3.2f" iniFafVal) :: Double)
-    add01hps <- vr "hps" add01nid 0.1 10
-                (read (printf "%3.2f" iniHpsVal) :: Double)
-
-    -- saw01
-    let xysiz :: Num a => a
-        xysiz = 128
-    saw01xy <- Extra.xyarea "cfhi x ftrr" xysiz $ \(x,y) -> do
-        let x' = (fromIntegral x / xysiz) * 8000
-            y' = fromIntegral y / xysiz
-        liftIO $ send fd $ n_set saw01nid [("cfhi",x'),("ftrr",y')]
-        return $ printf "(%3.2f,%3.2f)" x' y'
-
-    -- effects
-    revrmix <- vr "rmix" mixer01nid 0 1 0
-    revdamp <- vr "damp" mixer01nid 0 1 0
-    revroom <- vr "room" mixer01nid 0 1 0
-    cf_x_rq <- Extra.xyarea "cf x rq" xysiz $ \(x,y) -> do
-        let x' = (exp ((fromIntegral x + 0.001) / xysiz) - 1) * 10000
-            y' = fromIntegral y / xysiz
-        liftIO $ send fd $ n_set mixer01nid [("cf",x'),("rq",y')]
-        return $ printf "(%3.2f,%3.2f)" x' y'
+    revrmix <- kb "rmix" mixer01nid 0 1
+    revdamp <- kb "damp" mixer01nid 0 1
+    revroom <- kb "room" mixer01nid 0 1
 
     -- div for layout
     let divClear = UI.div # set style [("clear","both")]
@@ -218,8 +187,8 @@ setup fd window = do
         void $ element lagt # set style [("float","left")]
         return (mutes, radios)
 
-    -- mixer and sequence grids
-    let track lbl n = do
+    -- synth controls and sequence grids
+    let track (lbl,nid) n = do
             (grids, _boxes) <- Extra.toggleGrids 32 1 $ \(_i,j) val ->
                 liftIO $ send fd $ b_set n [(j, fromIntegral val)]
             let fpan v = do
@@ -257,6 +226,14 @@ setup fd window = do
 
                 (_,boxes) = unzip _boxes
 
+            knobs <- knobControls fd lbl nid
+                     # set style [("display", "none")
+                                 ,("margin", "10px")
+                                 ,("padding", "10px")
+                                 ,("border", "solid 1px #888")
+                                 ,("height", "40px")
+                                 ]
+
             clearButton <- mkbtn "c" $ \_ -> do
                 mapM_ Extra.turnOffGrid boxes
                 liftIO $ send fd $ b_setn1 n 0 (replicate 32 0)
@@ -269,35 +246,37 @@ setup fd window = do
                     (zip vals boxes)
                 liftIO $ send fd $ b_setn1 n 0 (map realToFrac vals)
 
+            showButton <- mkbtn "k" $ \_ -> JS.toggle knobs
+
             wrapper <- UI.new #+
-                [ muteBox 0
-                , muteBox 1
-                , muteBox 2
-                , Extra.hslider "pan" 40 12 (-1) 1 0 fpan
-                  # set style [("float", "left")]
-                , Extra.toggleBox "fx" 15 15 feff
-                  # set style [("float", "left")
-                              ,("margin","2px 3px 0")]
-                , Extra.hslider ("amp"++show n) 40 12 (-60) 25 0 famp
-                  # set style [("float", "left")]
-                , element clearButton
-                , element randButton
-                , element grids
-                  # set style [("margin-top","6px")]
-                , divClear
-                , UI.new
-                  # set text lbl
-                  # set style [("font-size","10px")]
-                ]
+                ([ muteBox 0, muteBox 1, muteBox 2
+                 , Extra.hslider "pan" 40 12 (-1) 1 0 fpan
+                   # set style [("float", "left")]
+                 , Extra.toggleBox "fx" 15 15 feff
+                   # set style [("float", "left")
+                               ,("margin","2px 3px 0")]
+                 , Extra.hslider ("amp"++show n) 40 12 (-60) 25 0 famp
+                   # set style [("float", "left")]
+                 , element clearButton
+                 , element randButton
+                 , element showButton
+                 , element grids
+                   # set style [("margin-top","6px")]
+                 , divClear
+                 ] ++ [element knobs] ++
+                 [ divClear
+                 , UI.new
+                   # set text lbl
+                   # set style [("font-size","10px")]
+                 ])
             return (wrapper, (lbl,(n,boxes)))
 
     -- layout --
     mapM_ (\e -> element e # set style [("float","left")])
-        [ bpm, beat, lmt, add01faf, add01hps, revrmix, revroom, revdamp
-        , saw01xy
-        ]
+        [ bpm, beat, lmt ]
 
-    let synths = map synthName $ queryN (not . null . synthName) g11
+    let synths = map (\s -> (synthName s, nodeId s)) $
+                 queryN (not . null . synthName) g11
         g11    = case queryN' (nodeId ==? 11) (nodify nodes) of
             Just node -> node
             Nothing   -> error "node id 11 not found"
@@ -340,46 +319,65 @@ setup fd window = do
             (pf,_):_  -> fillPatternFormat pf
             _         -> liftIO $ print "malformed pattern"
 
-    knob031 <- Extra.knob "dff" 40 0 10 $ \v ->
-        liftIO $ send fd $ n_set sine01nid [("dff",v)]
-
-    knob032 <- Extra.knob "dmax" 40 0 100 $ \v ->
-        liftIO $ send fd $ n_set sine01nid [("dmax", v)]
-
-    knob041 <- Extra.knob "lagt" 40 0 5 $ \v ->
-        liftIO $ send fd $ n_set pulse01nid [("lagt",v)]
-
-    knob042 <- Extra.knob "wfrq" 40 0 20 $ \v ->
-        liftIO $ send fd $ n_set pulse01nid [("wfrq",v)]
-
     void $ getBody window #+
         [ element stDiv
         , UI.new #
           set style
-          [("margin","0 auto"),("width", "1180px"),("padding","5px")] #+
+          [("margin","0 auto"),("width", "1096px"),("padding","5px")] #+
           ([ UI.new #
             set style [("float","left")] #+
             [ element mutes, element lmt, element mamp
-            , element bpm, element beat, element loadButton
+            , element bpm, element beat
+            , element revrmix, element revdamp, element revroom
+            , element loadButton
             ]
            , divClear
-           ] ++ map element tracks ++
-           [ UI.new #
-             set style
-             [("float","left")
-             ,("padding-bottom","5px"),("margin-bottom", "5px")] #+
-             [ element add01faf, element add01hps
-             , element saw01xy
-             , element revrmix, element revdamp, element revroom
-             , element cf_x_rq
-             , element knob031, element knob032
-             , element knob041, element knob042
-             ]
-           , divClear
-           ])
+           ] ++
+           map element tracks)
         ]
     UI.start tmr
 
+-- | Make knob controls for synthdef using preset value for min and max.
+knobControls :: Transport fd => fd -> String -> Int -> UI Element
+knobControls fd lbl nid =
+    let ks = [ Extra.knob param 40 minv maxv $ \v ->
+                liftIO $ send fd $ n_set nid [(param,v)]
+             | param <- ps, param /= "out", param /= "t_tr0"
+             , let vals = lookup lbl knobPresets >>= lookup param
+             , let (minv, maxv) = maybe (0,0) id vals
+             ]
+        ps = [ node_k_name c
+             | def <- synthdefs
+             , c <- controls $ synthdefGraph def
+             , synthdefName def == lbl
+             ]
+    in  UI.new #+ ks
+
+-- | Knob preset values.
+knobPresets :: [(String, [(String,(Double,Double))])]
+knobPresets =
+    [("bd01",    [("dur", (0.01, 1.0))
+                 ,("freq",(20,100))
+                 ])
+    ,("add01",   [("hps", (0.1, 10))
+                 ,("faf", (0.2,30))
+                 ])
+    ,("add02",   [("dur1", (0.1, 10))])
+    ,("saw01",   [("cfhi", (200, 12000))
+                 ,("ftrr",(0,1))
+                 ])
+    ,("sine01",  [("dmax", (0.1, 32))
+                 ,("dff",  (0.01, 100))
+                 ])
+    ,("pulse01", [("rfrq", (0, 50))
+                 ,("cfrq", (0, 50))
+                 ,("wfrq", (0, 50))
+                 ,("lagt", (0, 4))
+                 ])
+    ,("fm01",    [("dur",  (0.01, 2))
+                 ,("maxi", (1, 64))
+                 ])
+    ]
 
 -- --------------------------------------------------------------------------
 --

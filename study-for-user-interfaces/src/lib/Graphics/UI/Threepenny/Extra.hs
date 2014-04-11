@@ -416,7 +416,7 @@ xyarea name size fxy = do
     return wrapper
 
 -- | Simple knob with /knobjs/.
-knob :: String -> Int -> Int -> Int -> (Double -> UI ()) -> UI Element
+knob :: String -> Int -> Double -> Double -> (Double -> UI ()) -> UI Element
 knob lbl size minv maxv act = do
     let sizePx  = show size ++ "px"
     k <- mkElement "x-knobjs-knob"
