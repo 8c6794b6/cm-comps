@@ -16,6 +16,7 @@ import           Control.Arrow (first)
 import           Control.Concurrent (forkIO, killThread)
 import           Control.Monad (foldM, foldM_, forM, forM_, unless, void, when)
 import           Control.Monad.Reader (runReaderT)
+import           Data.List (isPrefixOf)
 import           Data.Maybe (catMaybes)
 import           System.Random (newStdGen, randomRs)
 import           Text.Printf (printf)
@@ -80,12 +81,12 @@ nodes =
           , syn "nz01"
             ["out"*=4,"t_tr0"*<-ts!!4-*"out"]
           , syn "add01"
-            ["out"*=5,"t_tr0"*<-ts!!5-*"out","tr1"*<-t00-*"out"
+            ["out"*=5,"t_tr0"*<-ts!!5-*"out","t_tr1"*<-t00-*"out"
             ,"faf"*=9.45,"hps"*=2.80]
           , syn "add02"
             ["out"*=6,"t_tr0"*<-ts!!6-*"out"]
           , syn "saw01"
-            ["out"*=7,"t_tr0"*<-ts!!7-*"out","tr1"*<-t00-*"out"
+            ["out"*=7,"t_tr0"*<-ts!!7-*"out","t_tr1"*<-t00-*"out"
             ,"cfhi"*=7562,"ftrr"*=0.1]
           , syn "sine01"
             ["out"*=8,"t_tr0"*<-ts!!8-*"out"]
@@ -102,7 +103,15 @@ nodes =
       , grp 2 []
       ]
 
+-- | Synonym for pattern format loaded from text file.
 type PatternFormat = [(String,[Double])]
+
+-- | Data type to specify curve of control value.
+data ControlCurve
+    = -- | Control value changes exponentially.
+      ExpControl Double Double
+      -- | Control value changes linearly.
+    | LinControl Double Double
 
 -- | Setup GUI with given 'Transport'.
 setup :: Transport t => t -> Window -> UI ()
@@ -341,10 +350,13 @@ setup fd window = do
 knobControls :: Transport fd => fd -> String -> Int -> UI Element
 knobControls fd lbl nid =
     let ks = [ Extra.knob param 40 minv maxv $ \v ->
-                liftIO $ send fd $ n_set nid [(param,v)]
-             | param <- ps, param /= "out", param /= "t_tr0"
+                liftIO $ send fd $ n_set nid [(param,fv v)]
+             | param <- ps, param /= "out", not ("t_" `isPrefixOf` param)
              , let vals = lookup lbl knobPresets >>= lookup param
-             , let (minv, maxv) = maybe (0,0) id vals
+             , let (fv,minv,maxv) = case vals of
+                       Just (ExpControl s e) -> (exp, log s, log e)
+                       Just (LinControl s e) -> (id, s, e)
+                       _                     -> (id, 0, 0)
              ]
         ps = [ node_k_name c
              | def <- synthdefs
@@ -354,28 +366,34 @@ knobControls fd lbl nid =
     in  UI.new #+ ks
 
 -- | Knob preset values.
-knobPresets :: [(String, [(String,(Double,Double))])]
+knobPresets :: [(String, [(String,ControlCurve)])]
 knobPresets =
-    [("bd01",    [("dur", (0.01, 1.0))
-                 ,("freq",(20,100))
+    [("bd01",    [("dur", ExpControl 0.01 1.0)
+                 ,("freq",ExpControl 20 100)
                  ])
-    ,("add01",   [("hps", (0.1, 10))
-                 ,("faf", (0.2,30))
+    ,("add01",   [("hps", LinControl 0.1 10)
+                 ,("faf", LinControl 0.2 30)
                  ])
-    ,("add02",   [("dur1", (0.1, 10))])
-    ,("saw01",   [("cfhi", (200, 12000))
-                 ,("ftrr",(0,1))
+    ,("add02",   [("dur1", ExpControl 0.1 10)
+                 ,("prb1", LinControl 0 1)
                  ])
-    ,("sine01",  [("dmax", (0.1, 32))
-                 ,("dff",  (0.01, 100))
+    ,("saw01",   [("cfhi", ExpControl 200 12000)
+                 ,("ftrr", LinControl 0 1)
                  ])
-    ,("pulse01", [("rfrq", (0, 50))
-                 ,("cfrq", (0, 50))
-                 ,("wfrq", (0, 50))
-                 ,("lagt", (0, 4))
+    ,("sine01",  [("dmax", ExpControl 0.1 32)
+                 ,("dff",  ExpControl 0.01 100)
                  ])
-    ,("fm01",    [("dur",  (0.01, 2))
-                 ,("maxi", (1, 64))
+    ,("sine02",  [("dct", ExpControl 0.5 16)
+                 ,("dlt", ExpControl 0.02 2)
+                 ,("dur", ExpControl 0.1 8)
+                 ])
+    ,("pulse01", [("rfrq", LinControl 0 50)
+                 ,("cfrq", LinControl 0 50)
+                 ,("wfrq", LinControl 0 50)
+                 ,("lagt", ExpControl 0.01 4)
+                 ])
+    ,("fm01",    [("dur",  ExpControl 0.01 2)
+                 ,("maxi", LinControl 1 64)
                  ])
     ]
 
@@ -427,7 +445,7 @@ synth_add01 = out (control KR "out" 0) sig0
     dur  = recip hps
     faf  = control KR "faf" 9.23 `lag` 0.1
     hps  = control KR "hps" 0.3 `lag` 0.1
-    tr1  = control KR "tr1" 0
+    tr1  = control KR "t_tr1" 0
 
 -- | Simple additive synth with 'clip2'.
 synth_add02 :: UGen
@@ -441,7 +459,7 @@ synth_add02 = out (control KR "out" 0) sig0
     sig5  = clip2 (mix (sinOsc AR freq 0 * aenv0 * pamp)) 1
     sig6  = rlpf sig7 14000 0.8 * aenv2
     sig7  = brownNoise 'B' AR
-    freq  = tChoose 'T' tr1 (mce [frq 0,frq 5,frq 7]) `lag2` 0.01
+    freq  = tChoose 'T' tr1 (mce $ map frq [0,5,7]) `lag2` 0.01
     frq x = mce $ concat
             [[y,y*2.999,y*6.001,y*8.999]|y<-map midiCPS [x+36,x+43,x+48]]
     pamp  = 20
@@ -456,7 +474,8 @@ synth_add02 = out (control KR "out" 0) sig0
     dur1  = control KR "dur1" 0.4
     amp   = tExpRand 'A' 0.5 1 tr0
     tr0   = tr_control "t_tr0" 1
-    tr1   = coinGate 'g' 0.125 tr0
+    tr1   = coinGate 'g' prb1 tr0
+    prb1  = control KR "prb1" 0.125
 
 -- | Plays 'synth_add02' with 'synth_trig00'.
 go_add02 :: IO ()
@@ -482,7 +501,7 @@ synth_saw01 = out (control KR "out" 1) sig0
     aenv     = envGen KR tr3 1 0 0.2 DoNothing ash
     ash      = envCoord [(0,0),(1e-4,1),(0.5,0.2)] 1 1 EnvCub
     zo0      = toggleFF (dust 'D' KR 1)
-    tr1      = control KR "tr1" 0
+    tr1      = control KR "t_tr1" 0
     tr2      = coinGate 'g' ftrr tr1
     tr3      = tr_control "t_tr0" 1
     cfhi     = control KR "cfhi" 8000 `lag` 0.1
@@ -502,7 +521,7 @@ synth_pulse01 = out (control KR "out" 0) sig0
     degs = [0,2,5,7]
     wdt  = linLin (lfdNoise3 'W' KR wfrq) (-1) 1 0 0.5
     cf   = linExp (lfdNoise3 'C' KR cfrq + 2) 1 3 400 12000
-    rq   = linLin (lfdNoise3 'Q' KR rfrq) (-1) 1 0.1 0.9
+    rq   = linLin (lfdNoise3 'Q' KR rfrq) (-1) 1 0.01 0.99
     aenv = envGen KR tr0 1 0 dur DoNothing ash
     ash  = Envelope [0,1,1,0.3,0] [0.001,0.1,0.9,0.1] [EnvCub] Nothing Nothing
     dur  = 8
@@ -622,7 +641,7 @@ synth_sine01 = out (control KR "out" 0) sig0
 synth_sine02 :: UGen
 synth_sine02 = out (control KR "out" 0) sig0
   where
-    sig0 = combC (sinOsc AR freq 0 * aenv) 0.15 0.15 8 * 0.3
+    sig0 = combC (sinOsc AR freq 0 * aenv) 1 dlt dct * 0.3
     freq = select idx (mce pchs)
     pchs = foldr (\o acc -> map (midiCPS . (+o)) degs ++ acc) [] octs
     octs = take 3 $ iterate (+12) 60
@@ -630,8 +649,10 @@ synth_sine02 = out (control KR "out" 0) sig0
     idx  = tIRand 'p' 0 (constant $ length pchs - 1) tr0
     aenv = envGen KR tr0 1 0 dur DoNothing ash
     ash  = Envelope [0,1,0.8,0] [0.001,0.099,0.9] [EnvCub] Nothing Nothing
-    dur  = 0.3
+    dur  = control KR "dur" 3
     tr0  = tr_control "t_tr0" 1
+    dlt  = control KR "dlt" 0.15
+    dct  = control KR "dct" 8
 
 -- | Simple FM bass.
 synth_fm01 :: UGen
