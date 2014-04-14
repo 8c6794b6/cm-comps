@@ -286,7 +286,7 @@ setup fd window = do
 
     let synths = map (\s -> (synthName s, nodeId s)) $
                  queryN (not . null . synthName) g11
-        g11    = case queryN' (nodeId ==? 11) (nodify nodes) of
+        g11 = case queryN' (nodeId ==? 11) (nodify nodes) of
             Just node -> node
             Nothing   -> error "node id 11 not found"
 
@@ -521,7 +521,7 @@ synth_pulse01 = out (control KR "out" 0) sig0
     degs = [0,2,5,7]
     wdt  = linLin (lfdNoise3 'W' KR wfrq) (-1) 1 0 0.5
     cf   = linExp (lfdNoise3 'C' KR cfrq + 2) 1 3 400 12000
-    rq   = linLin (lfdNoise3 'Q' KR rfrq) (-1) 1 0.01 0.99
+    rq   = linLin (lfdNoise3 'Q' KR rfrq) (-1) 1 0.1 0.9
     aenv = envGen KR tr0 1 0 dur DoNothing ash
     ash  = Envelope [0,1,1,0.3,0] [0.001,0.1,0.9,0.1] [EnvCub] Nothing Nothing
     dur  = 8
@@ -682,7 +682,7 @@ synth_fm01 = out (control KR "out" 0) (mix sig0)
 synth_mixer01 :: UGen
 synth_mixer01 = replaceOut 0 (sigs0 * dbAmp mamp)
   where
-    sigs0 = (lmt * limiter sigs1 1 0.01) + ((1-lmt) * sigs1)
+    sigs0 = (lmt * limiter sigs1 1 0.02) + ((1-lmt) * sigs1)
     sigs1 = efx (sum sigsA) + sum sigsB
     (sigsA, sigsB) = unzip $ map f [0..12::Int]
     f n   = (sig0*efxc, sig0*(1-efxc))

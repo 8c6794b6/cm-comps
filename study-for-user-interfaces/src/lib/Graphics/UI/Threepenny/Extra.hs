@@ -108,7 +108,9 @@ hrange name minv maxv stepv iniv act = do
             # set style [("width","128px")]
     on change cval $ \_v -> do
         v <- get value cval
-        v' <- act $ read v
+        v' <- case reads v of
+            (v',""):_ -> act v'
+            _         -> return ""
         element clab # set text v'
     UI.div
         #. "hrange-wrapper"
@@ -141,9 +143,11 @@ vrange name minv maxv stepv iniv act = do
     clab <- UI.span
             # set text (show iniv)
             #. "vrange-label"
-    on input cval $ \_v -> do
+    on input cval $ \_ -> do
         v' <- get value cval
-        v'' <- act $ read v'
+        v'' <- case reads v' of
+            (v'',""):_ -> act v''
+            _          -> return ""
         element clab # set text v''
     cclear <- UI.div
     UI.div
