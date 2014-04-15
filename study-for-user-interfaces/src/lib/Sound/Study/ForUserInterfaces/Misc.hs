@@ -72,6 +72,56 @@ sb_r bufn offset ds = withSC3 $ do
     let is = take 16 $ randomRs (0,length ds-1) g
     send $ b_setn1 bufn 0 $ [(ds!!i)+offset|i<-is]
 
+sb :: Int -> [Double] -> IO Message
+sb bufn vals = withSC3 $ async $ b_alloc_setn1 bufn 0 vals
+
+crep :: Int -> [a] -> [a]
+crep n vs = concat $ replicate n vs
+
+{-
+
+sb   0 (crep 7 [1,0,0,0] ++ [1,0,0,1])
+sb   0 (crep 8 [1,1/32,1/32,1/32])
+sb_r 0 0 [0,0.5,1]
+
+sb   1 (replicate 17 1 ++ replicate 15 0)
+sb   1 (concat $ replicate 8 [0,0,1,0.25])
+
+sb   3  (concat $ replicate 2 [0,0,0,0, 0,0,0,0, 1,0,0,0])
+sb   5  (concat $ replicate 2 [0,0,0,0, 0,0,0,0, 1,0,0,0])
+
+sb   4 (replicate 32 0)
+sb   4 (1 : replicate 31 0)
+sb   4 (replicate 32 1)
+sb   4 (concat $ replicate 16 [0.75,0.25])
+sb   4 (concat $ replicate 8 [1,0,0.5,0.25])
+sb_r 4 0 [0.25,0.5,0.75,1]
+sb   4 (concat $ replicate 16 [0,0.5])
+
+sb_r 5 0 [0,0.5]
+
+sb   7  (1 : replicate 31 0)
+
+sb   11 (1 : replicate 31 0)
+sb   11 (replicate 17 1 ++ replicate 15 0)
+sb   11 (concat $ replicate 8 [1,0,0.25,0])
+sb   11 (concat $ replicate 16 [1,0])
+sb   11 (replicate 32 1)
+sb   11 (replicate 32 0.9)
+sb_r 11 0 [0,0,0.5,0.75,1]
+sb_r 11 0 [0,0.5]
+
+slen 5
+slen 7
+slen 4
+slen 8
+slen 32
+
+-}
+
+slen :: Double -> IO ()
+slen n = withSC3 $ send $ n_set 10 [("len",n)]
+
 sb_100r1, sb_100r2, sb_100r3, sb_100r4 :: IO ()
 sb_100r1 = sb_r 100 0 [0.1,0.2..1]
 sb_100r2 = sb_r 100 0 [0,0.5,1]
@@ -90,6 +140,7 @@ sb_102r1 = sb_r 102 0 [0,0.5,0.8,1]
 sb_102r2 = sb_r 102 0 [0.1,0.2..1]
 sb_102r3 = sb_r 102 0 [0,1]
 sb_102r4 = sb_r 102 0 [0,0,0.5,1]
+
 
 -- | From hsc3 help of 'stepper'.
 stepper_ex :: IO ()
