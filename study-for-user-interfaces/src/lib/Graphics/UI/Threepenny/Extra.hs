@@ -315,8 +315,8 @@ toggleGrids ::
     -- ^ A pair of whole wrapper contents and each toggle box with (row,column)
     -- index.
 toggleGrids ncol nrow act = do
-    let width = 25 :: Int
-        height = 20 :: Int
+    let width  = 20 :: Int
+        height = 18 :: Int
     columns_x_grds <- forM [0..nrow-1] $ \rowi -> do
         columWrap <- UI.div # set style
                      [("clear","both")
@@ -420,8 +420,14 @@ xyarea name size fxy = do
     return wrapper
 
 -- | Simple knob with /knobjs/.
-knob :: String -> Int -> Double -> Double -> (Double -> UI ()) -> UI Element
-knob lbl size minv maxv act = do
+knob :: String               -- ^ Label.
+        -> Int               -- ^ Size.
+        -> Double            -- ^ Min value.
+        -> Double            -- ^ Max value.
+        -> Double            -- ^ Initial value.
+        -> (Double -> UI ()) -- ^ Action to take on change.
+        -> UI Element
+knob lbl size minv maxv iniv act = do
     let sizePx  = show size ++ "px"
     k <- mkElement "x-knobjs-knob"
          # set UI.style [("width",sizePx)
@@ -430,6 +436,7 @@ knob lbl size minv maxv act = do
          # set (attr "throw") (show (size * 2))
          # set (attr "min") (show minv)
          # set (attr "max") (show maxv)
+         # set value (show iniv)
     on change k $ \_ -> do
         v <- get value k
         case reads v of

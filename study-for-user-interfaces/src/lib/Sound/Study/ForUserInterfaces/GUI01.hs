@@ -9,6 +9,12 @@ Portability : unknown
 
 Graphical user interface, take 1.
 
+Simple 32 step grid sequencers with 0/1 values, with grouped mute and un-mutes.
+Each grid row controls synth, which takes common trigger signal and steps
+through assigned buffer. How the trigger signal treated are defined inside each
+synthdef, some uses for percussive hit, some for picking up new pitches, and so
+on.
+
 -}
 module Sound.Study.ForUserInterfaces.GUI01 where
 
@@ -136,11 +142,6 @@ setup fd window = do
     -- status div
     (tmr,stDiv) <- Extra.statusDiv fd
 
-    let kb :: String -> Int -> Double -> Double -> UI Element
-        kb l nid minv maxv =
-            Extra.knob l 40 minv maxv $ \v ->
-                liftIO $ send fd $ n_set nid [(l,v)]
-
     -- common trigger
     let iniBpmVal  = queryParam "bpm" tr00node
         iniBeatVal = queryParam "beat" tr00node
@@ -159,9 +160,11 @@ setup fd window = do
     lmt <- Extra.toggleBox "lmt" 15 15 (\checked ->
             liftIO $ send fd $ n_set mixer01nid [("lmt",if checked then 1 else 0)])
             # set style [("margin","10px 5px 0px 5px")]
-    revrmix <- kb "rmix" mixer01nid 0 1
-    revdamp <- kb "damp" mixer01nid 0 1
-    revroom <- kb "room" mixer01nid 0 1
+    revrmix <- knobControl fd "rmix" mixer01nid 0 $ LinControl 0 1
+    revdamp <- knobControl fd "damp" mixer01nid 0 $ LinControl 0 1
+    revroom <- knobControl fd "room" mixer01nid 0 $ LinControl 0 1
+    mcf     <- knobControl fd "cf" mixer01nid 8000 $ ExpControl 20 20000
+    mrq     <- knobControl fd "rq" mixer01nid 0.5 $ LinControl 0.01 0.99
 
     -- div for layout
     let divClear = UI.div # set style [("clear","both")]
@@ -266,11 +269,11 @@ setup fd window = do
                                ,("margin","2px 3px 0")]
                  , Extra.hslider ("amp"++show n) 40 12 (-60) 25 0 famp
                    # set style [("float", "left")]
+                 , element showButton
                  , element clearButton
                  , element randButton
-                 , element showButton
                  , element grids
-                   # set style [("margin-top","6px")]
+                   # set style [("margin-top","9px")]
                  , divClear
                  ] ++ [element knobs] ++
                  [ divClear
@@ -332,12 +335,13 @@ setup fd window = do
         [ element stDiv
         , UI.new #
           set style
-          [("margin","0 auto"),("width", "1096px"),("padding","5px")] #+
+          [("margin","0 auto"),("width", "936px"),("padding","5px")] #+
           ([ UI.new #
             set style [("float","left")] #+
             [ element mutes, element lmt, element mamp
             , element bpm, element beat
             , element revrmix, element revdamp, element revroom
+            , element mcf, element mrq
             , element loadButton
             ]
            , divClear
@@ -346,19 +350,26 @@ setup fd window = do
         ]
     UI.start tmr
 
+-- | Make knob control from 'ControlCurve'.
+knobControl ::
+    Transport fd => fd -> String -> Int -> Double -> ControlCurve -> UI Element
+knobControl fd param nid iniv cc = Extra.knob param 40 minv maxv ini $ \v ->
+    liftIO $ send fd $ n_set nid [(param, fv v)]
+  where
+    (fv, minv, maxv, ini) = case cc of
+        ExpControl s e -> (exp, log s, log e, log iniv)
+        LinControl s e -> (id, s, e, iniv)
+
 -- | Make knob controls for synthdef using preset value for min and max.
 knobControls :: Transport fd => fd -> String -> Int -> UI Element
 knobControls fd lbl nid =
-    let ks = [ Extra.knob param 40 minv maxv $ \v ->
-                liftIO $ send fd $ n_set nid [(param,fv v)]
-             | param <- ps, param /= "out", not ("t_" `isPrefixOf` param)
-             , let vals = lookup lbl knobPresets >>= lookup param
-             , let (fv,minv,maxv) = case vals of
-                       Just (ExpControl s e) -> (exp, log s, log e)
-                       Just (LinControl s e) -> (id, s, e)
-                       _                     -> (id, 0, 0)
+    let ks = [ knobControl fd pname nid (realToFrac pval) cc
+             | (pname, pval) <- ps
+             , pname /= "out", not ("t_" `isPrefixOf` pname)
+             , let err = error $ "knobControls: " ++ pname ++ " not found"
+             , let cc  = maybe err id (lookup lbl knobPresets >>= lookup pname)
              ]
-        ps = [ node_k_name c
+        ps = [ (node_k_name c, node_k_default c)
              | def <- synthdefs
              , c <- controls $ synthdefGraph def
              , synthdefName def == lbl
@@ -387,9 +398,9 @@ knobPresets =
                  ,("dlt", ExpControl 0.02 2)
                  ,("dur", ExpControl 0.1 8)
                  ])
-    ,("pulse01", [("rfrq", LinControl 0 50)
-                 ,("cfrq", LinControl 0 50)
-                 ,("wfrq", LinControl 0 50)
+    ,("pulse01", [("rfrq", ExpControl 0.01 50)
+                 ,("cfrq", ExpControl 0.01 50)
+                 ,("wfrq", ExpControl 0.01 50)
                  ,("lagt", ExpControl 0.01 4)
                  ])
     ,("fm01",    [("dur",  ExpControl 0.01 2)
