@@ -52,9 +52,9 @@ main :: IO ()
 main = withSC3 $ \fd -> do
 
     -- buffers for toggled sequences
-    mapM_ (\x -> async fd $ b_alloc x 32 1) [0..11]
+    mapM_ (\x -> async fd $ b_alloc x 32 1) [0..ntrack-1]
     -- buffers for grouping mute/unmute
-    mapM_ (\x -> async fd $ b_alloc x 12 1) [100,101,102]
+    mapM_ (\x -> async fd $ b_alloc x ntrack 1) mutebufs
     mapM_ (async fd . d_recv) synthdefs
     runReaderT (patchNode $ nodify nodes) fd
 
@@ -65,13 +65,25 @@ main = withSC3 $ \fd -> do
                          } (setup fd)
     getChar >> killThread tid
 
+-- | Number of tracks.
+ntrack :: Num a => a
+ntrack = 13
+
+-- | Buffer numbers used for mute/un-mute.
+mutebufs :: (Show a, Num a) => [a]
+mutebufs = [100, 101, 102]
+
+-- | Control rate outputs for triggers.
+kouts :: (Num a, Enum a) => [a]
+kouts = [101..]
+
 -- | Node arrangement for GUI.
 nodes :: Nd
 nodes =
   let t00 = syn "trig00" ["out"*=100,"bpm"*=128,"beat"*=4]
       rb o b = syn "rbufrd01"
                ["out"*=Ival o,"bufn"*=Dval b, "len"*=32,"tr0"*<-t00-*"out"]
-      ts = zipWith rb [101..] [0..11]
+      ts = zipWith rb kouts [0..ntrack-1]
   in  grp 0
       [ grp 1
         [ grp 10 (t00:ts)
@@ -84,24 +96,26 @@ nodes =
             ["out"*=2,"t_tr0"*<-ts!!2-*"out"]
           , syn "prc01"
             ["out"*=3,"t_tr0"*<-ts!!3-*"out"]
-          , syn "nz01"
+          , syn "prc02"
             ["out"*=4,"t_tr0"*<-ts!!4-*"out"]
+          , syn "nz01"
+            ["out"*=5,"t_tr0"*<-ts!!5-*"out"]
           , syn "add01"
-            ["out"*=5,"t_tr0"*<-ts!!5-*"out","t_tr1"*<-t00-*"out"
+            ["out"*=6,"t_tr0"*<-ts!!6-*"out","t_tr1"*<-t00-*"out"
             ,"faf"*=9.45,"hps"*=2.80]
           , syn "add02"
-            ["out"*=6,"t_tr0"*<-ts!!6-*"out"]
+            ["out"*=7,"t_tr0"*<-ts!!7-*"out"]
           , syn "saw01"
-            ["out"*=7,"t_tr0"*<-ts!!7-*"out","t_tr1"*<-t00-*"out"
+            ["out"*=8,"t_tr0"*<-ts!!8-*"out","t_tr1"*<-t00-*"out"
             ,"cfhi"*=7562,"ftrr"*=0.1]
           , syn "sine01"
-            ["out"*=8,"t_tr0"*<-ts!!8-*"out"]
-          , syn "sine02"
             ["out"*=9,"t_tr0"*<-ts!!9-*"out"]
-          , syn "pulse01"
+          , syn "sine02"
             ["out"*=10,"t_tr0"*<-ts!!10-*"out"]
-          , syn "fm01"
+          , syn "pulse01"
             ["out"*=11,"t_tr0"*<-ts!!11-*"out"]
+          , syn "fm01"
+            ["out"*=12,"t_tr0"*<-ts!!12-*"out"]
           ]
         , grp 12
           [ syn "mixer01" [] ]
@@ -171,11 +185,11 @@ setup fd window = do
 
     -- mutes
     (mutes, radios) <- do
-        radios <- forM [100,101,102::Int] $ \n -> do
+        radios <- forM mutebufs $ \n -> do
             radio <- UI.input
                 # set UI.type_ "radio"
                 # set UI.name "set"
-                # set UI.value (show n)
+                # set UI.value (show (n::Int))
             on UI.click radio $ \_ -> do
                 bufn <- radio # get UI.value
                 liftIO $ do
@@ -214,13 +228,14 @@ setup fd window = do
                         [("efx"++show n, if v then 1 else 0)]
                 fmute k v = do
                     let v' = if v then 1 else 0
+                        bufn = mutebufs !! k :: Int
                         fr  _ radio = do
                             isChecked <- get UI.checked radio
                             radioVal  <- get value radio
-                            when (isChecked && radioVal == show (100+k)) $
+                            when (isChecked && radioVal == show bufn) $
                                 liftIO $ send fd $ n_set mixer01nid
                                     [("mute"++show n, realToFrac v')]
-                    liftIO $ send fd $ b_setn1 (100+k) n [v']
+                    liftIO $ send fd $ b_setn1 bufn n [v']
                     foldM_ fr () radios
                 muteBox m = Extra.toggleBox "" 15 15 (fmute m)
                             # set style [("float","left")
@@ -297,7 +312,7 @@ setup fd window = do
         tracksM =
             let go (ts,ps) (lbl,n) =
                     track lbl n >>= \(t,p) -> return (t:ts,p:ps)
-            in  first reverse <$> foldM go ([],[]) (zip synths [0..11])
+            in  first reverse <$> foldM go ([],[]) (zip synths [0..ntrack-1])
 
     (tracks,lbl_bufn_boxes) <- tracksM
 
@@ -613,6 +628,48 @@ synth_prc01 = out (control KR "out" 0) sig0
     dur   = 0.3
     tr0   = tr_control "t_tr0" 1
 
+-- | Simple percussive sound, using buffered trigger for 'tChoose', chooses one
+-- signal from array of signals.
+synth_prc02 :: UGen
+synth_prc02 = out (control KR "out" 0) sig0
+  where
+    sig0  = tChoose 'I' tr0 sigs
+    sigs  = mce [sig1, sig2, sig3, sig4]
+    sig1  = rlpf (saw AR frq1) cf1 rq1 * aenv1 * 0.3
+    frq1  = 63 * (2 ** tIRand 'F' 0 7 tr1)
+    cf1   = aenv1 * frq1 * 3 * (sinOsc AR 23 0 * 0.5 + 0.5)
+    rq1   = 0.3
+    aenv1 = envGen KR tr0 1 0 1 DoNothing $
+            Envelope [0,1,0.8,0] [0.001,0.1,0.9] [EnvCub] Nothing Nothing
+    sig2  = rhpf (whiteNoise 'W' AR) cf2 rq2 * aenv2
+    cf2   = 76.5 * (2 ** tIRand 'f' 0 8 tr2)
+    rq2   = tExpRand 'R' 0.10 0.99 tr2
+    aenv2 = envGen KR tr0 0.3 0 1 DoNothing $
+            Envelope [0,1,1,0] [0.01,0.9,0.01] [EnvNum en2] Nothing Nothing
+    en2   = tRand '2' (-3) 3 tr2
+    sig3  = sinOsc AR mfrq3 frq3 * aenv3
+    frq3  = sinOsc AR mfrq3 0 * mfrq3 * idx3
+    mfrq3 = 213 * (2 ** tIRand 'H' 0 5 tr3)
+    idx3  = linLin (lfdNoise3 'I' AR 8) (-1) 1 0 16
+    aenv3 = (sinOsc AR amf3 0 * 0.5 + 0.5) * aenv2
+    amf3  = linLin (lfdNoise3 'M' KR 0.06) (-1) 1 2 20
+    sig4  = clipNoise 'G' AR * aenv4
+    aenv4 = envGen KR (impulse KR aef4 0) 0.5 0 0.02 DoNothing $
+            Envelope [0,1,1,0] [0.3,0.3,0.3] [EnvCub] Nothing Nothing
+    aef4  = tExpRand 'E' 1 32 tr4
+    tr0   = tr_control "t_tr0" 1
+    tr1   = coinGate '1' 0.5 tr0
+    tr2   = coinGate '2' 0.5 tr0
+    tr3   = coinGate '3' 0.5 tr0
+    tr4   = coinGate '4' 0.5 tr0
+
+-- | Play 'synth_perc02' with 'synth_trig00'.
+go_perc02 :: IO ()
+go_perc02 = withSC3 $ \fd -> do
+    play fd synth_prc02
+    send fd $ n_map (-1) [("t_tr0",100)]
+    send fd $ s_new "trig00" (-1) AddBefore (-1) [("out",100)]
+
 -- | Simple filtered white noise sound.
 synth_nz01 :: UGen
 synth_nz01 = out (control KR "out" 0) sig0
@@ -695,7 +752,7 @@ synth_mixer01 = replaceOut 0 (sigs0 * dbAmp mamp)
   where
     sigs0 = (lmt * limiter sigs1 1 0.02) + ((1-lmt) * sigs1)
     sigs1 = efx (sum sigsA) + sum sigsB
-    (sigsA, sigsB) = unzip $ map f [0..12::Int]
+    (sigsA, sigsB) = unzip $ map f [0..ntrack-1::Int]
     f n   = (sig0*efxc, sig0*(1-efxc))
       where
         sig0 = pan2 sig1 posn (dbAmp ampn) * mute
