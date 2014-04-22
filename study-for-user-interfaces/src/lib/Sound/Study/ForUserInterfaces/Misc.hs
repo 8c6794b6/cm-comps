@@ -13,7 +13,7 @@ module Sound.Study.ForUserInterfaces.Misc where
 
 import Control.Concurrent (forkIO, killThread)
 import Data.Function (fix)
-import System.Random (newStdGen, mkStdGen, randomR, randomRs)
+import System.Random (newStdGen, randomR, randomRs)
 
 import Sound.OSC
 import Sound.SC3
