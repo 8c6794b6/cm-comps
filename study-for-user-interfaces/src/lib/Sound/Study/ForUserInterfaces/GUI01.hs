@@ -193,7 +193,7 @@ setup fd window = do
     let goRec checked =
             let act | checked   = do
                     mapM_ (async fd) $
-                        [ b_alloc recbufn 8192 2
+                        [ b_alloc recbufn 131072 2
                         , b_write recbufn "out.wav" Wave PcmFloat (-1) 0 True
                         ]
                     send fd $ n_run [(rec01nid, True)]
