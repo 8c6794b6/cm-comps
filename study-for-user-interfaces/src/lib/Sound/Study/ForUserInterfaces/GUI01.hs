@@ -133,12 +133,12 @@ nodes =
 -- | Synonym for pattern format loaded from text file.
 type PatternFormat = [(String,[Double])]
 
--- | Data type to specify curve of control value.
-data ControlCurve
+-- | Data type to specify curved range of control value.
+data ControlRange
     = -- | Control value changes exponentially.
-      ExpControl Double Double
+      ExpRange Double Double
       -- | Control value changes linearly.
-    | LinControl Double Double
+    | LinRange Double Double
 
 -- | Setup GUI with given 'Transport'.
 setup :: Transport t => t -> Window -> UI ()
@@ -183,12 +183,12 @@ setup fd window = do
     lmt <- Extra.toggleBox "lmt" 15 15 (\checked ->
             liftIO $ send fd $ n_set mixer01nid [("lmt",if checked then 1 else 0)])
             # set style [("margin","10px 5px 0px 5px")]
-    revrmix <- knobControl fd "rmix" mixer01nid 0 $ LinControl 0 1
-    revdamp <- knobControl fd "damp" mixer01nid 0 $ LinControl 0 1
-    revroom <- knobControl fd "room" mixer01nid 0 $ LinControl 0 1
-    mcf     <- knobControl fd "cf" mixer01nid 8000 $ ExpControl 20 20000
-    mrq     <- knobControl fd "rq" mixer01nid 0.5 $ LinControl 0.01 0.99
-    mfp     <- knobControl fd "mfp" mixer01nid 0 $ LinControl 0 1
+    revrmix <- knobControl fd "rmix" mixer01nid 0 $ LinRange 0 1
+    revdamp <- knobControl fd "damp" mixer01nid 0 $ LinRange 0 1
+    revroom <- knobControl fd "room" mixer01nid 0 $ LinRange 0 1
+    mcf     <- knobControl fd "cf" mixer01nid 8000 $ ExpRange 20 20000
+    mrq     <- knobControl fd "rq" mixer01nid 0.5 $ LinRange 0.01 0.99
+    mfp     <- knobControl fd "mfp" mixer01nid 0 $ LinRange 0 1
 
     let goRec checked =
             let act | checked   = do
@@ -276,9 +276,9 @@ setup fd window = do
 
             knobs <- knobControls fd lbl nid
             ampKnob <- knobControl fd ("amp" ++ show n) mixer01nid 0
-                       (LinControl (-60) 25)
+                       (LinRange (-60) 25)
             panKnob <- knobControl fd ("pos" ++ show n) mixer01nid 0
-                       (LinControl (-1) 1)
+                       (LinRange (-1) 1)
             knobs' <- UI.new #+ map element (ampKnob : panKnob : knobs)
                      # set style [("display", "none")
                                  ,("margin", "10px")
@@ -390,15 +390,21 @@ setup fd window = do
         ]
     UI.start tmr
 
--- | Make knob control from 'ControlCurve'.
+-- | Make knob control from 'ControlRange'.
 knobControl ::
-    Transport fd => fd -> String -> Int -> Double -> ControlCurve -> UI Element
+    Transport fd
+    => fd           -- ^ Transport to send message.
+    -> String       -- ^ Parameter name
+    -> Int          -- ^ Node id.
+    -> Double       -- ^ Initial value
+    -> ControlRange -- ^ Control range for this 'Extra.knob'.
+    -> UI Element
 knobControl fd param nid iniv cc = Extra.knob param 40 minv maxv ini $ \v ->
     liftIO $ send fd $ n_set nid [(param, fv v)]
   where
     (fv, minv, maxv, ini) = case cc of
-        ExpControl s e -> (exp, log s, log e, log iniv)
-        LinControl s e -> (id, s, e, iniv)
+        ExpRange s e -> (exp, log s, log e, log iniv)
+        LinRange s e -> (id, s, e, iniv)
 
 -- | Make knob controls for synthdef using preset value for min and max.
 knobControls :: Transport fd => fd -> String -> Int -> UI [Element]
@@ -417,47 +423,47 @@ knobControls fd lbl nid =
     in  sequence ks
 
 -- | Knob preset values.
-knobPresets :: [(String, [(String,ControlCurve)])]
+knobPresets :: [(String, [(String,ControlRange)])]
 knobPresets =
-    [("bd01",    [("dur", ExpControl 0.01 1.0)
-                 ,("freq",ExpControl 20 100)
+    [("bd01",    [("dur", ExpRange 0.01 1.0)
+                 ,("freq",ExpRange 20 100)
                  ])
-    ,("prc02",   [("prb1", LinControl 0 1)
-                 ,("prb2", LinControl 0 1)
-                 ,("prb3", LinControl 0 1)
-                 ,("prb4", LinControl 0 1)
+    ,("prc02",   [("prb1", LinRange 0 1)
+                 ,("prb2", LinRange 0 1)
+                 ,("prb3", LinRange 0 1)
+                 ,("prb4", LinRange 0 1)
                  ])
-    ,("add01",   [("hps", LinControl 0.1 10)
-                 ,("faf", LinControl 0.2 30)
+    ,("add01",   [("hps", LinRange 0.1 10)
+                 ,("faf", LinRange 0.2 30)
                  ])
-    ,("add02",   [("dur1", ExpControl 0.1 10)
-                 ,("prb1", LinControl 0 1)
-                 ,("pamp", LinControl 1 50)
-                 ,("en1",  LinControl (-10) 10)
+    ,("add02",   [("dur1", ExpRange 0.1 10)
+                 ,("prb1", LinRange 0 1)
+                 ,("pamp", LinRange 1 50)
+                 ,("en1",  LinRange (-10) 10)
                  ])
-    ,("saw01",   [("cfhi", ExpControl 200 12000)
-                 ,("ftrr", LinControl 0 1)
+    ,("saw01",   [("cfhi", ExpRange 200 12000)
+                 ,("ftrr", LinRange 0 1)
                  ])
-    ,("sine01",  [("dmax", ExpControl 0.1 32)
-                 ,("dff",  ExpControl 0.01 100)
+    ,("sine01",  [("dmax", ExpRange 0.1 32)
+                 ,("dff",  ExpRange 0.01 100)
                  ])
-    ,("sine02",  [("dct", ExpControl 0.5 16)
-                 ,("dlt", ExpControl 0.02 2)
-                 ,("dur", ExpControl 0.1 8)
+    ,("sine02",  [("dct", ExpRange 0.5 16)
+                 ,("dlt", ExpRange 0.02 2)
+                 ,("dur", ExpRange 0.1 8)
                  ])
-    ,("pulse01", [("rfrq", ExpControl 0.01 50)
-                 ,("cfrq", ExpControl 0.01 50)
-                 ,("wfrq", ExpControl 0.01 50)
-                 ,("lagt", ExpControl 0.01 4)
+    ,("pulse01", [("rfrq", ExpRange 0.01 50)
+                 ,("cfrq", ExpRange 0.01 50)
+                 ,("wfrq", ExpRange 0.01 50)
+                 ,("lagt", ExpRange 0.01 4)
                  ])
-    ,("fm01",    [("dur",  ExpControl 0.01 2)
-                 ,("maxi", LinControl 1 64)
+    ,("fm01",    [("dur",  ExpRange 0.01 2)
+                 ,("maxi", LinRange 1 64)
                  ])
-    ,("pv01",    [("tlag", ExpControl 0.002 3)
-                 ,("minFreq", ExpControl 20 20000)
-                 ,("maxFreq", ExpControl 20 20000)
-                 ,("cutoff",  ExpControl 20 20000)
-                 ,("density", ExpControl 1 2000)
+    ,("pv01",    [("tlag", ExpRange 0.002 3)
+                 ,("minFreq", ExpRange 20 20000)
+                 ,("maxFreq", ExpRange 20 20000)
+                 ,("cutoff",  ExpRange 20 20000)
+                 ,("density", ExpRange 1 2000)
                  ])
     ]
 
