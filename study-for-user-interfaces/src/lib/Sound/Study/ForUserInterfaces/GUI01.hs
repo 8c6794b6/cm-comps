@@ -124,7 +124,7 @@ nodes =
           ]
         , grp 12
           [ syn "mixer01" ["t_tr0"*<-t00-*"out"]
-          , syn "rec01"   ["bufn"*=999]
+          , syn "rec01"   ["bufn"*=recbufn]
           ]
         ]
       , grp 2 []
@@ -190,7 +190,7 @@ setup fd window = do
     mrq     <- knobControl fd "rq" mixer01nid 0.5 $ LinRange 0.01 0.99
     mfp     <- knobControl fd "mfp" mixer01nid 0 $ LinRange 0 1
 
-    let goRec checked =
+    let goRecording checked =
             let act | checked   = do
                     mapM_ (async fd) $
                         [ b_alloc recbufn 131072 2
@@ -204,7 +204,7 @@ setup fd window = do
                         ]
             in  liftIO act
 
-    recbtn  <- Extra.toggleBox "rec" 15 15 goRec
+    recbtn  <- Extra.toggleBox "rec" 15 15 goRecording
                # set style [("margin","10px 5px 0px 5px")]
 
     -- div for layout
