@@ -40,7 +40,6 @@ import qualified Graphics.UI.Threepenny.Extra as Extra
 import qualified Sound.Study.ForUserInterfaces.JS as JS
 import           Paths_study_for_user_interfaces (getDataDir)
 
-
 -- --------------------------------------------------------------------------
 --
 -- * UI
@@ -67,7 +66,7 @@ main = withSC3 $ \fd -> do
 
 -- | Number of tracks.
 ntrack :: Num a => a
-ntrack = 13
+ntrack = 14
 
 -- | Buffer numbers used for mute/un-mute.
 mutebufs :: (Show a, Num a) => [a]
@@ -116,9 +115,11 @@ nodes =
             ["out"*=11,"t_tr0"*<-ts!!11-*"out"]
           , syn "fm01"
             ["out"*=12,"t_tr0"*<-ts!!12-*"out"]
+          , syn "pv01"
+            ["out"*=13]
           ]
         , grp 12
-          [ syn "mixer01" [] ]
+          [ syn "mixer01" ["t_tr0"*<-t00-*"out"] ]
         ]
       , grp 2 []
       ]
@@ -179,6 +180,7 @@ setup fd window = do
     revroom <- knobControl fd "room" mixer01nid 0 $ LinControl 0 1
     mcf     <- knobControl fd "cf" mixer01nid 8000 $ ExpControl 20 20000
     mrq     <- knobControl fd "rq" mixer01nid 0.5 $ LinControl 0.01 0.99
+    mfp     <- knobControl fd "mfp" mixer01nid 0 $ LinControl 0 1
 
     -- div for layout
     let divClear = UI.div # set style [("clear","both")]
@@ -229,7 +231,7 @@ setup fd window = do
                 fmute k v = do
                     let v' = if v then 1 else 0
                         bufn = mutebufs !! k :: Int
-                        fr  _ radio = do
+                        fr _ radio = do
                             isChecked <- get UI.checked radio
                             radioVal  <- get value radio
                             when (isChecked && radioVal == show bufn) $
@@ -254,6 +256,11 @@ setup fd window = do
                 (_,boxes) = unzip _boxes
 
             knobs <- knobControls fd lbl nid
+            ampKnob <- knobControl fd ("amp" ++ show n) mixer01nid 0
+                       (LinControl (-60) 25)
+            panKnob <- knobControl fd ("pos" ++ show n) mixer01nid 0
+                       (LinControl (-1) 1)
+            knobs' <- UI.new #+ map element (ampKnob : panKnob : knobs)
                      # set style [("display", "none")
                                  ,("margin", "10px")
                                  ,("padding", "10px")
@@ -273,24 +280,26 @@ setup fd window = do
                     (zip vals boxes)
                 liftIO $ send fd $ b_setn1 n 0 (map realToFrac vals)
 
-            showButton <- mkbtn "k" $ \_ -> JS.toggle knobs
+            showButton <- mkbtn "k" $ \_ -> JS.toggle knobs'
 
             wrapper <- UI.new #+
                 ([ muteBox 0, muteBox 1, muteBox 2
-                 , Extra.hslider "pan" 40 12 (-1) 1 0 fpan
-                   # set style [("float", "left")]
+                 -- , Extra.hslider "pan" 40 12 (-1) 1 0 fpan
+                 --   # set style [("float", "left")]
+                 -- , knobControl fd ("pos" ++ show n) mixer01nid 0 (LinControl (-1) 1)
                  , Extra.toggleBox "fx" 15 15 feff
                    # set style [("float", "left")
                                ,("margin","2px 3px 0")]
-                 , Extra.hslider ("amp"++show n) 40 12 (-60) 25 0 famp
-                   # set style [("float", "left")]
+                 -- , Extra.hslider ("amp"++show n) 40 12 (-60) 25 0 famp
+                 --   # set style [("float", "left")]
+                 -- , knobControl fd ("amp" ++ show n) mixer01nid 0 (LinControl (-60) 25)
                  , element showButton
                  , element clearButton
                  , element randButton
                  , element grids
                    # set style [("margin-top","9px")]
                  , divClear
-                 ] ++ [element knobs] ++
+                 ] ++ [element knobs'] ++
                  [ divClear
                  , UI.new
                    # set text lbl
@@ -350,14 +359,15 @@ setup fd window = do
         [ element stDiv
         , UI.new #
           set style
-          [("margin","0 auto"),("width", "936px"),("padding","5px")] #+
+          [("margin","0 auto"),("width", "836px"),("padding","5px")] #+
           ([ UI.new #
             set style [("float","left")] #+
             [ element mutes, element lmt, element mamp
             , element bpm, element beat
-            , element revrmix, element revdamp, element revroom
-            , element mcf, element mrq
             , element loadButton
+            , divClear
+            , element revrmix, element revdamp, element revroom
+            , element mcf, element mrq, element mfp
             ]
            , divClear
            ] ++
@@ -376,7 +386,7 @@ knobControl fd param nid iniv cc = Extra.knob param 40 minv maxv ini $ \v ->
         LinControl s e -> (id, s, e, iniv)
 
 -- | Make knob controls for synthdef using preset value for min and max.
-knobControls :: Transport fd => fd -> String -> Int -> UI Element
+knobControls :: Transport fd => fd -> String -> Int -> UI [Element]
 knobControls fd lbl nid =
     let ks = [ knobControl fd pname nid (realToFrac pval) cc
              | (pname, pval) <- ps
@@ -389,7 +399,7 @@ knobControls fd lbl nid =
              , c <- controls $ synthdefGraph def
              , synthdefName def == lbl
              ]
-    in  UI.new #+ ks
+    in  sequence ks
 
 -- | Knob preset values.
 knobPresets :: [(String, [(String,ControlCurve)])]
@@ -397,11 +407,18 @@ knobPresets =
     [("bd01",    [("dur", ExpControl 0.01 1.0)
                  ,("freq",ExpControl 20 100)
                  ])
+    ,("prc02",   [("prb1", LinControl 0 1)
+                 ,("prb2", LinControl 0 1)
+                 ,("prb3", LinControl 0 1)
+                 ,("prb4", LinControl 0 1)
+                 ])
     ,("add01",   [("hps", LinControl 0.1 10)
                  ,("faf", LinControl 0.2 30)
                  ])
     ,("add02",   [("dur1", ExpControl 0.1 10)
                  ,("prb1", LinControl 0 1)
+                 ,("pamp", LinControl 1 50)
+                 ,("en1",  LinControl (-10) 10)
                  ])
     ,("saw01",   [("cfhi", ExpControl 200 12000)
                  ,("ftrr", LinControl 0 1)
@@ -420,6 +437,12 @@ knobPresets =
                  ])
     ,("fm01",    [("dur",  ExpControl 0.01 2)
                  ,("maxi", LinControl 1 64)
+                 ])
+    ,("pv01",    [("trigPeriod", ExpControl 0.05 20)
+                 ,("minFreq", ExpControl 20 20000)
+                 ,("maxFreq", ExpControl 20 20000)
+                 ,("cutoff",  ExpControl 20 20000)
+                 ,("density", ExpControl 1 2000)
                  ])
     ]
 
@@ -488,9 +511,8 @@ synth_add02 = out (control KR "out" 0) sig0
     freq  = tChoose 'T' tr1 (mce $ map frq [0,5,7]) `lag2` 0.01
     frq x = mce $ concat
             [[y,y*2.999,y*6.001,y*8.999]|y<-map midiCPS [x+36,x+43,x+48]]
-    pamp  = 20
     aenv0 = envGen KR tr0 amp 0 dur DoNothing ash0
-    ash0  = Envelope [0,1,0.1,0.005,0] [0.002,0.08,0.85,0.08] [EnvNum (-2)]
+    ash0  = Envelope [0,1,0.1,0.005,0] [0.002,0.08,0.85,0.08] [EnvNum en1]
             Nothing Nothing
     aenv1 = envGen KR tr0 1 0 dur1 DoNothing ash1
     ash1  = Envelope [1,1,1,0] [0.0005,0.9999,0.0005] [EnvCub] (Just 0) Nothing
@@ -502,6 +524,8 @@ synth_add02 = out (control KR "out" 0) sig0
     tr0   = tr_control "t_tr0" 1
     tr1   = coinGate 'g' prb1 tr0
     prb1  = control KR "prb1" 0.125
+    pamp  = control KR "pamp" 20
+    en1   = control KR "en1" (-2)
 
 -- | Plays 'synth_add02' with 'synth_trig00'.
 go_add02 :: IO ()
@@ -574,7 +598,7 @@ synth_bd01 = out (control KR "out" 0) sig0
     cf    = 20000 * aenv0 + freq
     rq    = 0.99
     freq  = control KR "freq" 30
-    amp   = tExpRand 'a' 0.7 1 tr0
+    amp   = tExpRand 'a' 0.9 1 tr0
     dur   = control KR "dur" 0.25
     tr0   = tr_control "t_tr0" 1
 
@@ -642,7 +666,7 @@ synth_prc02 = out (control KR "out" 0) sig0
     aenv1 = envGen KR tr0 1 0 1 DoNothing $
             Envelope [0,1,0.8,0] [0.001,0.1,0.9] [EnvCub] Nothing Nothing
     sig2  = rhpf (whiteNoise 'W' AR) cf2 rq2 * aenv2
-    cf2   = 76.5 * (2 ** tIRand 'f' 0 8 tr2)
+    cf2   = 76.5 * (2 ** tIRand 'f' 0 6 tr2)
     rq2   = tExpRand 'R' 0.10 0.99 tr2
     aenv2 = envGen KR tr0 0.3 0 1 DoNothing $
             Envelope [0,1,1,0] [0.01,0.9,0.01] [EnvNum en2] Nothing Nothing
@@ -656,19 +680,22 @@ synth_prc02 = out (control KR "out" 0) sig0
     sig4  = clipNoise 'G' AR * aenv4
     aenv4 = envGen KR (impulse KR aef4 0) 0.5 0 0.02 DoNothing $
             Envelope [0,1,1,0] [0.3,0.3,0.3] [EnvCub] Nothing Nothing
-    aef4  = tExpRand 'E' 1 32 tr4
+    aef4  = tExpRand 'E' 2 32 tr4
     tr0   = tr_control "t_tr0" 1
-    tr1   = coinGate '1' 0.5 tr0
-    tr2   = coinGate '2' 0.5 tr0
-    tr3   = coinGate '3' 0.5 tr0
-    tr4   = coinGate '4' 0.5 tr0
+    tr1   = cg '1'
+    tr2   = cg '2'
+    tr3   = cg '3'
+    tr4   = cg '4'
+    cg n  = coinGate n (control KR ("prb"++[n]) 0.5) tr0
 
 -- | Play 'synth_perc02' with 'synth_trig00'.
 go_perc02 :: IO ()
 go_perc02 = withSC3 $ \fd -> do
     play fd synth_prc02
-    send fd $ n_map (-1) [("t_tr0",100)]
-    send fd $ s_new "trig00" (-1) AddBefore (-1) [("out",100)]
+    sendOSC fd $ bundle immediately
+        [ n_map (-1) [("t_tr0",100),("bpm",128),("beat",2)]
+        , s_new "trig00" (-1) AddBefore (-1) [("out",100)]
+        ]
 
 -- | Simple filtered white noise sound.
 synth_nz01 :: UGen
@@ -746,9 +773,37 @@ synth_fm01 = out (control KR "out" 0) (mix sig0)
     tr0   = tr_control "t_tr0" 1
     tr1   = coinGate 'G' 0.6 tr0
 
+-- | Simple convolution with 'saw' chord and 'dust'.
+synth_pv01 :: UGen
+synth_pv01 = mrg2 (out (k "out" 0) osig) recbuf
+  where
+    osig          = fade * conv0 + (1-fade) * conv1
+    fade          = lfTri KR (trigFreq*0.5) 1 * 0.5 + 0.5
+    [conv0,conv1] = mceChannels conv
+    conv          = convolution2 isig bufk convTrigs frames
+    frames        = bufFrames KR bufk
+    convTrigs     = pulseDivider convTrig 2 (mce [0,1])
+    convTrig      = tDelay recTrig (bufDur KR bufk)
+    recbuf        = recordBuf AR bufk 0 1 0 1 NoLoop recTrig DoNothing irSig
+    irSig         = mix (hpf (lpf (saw AR freqs) maxFreq) minFreq) * 0.4
+    freqs         = mce $ map (\i -> tChoose i recTrig $ mce pchs) [1..8::Int]
+    pchs          = foldr (\o acc -> map (midiCPS . (+o)) degs ++ acc) [] octs
+    octs          = take 5 $ iterate (+12) 24
+    degs          = [0,2,5,7]
+    recTrig       = impulse KR trigFreq 0
+    trigFreq      = recip trigPeriod
+    isig          = lpf (dust2 'd' AR density) cutoff
+    trigPeriod    = k "trigPeriod" 10
+    minFreq       = k "minFreq" 200
+    maxFreq       = k "maxFreq" 8000
+    cutoff        = k "cutoff" 1000
+    density       = k "density" 200
+    k             = control KR
+    bufk          = mrg2 (localBuf 'a' 2048 1) (maxLocalBufs 2)
+
 -- | Simple mixer.
 synth_mixer01 :: UGen
-synth_mixer01 = replaceOut 0 (sigs0 * dbAmp mamp)
+synth_mixer01 = mrg [replaceOut 0 (sigs0 * dbAmp mamp), maxLocalBufs 1]
   where
     sigs0 = (lmt * limiter sigs1 1 0.02) + ((1-lmt) * sigs1)
     sigs1 = efx (sum sigsA) + sum sigsB
@@ -765,14 +820,19 @@ synth_mixer01 = replaceOut 0 (sigs0 * dbAmp mamp)
         lagt = control KR "lagt" 2
     efx x = freeVerb sig0 rmix room damp
       where
-        sig0 = rlpf x cf rq
+        sig0 = rlpf sig1 cf rq
+        sig1 = ifft' $ pv_MagFreeze ch0 trmf
+        ch0  = fft' (localBuf 'a' 2048 1) x
+        trmf = toggleFF $ coinGate 'M' mfp (t_tr0)
     mamp  = k "mamp" 0
-    rmix  = k "rmix" 0.33
+    rmix  = k "rmix" 0
     room  = k "room" 0.5
     damp  = k "damp" 0.5
     cf    = k "cf" 2800
     rq    = k "rq" 0.999
     lmt   = k "lmt" 1
+    mfp   = k "mfp" 1
+    t_tr0 = tr_control "t_tr0" 1
     k n v = control KR n v `lag` 0.2
 
 -- | All 'Synthdef's starting with /synth_/ in this module.
