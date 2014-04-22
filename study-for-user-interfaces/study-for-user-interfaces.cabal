@@ -32,11 +32,13 @@ library
                    , hosc >= 0.14
                    , hsc3 >= 0.14
                    , hsc3-db
+                   , hsc3-lang
                    , hsc3-th
                    , hsc3-tree
                    , mtl
                    , random
                    , threepenny-gui
+                   , transformers
 
 executable ui-run
   main-is:           run.hs
