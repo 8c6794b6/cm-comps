@@ -72,6 +72,10 @@ ntrack = 14
 mutebufs :: (Show a, Num a) => [a]
 mutebufs = [100, 101, 102]
 
+-- | Buffer number used for recording with 'diskOut'.
+recbufn :: Num a => a
+recbufn = 999
+
 -- | Control rate outputs for triggers.
 kouts :: (Num a, Enum a) => [a]
 kouts = [101..]
@@ -116,10 +120,12 @@ nodes =
           , syn "fm01"
             ["out"*=12,"t_tr0"*<-ts!!12-*"out"]
           , syn "pv01"
-            ["out"*=13]
+            ["out"*=13,"t_tr0"*<-ts!!13-*"out"]
           ]
         , grp 12
-          [ syn "mixer01" ["t_tr0"*<-t00-*"out"] ]
+          [ syn "mixer01" ["t_tr0"*<-t00-*"out"]
+          , syn "rec01"   ["bufn"*=999]
+          ]
         ]
       , grp 2 []
       ]
@@ -153,6 +159,8 @@ setup fd window = do
         tr00nid  = nodeId tr00node
         mixer01node = queryByName "mixer01"
         mixer01nid  = nodeId mixer01node
+        rec01node = queryByName "rec01"
+        rec01nid = nodeId rec01node
 
     -- status div
     (tmr,stDiv) <- Extra.statusDiv fd
@@ -181,6 +189,23 @@ setup fd window = do
     mcf     <- knobControl fd "cf" mixer01nid 8000 $ ExpControl 20 20000
     mrq     <- knobControl fd "rq" mixer01nid 0.5 $ LinControl 0.01 0.99
     mfp     <- knobControl fd "mfp" mixer01nid 0 $ LinControl 0 1
+
+    let goRec checked =
+            let act | checked   = do
+                    mapM_ (async fd) $
+                        [ b_alloc recbufn 8192 2
+                        , b_write recbufn "out.wav" Wave PcmFloat (-1) 0 True
+                        ]
+                    send fd $ n_run [(rec01nid, True)]
+                    | otherwise =
+                    sendOSC fd $ bundle immediately
+                        [ n_run [(rec01nid,False)]
+                        , b_close recbufn, b_free recbufn
+                        ]
+            in  liftIO act
+
+    recbtn  <- Extra.toggleBox "rec" 15 15 goRec
+               # set style [("margin","10px 5px 0px 5px")]
 
     -- div for layout
     let divClear = UI.div # set style [("clear","both")]
@@ -280,7 +305,7 @@ setup fd window = do
                 ([ muteBox 0, muteBox 1, muteBox 2
                  , Extra.toggleBox "fx" 15 15 feff
                    # set style [("float", "left")
-                               ,("margin","2px 3px 0")]
+                               ,("margin","1px 3px 0")]
                  , element showButton
                  , element clearButton
                  , element randButton
@@ -297,7 +322,7 @@ setup fd window = do
 
     -- layout --
     mapM_ (\e -> element e # set style [("float","left")])
-        [ bpm, beat, lmt ]
+        [ bpm, beat, lmt, recbtn ]
 
     let synths = map (\s -> (synthName s, nodeId s)) $
                  queryN (not . null . synthName) g11
@@ -343,6 +368,9 @@ setup fd window = do
             (pf,_):_  -> fillPatternFormat pf
             _         -> liftIO $ print "malformed pattern"
 
+    -- Disable recording
+    liftIO $ send fd $ n_run [(rec01nid,False)]
+
     void $ getBody window #+
         [ element stDiv
         , UI.new #
@@ -351,8 +379,7 @@ setup fd window = do
           ([ UI.new #
             set style [("float","left")] #+
             [ element mutes, element lmt, element mamp
-            , element bpm, element beat
-            , element loadButton
+            , element bpm, element beat, element recbtn, element loadButton
             , divClear
             , element revrmix, element revdamp, element revroom
             , element mcf, element mrq, element mfp
@@ -426,7 +453,7 @@ knobPresets =
     ,("fm01",    [("dur",  ExpControl 0.01 2)
                  ,("maxi", LinControl 1 64)
                  ])
-    ,("pv01",    [("trigPeriod", ExpControl 0.05 20)
+    ,("pv01",    [("tlag", ExpControl 0.002 3)
                  ,("minFreq", ExpControl 20 20000)
                  ,("maxFreq", ExpControl 20 20000)
                  ,("cutoff",  ExpControl 20 20000)
@@ -765,8 +792,8 @@ synth_fm01 = out (control KR "out" 0) (mix sig0)
 synth_pv01 :: UGen
 synth_pv01 = mrg2 (out (k "out" 0) osig) recbuf
   where
-    osig          = fade * conv0 + (1-fade) * conv1
-    fade          = lfTri KR (trigFreq*0.5) 1 * 0.5 + 0.5
+    osig          = (fade * conv0 + (1-fade) * conv1) * 0.2
+    fade          = toggleFF recTrig `lag` tlag
     [conv0,conv1] = mceChannels conv
     conv          = convolution2 isig bufk convTrigs frames
     frames        = bufFrames KR bufk
@@ -778,10 +805,9 @@ synth_pv01 = mrg2 (out (k "out" 0) osig) recbuf
     pchs          = foldr (\o acc -> map (midiCPS . (+o)) degs ++ acc) [] octs
     octs          = take 5 $ iterate (+12) 24
     degs          = [0,2,5,7]
-    recTrig       = impulse KR trigFreq 0
-    trigFreq      = recip trigPeriod
+    recTrig       = tr_control "t_tr0" 0
     isig          = lpf (dust2 'd' AR density) cutoff
-    trigPeriod    = k "trigPeriod" 10
+    tlag          = k "tlag" 1
     minFreq       = k "minFreq" 200
     maxFreq       = k "maxFreq" 8000
     cutoff        = k "cutoff" 1000
@@ -793,7 +819,8 @@ synth_pv01 = mrg2 (out (k "out" 0) osig) recbuf
 synth_mixer01 :: UGen
 synth_mixer01 = mrg [replaceOut 0 (sigs0 * dbAmp mamp), maxLocalBufs 1]
   where
-    sigs0 = (lmt * limiter sigs1 1 0.02) + ((1-lmt) * sigs1)
+    sigs0 = clip2 lmtd 1
+    lmtd = (lmt * limiter sigs1 1 0.02) + ((1-lmt) * sigs1)
     sigs1 = efx (sum sigsA) + sum sigsB
     (sigsA, sigsB) = unzip $ map f [0..ntrack-1::Int]
     f n   = (sig0*efxc, sig0*(1-efxc))
@@ -822,6 +849,9 @@ synth_mixer01 = mrg [replaceOut 0 (sigs0 * dbAmp mamp), maxLocalBufs 1]
     mfp   = k "mfp" 1
     t_tr0 = tr_control "t_tr0" 1
     k n v = control KR n v `lag` 0.2
+
+synth_rec01 :: UGen
+synth_rec01 = diskOut (control IR "bufn" 0) (in' 2 AR 0)
 
 -- | All 'Synthdef's starting with /synth_/ in this module.
 synthdefs :: [Synthdef]
