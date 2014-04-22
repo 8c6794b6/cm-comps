@@ -220,7 +220,7 @@ sendTrig01_ex01 = do
 
 -- | Example of 'diskOut'.
 diskOut_ex01 :: IO ()
-diskOut_ex01 = withSC3 $ withNotifications $ do
+diskOut_ex01 = withSC3 $ do
 
     let bbl  = out 0 $ combN (sinOsc AR f0 0 * 0.04) 0.2 0.2 4
         f0   = midiCPS (f1+f2)
@@ -231,7 +231,7 @@ diskOut_ex01 = withSC3 $ withNotifications $ do
         bufn = 0
 
     mapM_ async
-        [ b_alloc bufn 1024 2
+        [ b_alloc bufn 65536 2
         , b_write bufn "out.wav" Wave PcmFloat (-1) 0 True
         , d_recv $ synthdef "bbl" bbl
         , d_recv $ synthdef "dout" dout
@@ -245,6 +245,105 @@ diskOut_ex01 = withSC3 $ withNotifications $ do
     sendOSC $ bundle (now+4)
         [ n_free [2003,2004], b_close bufn, b_free bufn ]
 
+-- | Example of 'recordBuf'.
+recordBuf_ex01 :: IO ()
+recordBuf_ex01 = withSC3 $ do
+    let -- buffer number used to record.
+        bufn :: Num a => a
+        bufn = 0
+
+        -- synthdef recording audio bus 0 and 1.
+        rbuf = recordBuf AR chs b lvl 0 run NoLoop tr RemoveSynth i
+        chs  = mce [0,1]
+        lvl  = 1
+        run  = 1
+        tr   = 1
+        i    = in' 2 AR 0
+        b    = control KR "bufn" 0
+
+        -- sound to record
+        fmt  = out 0 $
+               formant AR
+               (xLine KR (mce [400,200]) (mce [1000,2000]) 4 DoNothing)
+               2000 880 * 0.125
+
+    mapM_ async
+        [ b_alloc bufn (48000 * 4) 2
+        , d_recv $ synthdef "rbuf" rbuf
+        , d_recv $ synthdef "fmt" fmt
+        ]
+
+    now <- liftIO time
+    sendOSC $ bundle immediately
+        [ s_new "fmt" 2003 AddToHead 1 []
+        , s_new "rbuf" 2004 AddAfter 2003 [("bufn",bufn)]
+        ]
+    sendOSC $ bundle (now+4)
+        [ n_free [2003]
+        , b_write bufn "rbuf.wav"  Wave PcmFloat (-1) 0 False
+        , b_free bufn
+        ]
+
+-- | Recording and playing back with 'localBuf'.
+recordBuf_ex02 :: Transport m => UGen -> m ()
+recordBuf_ex02 rsig = do
+    let buf   = localBuf 'z' 96000 1
+        rbuf  = recordBuf AR buf 0 1 0 1 Loop trec DoNothing rsig
+        trec  = impulse KR 0.5 0
+        pbuf  = playBuf 1 AR buf rate rst pos Loop DoNothing
+        rate  = bufRateScale KR buf
+        rst   = coinGate 'd' rprob trst
+        rprob = mouseY KR 0 1 Linear 0.1
+        pos   = 12000 * tIRand 'p' 0 7 (coinGate 'p' 0.5 rst)
+        trst  = impulse KR rstf 0
+        rstf  = mouseX KR 1 32 Exponential 0.1
+        osig  = mrg [out 0 (mce2 pbuf pbuf), rbuf, maxLocalBufs 1]
+    play osig
+
+recordBuf_ex02_play01 :: IO ()
+recordBuf_ex02_play01 =
+    let sig = resonz (whiteNoise 'W' AR) f rq * decay t 0.8
+        f   = tExpRand 'f' 200 12000 t
+        rq  = squared (lfdNoise3 'a' KR 1) + 0.1
+        t   = dust 'd' KR 8
+    in  withSC3 $ recordBuf_ex02 sig
+
+recordBuf_ex02_play02 :: FilePath -> IO ()
+recordBuf_ex02_play02 file = withSC3 $ do
+    let bufn :: Num a => a
+        bufn = 13
+        sig  = playBuf 1 AR bufn (bufRateScale KR bufn) 1 0 Loop DoNothing
+    _ <- async $ b_allocRead bufn file 0 0
+    recordBuf_ex02 sig
+
+recordBuf_ex02_play03 :: IO ()
+recordBuf_ex02_play03 =
+    let sig    = sum [fsig i|i<-[0..7::Int]]
+        fsig i = sinOsc AR frq 0 * aenv0 * 0.03
+          where
+            frq   = tChoose i tr0 (mce frqs)
+            aenv0 = envGen KR tr0 1 0 (tExpRand i 0.1 4 tr0) DoNothing $
+                    Envelope [0,1,0] [atk,1-atk] [EnvCub] (Just 0) Nothing
+            atk   = tExpRand i 0.001 0.999 tr0
+        frqs   = foldr (\o ps -> map (midiCPS . (+o)) degs ++ ps) [] octs
+        octs   = take 8 $ iterate (+12) 24
+        degs   = [0,2,5,7,10]
+        tr0    = dust 'A' KR 2
+        buf    = localBuf 'y' 96000 1
+        rbuf   = recordBuf AR buf 0 1 plvl run Loop trec DoNothing sig
+        plvl   = toggleFF (coinGate 't' (1/64) tr0)
+        run    = lfClipNoise 'c' KR (1/16)
+        trec   = impulse KR 0.5 0
+        osig   = playBuf 1 AR buf rate rst pos Loop DoNothing
+        rate   = bufRateScale KR buf
+        rst    = coinGate 'd' rprb trst
+        rprb   = mouseY KR 0 1 Linear 0.1
+        trst   = impulse KR rstf 0
+        rstf   = mouseX KR 1 32 Exponential 0.1
+        pos    = 12000 * tIRand 'p' 0 7 (coinGate 'p' 0.5 rst)
+    in  audition $ mrg [out 0 (mce2 osig osig), rbuf, maxLocalBufs 1]
+
+-- | Example of 'grainIn'.
 grainIn_ex01 :: IO ()
 grainIn_ex01 =
     let i   = pinkNoise 'a' AR
