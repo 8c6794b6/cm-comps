@@ -11,6 +11,7 @@ Miscellaneous functions.
 -}
 module Sound.Study.ForUserInterfaces.Misc where
 
+import Control.Arrow (first)
 import Control.Concurrent (forkIO, killThread)
 import Data.Function (fix)
 import System.Random (newStdGen, randomR, randomRs)
@@ -179,8 +180,8 @@ stepper_ex =
 
 -- | Simple 'sendTrig' example to schedule 's_new' message responding to @/tr@
 -- messages sent back from scsynth server.
-go_sendTrig01 :: IO ()
-go_sendTrig01 = do
+sendTrig01_ex01 :: IO ()
+sendTrig01_ex01 = do
     g0 <- newStdGen
     tid <- forkIO $ withSC3 $ withNotifications $ do
         let -- trigger synth
@@ -193,7 +194,6 @@ go_sendTrig01 = do
             sin01 = out 0 (pan2 (sinOsc AR freq phs * e * 0.08) pos 1)
             pos   = rand 'A' (-1) 1
             freq  = control KR "freq" 440
-            -- phs   = 0
             phs   = rlpf (saw AR (freq*2.9998)) (freq*4*e) 0.8 *
                     e * rand 'B' 1 6
             e     = envGen KR 1 1 0 dur RemoveSynth esh
@@ -207,15 +207,49 @@ go_sendTrig01 = do
             octs = take 6 $ iterate (+12) 36
             degs = [0,4,7,11]
         -- looping action responding to /tr message from scsynth server.
-        fix (\f gen -> do
+        flip fix g0 $ \f gen -> do
             [Int32 _nid, Int32 1000, Float val] <- waitDatum "/tr"
-            let pidx        = ceiling val `mod` (length pchs - 1)
-                frq         = pchs !! pidx
-                (latk,gen1) = randomR (log 0.001, log 0.999) gen
-                (ldur,gen2) = randomR (log 0.09, log 9) gen1
-                eatk        = exp latk
-                edur        = exp ldur
+            let pidx       = ceiling val `mod` (length pchs - 1)
+                frq        = pchs !! pidx
+                (patk,gen1) = first exp $ randomR (log 0.001, log 0.999) gen
+                (pdur,gen2) = first exp $ randomR (log 0.09, log 9) gen1
             send $ s_new "sin01" (-1) AddToTail 1
-                [("freq",frq),("atk",eatk),("dur",edur)]
-            f gen2) g0
+                [("freq",frq),("atk",patk),("dur",pdur)]
+            f gen2
     getChar >> killThread tid
+
+-- | Example of 'diskOut'.
+diskOut_ex01 :: IO ()
+diskOut_ex01 = withSC3 $ withNotifications $ do
+
+    let bbl  = out 0 $ combN (sinOsc AR f0 0 * 0.04) 0.2 0.2 4
+        f0   = midiCPS (f1+f2)
+        f1   = lfSaw KR 0.4 0 * 24
+        f2   = lfSaw KR (mce [8,7.23]) 0 * 3 + 80
+        dout = diskOut (control IR "bufn" 0) (in' 2 AR 0)
+        bufn :: Num a => a
+        bufn = 0
+
+    mapM_ async
+        [ b_alloc bufn 1024 2
+        , b_write bufn "out.wav" Wave PcmFloat (-1) 0 True
+        , d_recv $ synthdef "bbl" bbl
+        , d_recv $ synthdef "dout" dout
+        ]
+
+    now <- liftIO time
+    sendOSC $ bundle now
+        [ s_new "bbl" 2003 AddToHead 1 []
+        , s_new "dout" 2004 AddAfter 2003 [("bufn",bufn)]
+        ]
+    sendOSC $ bundle (now+4)
+        [ n_free [2003,2004], b_close bufn, b_free bufn ]
+
+grainIn_ex01 :: IO ()
+grainIn_ex01 =
+    let i   = pinkNoise 'a' AR
+        pan = mouseX KR (-0.5) 0.5 Linear 0.1
+        tf  = mouseY KR 5 25 Linear 0.1
+        tr  = impulse KR tf 0
+        g   = grainIn 2 tr 0.1 i pan (-1) 512 * 0.1
+    in  audition $ out 0 g
