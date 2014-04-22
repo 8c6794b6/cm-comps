@@ -219,13 +219,7 @@ setup fd window = do
     let track (lbl,nid) n = do
             (grids, _boxes) <- Extra.toggleGrids 32 1 $ \(_i,j) val ->
                 liftIO $ send fd $ b_set n [(j, fromIntegral val)]
-            let fpan v = do
-                    liftIO $ send fd $ n_set mixer01nid [("pos"++show n,v)]
-                    return ""
-                famp v = do
-                    liftIO $ send fd $ n_set mixer01nid [("amp"++show n,v)]
-                    return ""
-                feff v = do
+            let feff v = do
                     liftIO $ send fd $ n_set mixer01nid
                         [("efx"++show n, if v then 1 else 0)]
                 fmute k v = do
@@ -284,15 +278,9 @@ setup fd window = do
 
             wrapper <- UI.new #+
                 ([ muteBox 0, muteBox 1, muteBox 2
-                 -- , Extra.hslider "pan" 40 12 (-1) 1 0 fpan
-                 --   # set style [("float", "left")]
-                 -- , knobControl fd ("pos" ++ show n) mixer01nid 0 (LinControl (-1) 1)
                  , Extra.toggleBox "fx" 15 15 feff
                    # set style [("float", "left")
                                ,("margin","2px 3px 0")]
-                 -- , Extra.hslider ("amp"++show n) 40 12 (-60) 25 0 famp
-                 --   # set style [("float", "left")]
-                 -- , knobControl fd ("amp" ++ show n) mixer01nid 0 (LinControl (-60) 25)
                  , element showButton
                  , element clearButton
                  , element randButton
