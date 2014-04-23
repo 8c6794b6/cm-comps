@@ -25,6 +25,7 @@ library
                      Sound.Study.ForUserInterfaces.SimpleStatus
                      Sound.Study.ForUserInterfaces.SimpleXY
                      Sound.Study.ForUserInterfaces.GUI01
+                     Sound.Study.ForUserInterfaces.GUI02
                      Sound.Study.ForUserInterfaces.JS
                      Paths_study_for_user_interfaces
   build-depends:     base >=4.6 && <4.7

@@ -193,3 +193,24 @@ x-knobjs-knob {
   height: 100px;
   width: 100px;
 }
+
+
+/** SCNode **/
+
+.group_node {
+    border: solid 1px black;
+    margin: 5px;
+    padding: 5px;
+}
+
+.synth_node {
+    border: solid 1px black;
+    margin: 5px;
+    padding: 5px;
+}
+
+.param {
+    float: left;
+    margin: 5px;
+    padding: 5px;
+}

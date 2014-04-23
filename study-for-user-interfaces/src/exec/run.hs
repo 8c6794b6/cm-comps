@@ -1,17 +1,19 @@
 module Main where
 
-import Control.Monad (unless)
-import System.Console.GetOpt
-import System.Environment (getArgs, getProgName)
-import System.Exit (exitFailure)
+import           Control.Monad (unless)
+import           System.Console.GetOpt
+import           System.Environment (getArgs, getProgName)
+import           System.Exit (exitFailure)
 
 import qualified Sound.Study.ForUserInterfaces.GUI01 as GUI01
+import qualified Sound.Study.ForUserInterfaces.GUI02 as GUI02
 import qualified Sound.Study.ForUserInterfaces.SimpleRange as SimpleRange
 import qualified Sound.Study.ForUserInterfaces.SimpleStatus as SimpleStatus
 import qualified Sound.Study.ForUserInterfaces.SimpleXY as SimpleXY
 
 data MainModule
     = GUI01
+    | GUI02
     | SimpleRange
     | SimpleStatus
     | SimpleXY
@@ -21,6 +23,8 @@ options :: [OptDescr MainModule]
 options =
     [ Option [] ["gui01"] (NoArg GUI01)
       "Run GUI01"
+    , Option [] ["gui02"] (NoArg GUI02)
+      "Run GUI02"
     , Option [] ["simplerange"] (NoArg SimpleRange)
       "Run SimpleXY"
     , Option [] ["simplestatus"] (NoArg SimpleStatus)
@@ -41,6 +45,7 @@ main = do
 
     case head opts of
          GUI01        -> GUI01.main
+         GUI02        -> GUI02.main
          SimpleRange  -> SimpleRange.main
          SimpleStatus -> SimpleStatus.main
          SimpleXY     -> SimpleXY.main

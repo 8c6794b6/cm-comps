@@ -303,7 +303,7 @@ recordBuf_ex02 rsig = do
 recordBuf_ex02_play01 :: IO ()
 recordBuf_ex02_play01 =
     let sig = resonz (whiteNoise 'W' AR) f rq * decay t 0.8
-        f   = tExpRand 'f' 200 12000 t
+        f   = tExpRand 'f' 20 12000 t
         rq  = squared (lfdNoise3 'a' KR 1) + 0.1
         t   = dust 'd' KR 8
     in  withSC3 $ recordBuf_ex02 sig

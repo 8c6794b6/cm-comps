@@ -10,8 +10,11 @@ Extra elements for threepenny-gui. See @data/static/ui.css@ for CSS values.
 
 -}
 module Graphics.UI.Threepenny.Extra
- ( -- * Element
-   addJavaScript
+ ( -- * Types
+   ControlRange(..)
+
+   -- * Element
+ , addJavaScript
  , textbox
  , hrange
  , vrange
@@ -25,10 +28,13 @@ module Graphics.UI.Threepenny.Extra
  , turnOffGrid
  , xyarea
  , knob
+ , knobControl
  , statusDiv
+
    -- * Event
  , change
  , input
+
    -- * IO
  , getStaticDir
  ) where
@@ -43,7 +49,7 @@ import qualified Graphics.UI.Threepenny as UI
 import           Graphics.UI.Threepenny.Core
 
 import           Sound.OSC.FD
-import           Sound.SC3.FD (dumpOSC, serverStatusData, withSC3)
+import           Sound.SC3.FD (dumpOSC, n_set, send, serverStatusData, withSC3)
 
 import           Paths_study_for_user_interfaces (getDataDir)
 
@@ -54,6 +60,7 @@ import           Paths_study_for_user_interfaces (getDataDir)
 --
 -- --------------------------------------------------------------------------
 
+-- | Add javascript to head of the windoe.
 addJavaScript :: Window -> FilePath -> UI ()
 addJavaScript w filename = void $ do
     el <- mkElement "script"
@@ -455,6 +462,30 @@ knob lbl size minv maxv iniv act = do
                        ,("margin-right","5px")
                        ]
 
+
+-- | Data type to specify curved range of control value.
+data ControlRange
+    = -- | Control value changes exponentially.
+      ExpRange Double Double
+      -- | Control value changes linearly.
+    | LinRange Double Double
+    deriving (Eq, Show)
+
+-- | Make knob control from 'ControlRange'.
+knobControl ::
+    Transport fd
+    => fd           -- ^ Transport to send message.
+    -> String       -- ^ Parameter name
+    -> Int          -- ^ Node id.
+    -> Double       -- ^ Initial value
+    -> ControlRange -- ^ Control range for this 'Extra.knob'.
+    -> UI Element
+knobControl fd param nid iniv cc = knob param 40 minv maxv ini $ \v ->
+    liftIO $ send fd $ n_set nid [(param, fv v)]
+  where
+    (fv, minv, maxv, ini) = case cc of
+        ExpRange s e -> (exp, log s, log e, log iniv)
+        LinRange s e -> (id, s, e, iniv)
 
 -- | Returns timer and div to show scsynth server status.
 statusDiv ::

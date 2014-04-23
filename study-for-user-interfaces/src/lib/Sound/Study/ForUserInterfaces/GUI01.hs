@@ -133,13 +133,6 @@ nodes =
 -- | Synonym for pattern format loaded from text file.
 type PatternFormat = [(String,[Double])]
 
--- | Data type to specify curved range of control value.
-data ControlRange
-    = -- | Control value changes exponentially.
-      ExpRange Double Double
-      -- | Control value changes linearly.
-    | LinRange Double Double
-
 -- | Setup GUI with given 'Transport'.
 setup :: Transport t => t -> Window -> UI ()
 setup fd window = do
@@ -148,19 +141,19 @@ setup fd window = do
 
     currentNodes <- liftIO $ runReaderT getRootNode fd
     let queryByName name =
-            maybe (error (name ++ " not found")) id $
-            queryN' (synthName ==? name) currentNodes
+                    maybe (error (name ++ " not found")) id $
+                    queryN' (synthName ==? name) currentNodes
         queryParam name node =
-            case queryP' (paramName ==? name) node of
-                Just (name' := val) | name == name' -> val
-                _                                   ->
-                    error $ unwords ["no", name, "found in", show node]
-        tr00node = queryByName "trig00"
-        tr00nid  = nodeId tr00node
+                    case queryP' (paramName ==? name) node of
+                        Just (name' := val) | name == name' -> val
+                        _                                   ->
+                            error $ unwords ["no", name, "found in", show node]
+        tr00node    = queryByName "trig00"
+        tr00nid     = nodeId tr00node
         mixer01node = queryByName "mixer01"
         mixer01nid  = nodeId mixer01node
-        rec01node = queryByName "rec01"
-        rec01nid = nodeId rec01node
+        rec01node   = queryByName "rec01"
+        rec01nid    = nodeId rec01node
 
     -- status div
     (tmr,stDiv) <- Extra.statusDiv fd
@@ -181,14 +174,17 @@ setup fd window = do
         liftIO $ send fd $ n_set mixer01nid [("mamp",v)]
         return $ printf "%3.2f" v) # set style [("float","left")]
     lmt <- Extra.toggleBox "lmt" 15 15 (\checked ->
-            liftIO $ send fd $ n_set mixer01nid [("lmt",if checked then 1 else 0)])
+            liftIO $ send fd $
+              n_set mixer01nid [("lmt",if checked then 1 else 0)])
             # set style [("margin","10px 5px 0px 5px")]
-    revrmix <- knobControl fd "rmix" mixer01nid 0 $ LinRange 0 1
-    revdamp <- knobControl fd "damp" mixer01nid 0 $ LinRange 0 1
-    revroom <- knobControl fd "room" mixer01nid 0 $ LinRange 0 1
-    mcf     <- knobControl fd "cf" mixer01nid 8000 $ ExpRange 20 20000
-    mrq     <- knobControl fd "rq" mixer01nid 0.5 $ LinRange 0.01 0.99
-    mfp     <- knobControl fd "mfp" mixer01nid 0 $ LinRange 0 1
+    revrmix <- Extra.knobControl fd "rmix" mixer01nid 0 $ Extra.LinRange 0 1
+    revdamp <- Extra.knobControl fd "damp" mixer01nid 0 $ Extra.LinRange 0 1
+    revroom <- Extra.knobControl fd "room" mixer01nid 0 $ Extra.LinRange 0 1
+    mcf     <- Extra.knobControl fd "cf" mixer01nid 8000 $
+               Extra.ExpRange 20 20000
+    mrq     <- Extra.knobControl fd "rq" mixer01nid 0.5 $
+               Extra.LinRange 0.01 0.99
+    mfp     <- Extra.knobControl fd "mfp" mixer01nid 0 $ Extra.LinRange 0 1
 
     let goRecording checked =
             let act | checked   = do
@@ -275,10 +271,10 @@ setup fd window = do
                 (_,boxes) = unzip _boxes
 
             knobs <- knobControls fd lbl nid
-            ampKnob <- knobControl fd ("amp" ++ show n) mixer01nid 0
-                       (LinRange (-60) 25)
-            panKnob <- knobControl fd ("pos" ++ show n) mixer01nid 0
-                       (LinRange (-1) 1)
+            ampKnob <- Extra.knobControl fd ("amp" ++ show n) mixer01nid 0
+                       (Extra.LinRange (-60) 25)
+            panKnob <- Extra.knobControl fd ("pos" ++ show n) mixer01nid 0
+                       (Extra.LinRange (-1) 1)
             knobs' <- UI.new #+ map element (ampKnob : panKnob : knobs)
                      # set style [("display", "none")
                                  ,("margin", "10px")
@@ -390,26 +386,10 @@ setup fd window = do
         ]
     UI.start tmr
 
--- | Make knob control from 'ControlRange'.
-knobControl ::
-    Transport fd
-    => fd           -- ^ Transport to send message.
-    -> String       -- ^ Parameter name
-    -> Int          -- ^ Node id.
-    -> Double       -- ^ Initial value
-    -> ControlRange -- ^ Control range for this 'Extra.knob'.
-    -> UI Element
-knobControl fd param nid iniv cc = Extra.knob param 40 minv maxv ini $ \v ->
-    liftIO $ send fd $ n_set nid [(param, fv v)]
-  where
-    (fv, minv, maxv, ini) = case cc of
-        ExpRange s e -> (exp, log s, log e, log iniv)
-        LinRange s e -> (id, s, e, iniv)
-
 -- | Make knob controls for synthdef using preset value for min and max.
 knobControls :: Transport fd => fd -> String -> Int -> UI [Element]
 knobControls fd lbl nid =
-    let ks = [ knobControl fd pname nid (realToFrac pval) cc
+    let ks = [ Extra.knobControl fd pname nid (realToFrac pval) cc
              | (pname, pval) <- ps
              , pname /= "out", not ("t_" `isPrefixOf` pname)
              , let err = error $ "knobControls: " ++ pname ++ " not found"
@@ -423,49 +403,52 @@ knobControls fd lbl nid =
     in  sequence ks
 
 -- | Knob preset values.
-knobPresets :: [(String, [(String,ControlRange)])]
+knobPresets :: [(String, [(String,Extra.ControlRange)])]
 knobPresets =
-    [("bd01",    [("dur", ExpRange 0.01 1.0)
-                 ,("freq",ExpRange 20 100)
+    [("bd01",    [("dur", e 0.01 1.0)
+                 ,("freq",e 20 100)
                  ])
-    ,("prc02",   [("prb1", LinRange 0 1)
-                 ,("prb2", LinRange 0 1)
-                 ,("prb3", LinRange 0 1)
-                 ,("prb4", LinRange 0 1)
+    ,("prc02",   [("prb1", l 0 1)
+                 ,("prb2", l 0 1)
+                 ,("prb3", l 0 1)
+                 ,("prb4", l 0 1)
                  ])
-    ,("add01",   [("hps", LinRange 0.1 10)
-                 ,("faf", LinRange 0.2 30)
+    ,("add01",   [("hps", l 0.1 10)
+                 ,("faf", l 0.2 30)
                  ])
-    ,("add02",   [("dur1", ExpRange 0.1 10)
-                 ,("prb1", LinRange 0 1)
-                 ,("pamp", LinRange 1 50)
-                 ,("en1",  LinRange (-10) 10)
+    ,("add02",   [("dur1", e 0.1 10)
+                 ,("prb1", l 0 1)
+                 ,("pamp", l 1 50)
+                 ,("en1",  l (-10) 10)
                  ])
-    ,("saw01",   [("cfhi", ExpRange 200 12000)
-                 ,("ftrr", LinRange 0 1)
+    ,("saw01",   [("cfhi", e 200 12000)
+                 ,("ftrr", l 0 1)
                  ])
-    ,("sine01",  [("dmax", ExpRange 0.1 32)
-                 ,("dff",  ExpRange 0.01 100)
+    ,("sine01",  [("dmax", e 0.1 32)
+                 ,("dff",  e 0.01 100)
                  ])
-    ,("sine02",  [("dct", ExpRange 0.5 16)
-                 ,("dlt", ExpRange 0.02 2)
-                 ,("dur", ExpRange 0.1 8)
+    ,("sine02",  [("dct", e 0.5 16)
+                 ,("dlt", e 0.02 2)
+                 ,("dur", e 0.1 8)
                  ])
-    ,("pulse01", [("rfrq", ExpRange 0.01 50)
-                 ,("cfrq", ExpRange 0.01 50)
-                 ,("wfrq", ExpRange 0.01 50)
-                 ,("lagt", ExpRange 0.01 4)
+    ,("pulse01", [("rfrq", e 0.01 50)
+                 ,("cfrq", e 0.01 50)
+                 ,("wfrq", e 0.01 50)
+                 ,("lagt", e 0.01 4)
                  ])
-    ,("fm01",    [("dur",  ExpRange 0.01 2)
-                 ,("maxi", LinRange 1 64)
+    ,("fm01",    [("dur",  e 0.01 2)
+                 ,("maxi", l 1 64)
                  ])
-    ,("pv01",    [("tlag", ExpRange 0.002 3)
-                 ,("minFreq", ExpRange 20 20000)
-                 ,("maxFreq", ExpRange 20 20000)
-                 ,("cutoff",  ExpRange 20 20000)
-                 ,("density", ExpRange 1 2000)
+    ,("pv01",    [("tlag", e 0.002 3)
+                 ,("minFreq", e 20 20000)
+                 ,("maxFreq", e 20 20000)
+                 ,("cutoff",  e 20 20000)
+                 ,("density", e 1 2000)
                  ])
     ]
+  where
+    e = Extra.ExpRange
+    l = Extra.LinRange
 
 -- --------------------------------------------------------------------------
 --
