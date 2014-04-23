@@ -319,29 +319,34 @@ recordBuf_ex02_play02 file = withSC3 $ do
 recordBuf_ex02_play03 :: IO ()
 recordBuf_ex02_play03 =
     let sig    = sum [fsig i|i<-[0..7::Int]]
-        fsig i = sinOsc AR frq 0 * aenv0 * 0.03
+        fsig i = pan2 (sinOsc AR frq 0 * aenv0 * 0.03) pos 1
           where
-            frq   = tChoose i tr0 (mce frqs)
+            frq   = midiCPS (tChoose i tr0 (mce frqs) + ofst)
             aenv0 = envGen KR tr0 1 0 (tExpRand i 0.1 4 tr0) DoNothing $
                     Envelope [0,1,0] [atk,1-atk] [EnvCub] (Just 0) Nothing
             atk   = tExpRand i 0.001 0.999 tr0
-        frqs   = foldr (\o ps -> map (midiCPS . (+o)) degs ++ ps) [] octs
-        octs   = take 8 $ iterate (+12) 24
+            pos   = envGen KR tr0 1 0 (tExpRand i 0.01 4 tr0) DoNothing $
+                    Envelope [pstrt, pstrt, pstrt*(-1)] [0.001,1] [EnvLin]
+                    (Just 0) Nothing
+            pstrt = tRand i (-1) 1 tr0
+        frqs   = foldr (\o ps -> map (+o) degs ++ ps) [] octs
+        octs   = take 10 $ iterate (+12) 24
         degs   = [0,2,5,7,10]
+        ofst   = tChoose 'o' (coinGate 'O' (1/128) tr0) (mce degs)
         tr0    = dust 'A' KR 2
-        buf    = localBuf 'y' 96000 1
+        buf    = localBuf 'y' 96000 2
         rbuf   = recordBuf AR buf 0 1 plvl run Loop trec DoNothing sig
-        plvl   = toggleFF (coinGate 't' (1/64) tr0)
+        plvl   = toggleFF (coinGate 't' (1/32) tr0)
         run    = lfClipNoise 'c' KR (1/16)
         trec   = impulse KR 0.5 0
-        osig   = playBuf 1 AR buf rate rst pos Loop DoNothing
+        osig   = playBuf 2 AR buf rate rst pos Loop DoNothing
         rate   = bufRateScale KR buf
         rst    = coinGate 'd' rprb trst
         rprb   = mouseY KR 0 1 Linear 0.1
         trst   = impulse KR rstf 0
         rstf   = mouseX KR 1 32 Exponential 0.1
         pos    = 12000 * tIRand 'p' 0 7 (coinGate 'p' 0.5 rst)
-    in  audition $ mrg [out 0 (mce2 osig osig), rbuf, maxLocalBufs 1]
+    in  audition $ mrg [out 0 osig, rbuf, maxLocalBufs 1]
 
 -- | Example of 'grainIn'.
 grainIn_ex01 :: IO ()
@@ -352,3 +357,24 @@ grainIn_ex01 =
         tr  = impulse KR tf 0
         g   = grainIn 2 tr 0.1 i pan (-1) 512 * 0.1
     in  audition $ out 0 g
+
+-- | Example for 'AddReplace' add action. This Haskell action adds node 1000
+-- to tail of node 1.
+replace_ex01_seq01 :: IO ()
+replace_ex01_seq01 = withSC3 $ do
+    let sdef = out 0 (sinOsc AR 440 0 * 0.2 * decay (dust 'a' KR 8) 0.5)
+    async $ d_recv $ synthdef "replace_ex01_seq01" sdef
+    send $ s_new "replace_ex01_seq01" 1000 AddToTail 1 []
+
+-- | Replaces node 1000 with node 1001. 'AddReplace' add action will not work if
+-- target node id is absent in scsynth.
+replace_ex01_seq02 :: IO ()
+replace_ex01_seq02 = withSC3 $ do
+    let sdef = out 0 (sinOsc AR 880 0 * 0.2 * decay (dust 'a' KR 32) 0.2)
+    async $ d_recv $ synthdef "replace_ex01_seq02" sdef
+    send $ s_new "replace_ex01_seq02" 1001 AddReplace 1000 []
+
+-- | Replacing node 1001 with node 1000.
+replace_ex01_seq03 :: IO ()
+replace_ex01_seq03 = withSC3 $ do
+    send $ s_new "replace_ex01_seq01" 1000 AddReplace 1001 []

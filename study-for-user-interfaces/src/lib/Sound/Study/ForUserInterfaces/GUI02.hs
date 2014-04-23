@@ -20,7 +20,6 @@ import           Control.Monad.Reader (runReaderT)
 import           Sound.OSC.FD
 import           Sound.SC3.FD
 import           Sound.SC3.Tree
-import           Sound.SC3.UGen.ID
 
 import qualified Graphics.UI.Threepenny as UI
 import           Graphics.UI.Threepenny.Core
@@ -28,8 +27,14 @@ import           Graphics.UI.Threepenny.Core
 import qualified Graphics.UI.Threepenny.Extra as Extra
 import Paths_study_for_user_interfaces (getDataDir)
 
+-- --------------------------------------------------------------------------
+--
+-- * GUI
+--
+-- --------------------------------------------------------------------------
+
 main :: IO ()
-main = withSC3 $ \fd -> do
+main = withSC3 $ \fd0 -> withNotifications fd0 $ \fd -> do
     dataDir <- getDataDir
     tid <- forkIO $ startGUI
            defaultConfig { tpStatic     = Just (dataDir ++ "/static")
@@ -61,8 +66,8 @@ nodeToHTML fd node = do
              # set text (show nid ++ " " ++ name)
              #. "synth_node"
              #+ (divClear :
-                 foldr (\p acc ->
-                         paramToHTML fd name nid p : acc) [divClear] prms)
+                 foldr (\p acc -> paramToHTML fd name nid p : acc)
+                 [divClear] prms)
 
 divClear :: UI Element
 divClear = UI.new # set style [("clear","both")]
@@ -71,7 +76,7 @@ paramToHTML :: Transport fd => fd -> String -> Int -> SynthParam -> UI Element
 paramToHTML fd sname nid param = case param of
     pname :=  val -> Extra.knobControl fd pname nid val (crange sname pname)
     pname :<- bus -> showParam pname ": c" bus
-    pname :<= bus -> showParam pname ": b" bus
+    pname :<= bus -> showParam pname ": a" bus
     where
       showParam n lbl v =
           UI.new
@@ -79,35 +84,54 @@ paramToHTML fd sname nid param = case param of
           #. "param"
       crange = lookupControl defaultControls
 
+-- | Synonym for list of controls.
+--
+-- Containing a pair of synthdef name and list of control parameter. Control
+-- parameter is pair of parameter name and 'ControlRange' for the paramater of
+-- synthdef.
+--
 type ControlList = [(String, [(String, Extra.ControlRange)])]
-
-defaultControls :: ControlList
-defaultControls =
-    [("Anonymous",
-      [("cf",e 20 20000)
-      ,("dbAmp",l (-60) 15)
-      ,("freq",e 20 20000)
-      ,("pan",l (-1) 1)
-      ,("rq",l 0.0001 0.9999)
-      ])
-
-    ,("foo",
-      (map d $ words "freq dbAmp pan"))
-
-    ,("bar",
-      (map d $ words "freq dbAmp pan cf rq"))
-    ]
-    where
-      l  = Extra.LinRange
-      e  = Extra.ExpRange
-      d n = (n, c) where
-        c = maybe (error $ "Anonymous does not contain " ++ n) id
-              (do { anon <- lookup "Anonymous" defaultControls
-                  ; lookup n anon })
 
 lookupControl :: ControlList -> String -> String -> Extra.ControlRange
 lookupControl db sname pname =
     maybe (Extra.LinRange 0 1) id (lookup sname db >>= lookup pname)
+
+defaultControls :: ControlList
+defaultControls =
+    [("Anonymous", defaultControlRanges)
+    ,("foo",
+      ("freq", Extra.ExpRange 100 800) : map d (words "dbAmp pan"))
+    ,("bar", map d (words "freq dbAmp pan cf rq"))
+    ]
+    where
+      d n   = (n, maybe (err n) id (lookup n defaultControlRanges))
+      err n = error $ "Anonymous does not contain " ++ n
+
+-- | Control ranges for default synthdef (Anonymous).
+defaultControlRanges :: [(String, Extra.ControlRange)]
+defaultControlRanges =
+    [p "amp" l 0 1
+    ,p "cf" e 20 20000
+    ,p "cutoff" e 20 20000
+    ,p "dbAmp" l (-60) 15
+    ,p "freq" e 20 20000
+    ,p "maxFreq" e 20 20000
+    ,p "minFreq" e 20 20000
+    ,p "pan" l (-1) 1
+    ,p "prob" l 0 1
+    ,p "rq" l 0.0001 0.9999
+    ]
+  where
+    p n f start end = (n,f start end)
+    l = Extra.LinRange
+    e = Extra.ExpRange
+
+
+-- --------------------------------------------------------------------------
+--
+-- * Synths for testing
+--
+-- --------------------------------------------------------------------------
 
 synth_foo :: UGen
 synth_foo = out (kr "out" 0) (pan2 osig pan 1)
