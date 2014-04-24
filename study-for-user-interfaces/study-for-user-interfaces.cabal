@@ -26,6 +26,7 @@ library
                      Sound.Study.ForUserInterfaces.SimpleXY
                      Sound.Study.ForUserInterfaces.GUI01
                      Sound.Study.ForUserInterfaces.GUI02
+                     Sound.Study.ForUserInterfaces.TUI01
                      Sound.Study.ForUserInterfaces.JS
                      Paths_study_for_user_interfaces
   build-depends:     base >=4.6 && <4.7
@@ -34,6 +35,7 @@ library
                    , hsc3 >= 0.14
                    , hsc3-db
                    , hsc3-lang
+                   , hsc3-supply
                    , hsc3-th
                    , hsc3-tree
                    , mtl
