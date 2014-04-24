@@ -1,4 +1,3 @@
-{-# LANGUAGE TemplateHaskell #-}
 {-|
 Copyright   : 8c6794b6, 2014
 License     : BSD3
@@ -74,7 +73,10 @@ divClear = UI.new # set style [("clear","both")]
 
 paramToHTML :: Transport fd => fd -> String -> Int -> SynthParam -> UI Element
 paramToHTML fd sname nid param = case param of
-    pname :=  val -> Extra.knobControl fd pname nid val (crange sname pname)
+    pname :=  val
+        | pname `elem` ignored -> showParam pname ":" val
+        | otherwise            ->
+            Extra.knobControl fd pname nid val (crange sname pname)
     pname :<- bus -> showParam pname ": c" bus
     pname :<= bus -> showParam pname ": a" bus
     where
@@ -83,6 +85,7 @@ paramToHTML fd sname nid param = case param of
           # set text (n ++ lbl ++ show v)
           #. "param"
       crange = lookupControl defaultControls
+      ignored = [ "out", "in" ]
 
 -- | Synonym for list of controls.
 --
