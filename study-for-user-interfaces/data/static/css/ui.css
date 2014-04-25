@@ -152,7 +152,8 @@ body {
     border-bottom: solid 1px;
     height: 14px;
     padding: 5px;
-    margin: 0;
+    margin-top: 0px;
+    background-color: #fff;
 }
 
 .status-param {
@@ -194,6 +195,11 @@ x-knobjs-knob {
   width: 100px;
 }
 
+/** GUI02 **/
+
+.gui02 {
+    padding-top: 30px;
+}
 
 /** SCNode **/
 

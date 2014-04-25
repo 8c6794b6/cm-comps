@@ -48,7 +48,13 @@ setup fd window = do
     currentNodes <- liftIO $ runReaderT getRootNode fd
     void $ getBody window #+
         [ element stDiv
-        , nodeToHTML fd currentNodes
+          # set style [("position","fixed")
+                      ,("width","100%")
+                      ,("background-color","#fff")
+                      ]
+        , UI.div
+          #+ [nodeToHTML fd currentNodes]
+          #. "gui02"
         ]
     UI.start tmr
 
