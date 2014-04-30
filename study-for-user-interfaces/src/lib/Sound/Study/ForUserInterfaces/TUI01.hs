@@ -147,8 +147,8 @@ nextOutBus currentNode =
         outs = [paramValue p | p <- queryP cond currentNode]
     in  case outs of
         [] -> metroOut + 1
-        ps -> fromIntegral
-              (ceiling $ maximum [p | p <- ps] + 1 :: Int)
+        ps -> fromIntegral (ceiling $ maximum [p | p <- ps] + 1 :: Int)
+
 
 -- --------------------------------------------------------------------------
 --
@@ -185,39 +185,37 @@ sendParam condition pname value dur = withSC3 $ do
             , n_map nid [(pname, ceiling obus)]
             ]
         -- When source parameter is mapped to control bus, free the synth
-        -- controlling the specified output. Do nothing when parameter is mapped to
-        -- audio rate bus.
-        go obus src | isSynth src = do
-            case [p | p <- synthParams src, paramName p == pname ] of
-                (_ := currentValue) :_ -> do
-                    assignOut (nodeId src) obus currentValue
-                    return (obus+1)
-                (_ :<- currentBus) :_ -> do
-                    let cond n =
-                            not $ null
-                                [n| "out" := fromIntegral currentBus `elem`
-                                    synthParams n
-                                  ]
-                        currentControlNids =
-                            map nodeId (queryN cond currentNode)
-                    send $ n_free currentControlNids
-                    send (c_get [currentBus])
-                    [Int32 _, Float currentValue] <- waitDatum "/c_set"
-                    assignOut (nodeId src) obus (realToFrac currentValue)
-                    return (obus+1)
-                _                     -> return obus
-                    | otherwise = do
-            let Group _ srcs' = src in foldM go obus srcs'
+        -- controlling the specified output. Do nothing when parameter is mapped
+        -- to audio rate bus.
+        go obus src = case src of
+            Synth {} ->
+              case [p | p <- synthParams src, paramName p == pname ] of
+                  (_ := currentValue) :_ -> do
+                      assignOut (nodeId src) obus currentValue
+                      return (obus+1)
+                  (_ :<- currentBus) :_ -> do
+                      let cond n =
+                              "out" := fromIntegral currentBus `elem` synthParams n
+                          currentControlNids =
+                              map nodeId (queryN cond currentNode)
+                      send $ n_free currentControlNids
+                      send (c_get [currentBus])
+                      [Int32 _, Float currentValue] <- waitDatum "/c_set"
+                      assignOut (nodeId src) obus (realToFrac currentValue)
+                      return (obus+1)
+                  _                     -> return obus
+            Group _ srcs' -> foldM go obus srcs'
     foldM_ go (nextOutBus currentNode) srcs
 
 -- | Free the synth controlling parameter if exist, set the value of specified
 -- parameter with given value and 'n_set'.
 freeParam :: Condition SCNode -> String -> IO ()
-freeParam cond pname = withSC3 $ do
+freeParam cond _pname = withSC3 $ do
+    -- XXX: TODO.
     currentNodes <- getRootNode
     case queryN cond currentNodes of
-        [] -> return ()
-        ns -> return ()
+        []  -> return ()
+        _ns -> return ()
 
 -- | Add new synthdef and mixer.
 sendSynth ::
@@ -250,9 +248,9 @@ sendSupply01 ::
     -> IO ()
 sendSupply01 sname pname isTrig sup = sendControl sname pname ug
   where
-    ug = (\tr ->
-           (if isTrig then (* tr) else id)
-           (demand tr 0 (evalSupply sup (mkStdGen 0x123456))))
+    ug tr =
+        (if isTrig then (* tr) else id)
+        (demand tr 0 (evalSupply sup (mkStdGen 0x123456)))
 
 -- | Function to route 'UGen' to synth found in current running node graph.
 sendControl ::
@@ -265,21 +263,22 @@ sendControl sname pname ugen = withSC3 $ do
     currentNode <- getRootNode
     case queryN (synthName ==? sname) currentNode of
         snth:[]  -> do
-            let nid  = nodeId snth
-                tr  = control KR "tr" 0
-                sdef = out (control KR "out" 0) (ugen tr)
+            let nid      = nodeId snth
+                tr       = control KR "tr" 0
+                sdef     = out (control KR "out" 0) (ugen tr)
                 pdefname = paramDefName sname pname
-                psynths = queryN (synthName ==? pdefname) currentNode
+                psynths  = queryN (synthName ==? pdefname) currentNode
+                psynthExist = not (null psynths)
                 (addAction,targetNid)
                     | psynthExist = (AddReplace, nodeId (head psynths))
                     | otherwise   = (AddBefore,  nid)
-                psynthExist = not (null psynths)
-            let obus = if psynthExist
-                    then paramValue $
-                         head [p | p <- synthParams $ head psynths
-                                 , paramName p == "out"
-                                 ]
-                    else nextOutBus currentNode
+                obus
+                    | psynthExist =
+                        paramValue $
+                        head [p | p <- synthParams $ head psynths
+                                , paramName p == "out"
+                                ]
+                    | otherwise   = nextOutBus currentNode
             _ <- async $ d_recv $ synthdef pdefname sdef
             sendOSC $ bundle immediately
                 [ s_new pdefname (-1) addAction targetNid [("out",obus)]

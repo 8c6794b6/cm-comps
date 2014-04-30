@@ -166,7 +166,10 @@ sampleSetup = do
     sendParam (synthName ==? "tuis01" ||?
                synthName ==? "tuis03" ||?
                synthName ==? "tuie00") "amp" 1 12
+
+    -- Enable effect
     sendParam (synthName ==? "tuie01") "wet" 0.5 8
+
 
 -- --------------------------------------------------------------------------
 --
@@ -190,7 +193,7 @@ tuis01_freq_01 =
 tuis01_freq_02 :: IO ()
 tuis01_freq_02 =
     sendSupply01 "tuis01" "freq" False $ fmap (midiCPS . (+62)) $
-    sshuf sinf $ sseq 1
+    sshuf sinf
       [ sseq 1 [0, 7, 0, 12]
       , sseq 1 [0, 2, 7, 12]
       , sseq 1
@@ -223,8 +226,10 @@ tuis01_freq_05 =
 tuis01_cf :: IO ()
 tuis01_cf =
     sendSupply01 "tuis01" "cf" False $
+
     -- sseq 1 [0.9]
     -- sseq sinf (map (/8) [5,1,1,5, 1,1,5,1])
+
     -- sseq sinf [ sseries 64 0.62 0.005
     --           , sseries 64 0.94 (-0.005) ]
     -- srand sinf [ 0.5, 0.6, 0.7, 0.8, 0.9 ]
@@ -259,7 +264,8 @@ tuis02_t_tr =
     , 8, sseq 7 [srand 1 [0, 0, 2, 4] ]
     ]
 
-    -- sseq sinf [8, 0, 4, 3]
+    -- sseq sinf [8, 0, srand 1 [0,4,7], 3]
+    -- sseq sinf [ 0, 0, 7, srand 1 [0,0,0,4,7] ]
 
     -- sseq sinf [0]
     -- sseq sinf [ 6, srand 3 [0,1,2,3,4] ]
@@ -270,18 +276,12 @@ tuis02_t_tr =
     --          , srand 1 [0,4]
     --          , srand 1 [0,1] ]
     -- , srand 4 (map (sval . constant) [2,4,6,10])
-    --
+    -- ]
 
 tuis02_t_tr_2 :: IO ()
 tuis02_t_tr_2 =
     sendControl "tuis02" "t_tr0" $
     (const (dust 'a' KR 8))
-
-tuis03_t_tr_2 :: IO ()
-tuis03_t_tr_2 =
-    sendSupply01 "tuis03" "t_tr0" True $
-    let f p = (<=* p) <$> swhite 1 0 1
-    in  sseq sinf [1, f (1/16), f (1/8), f (1/5)]
 
 tuis03_t_tr :: IO ()
 tuis03_t_tr =
@@ -291,6 +291,17 @@ tuis03_t_tr =
                   , sseq 1 [1, 0, 0, 1] ]
     -- sseq sinf [ sseq 4 [1], srand 12 [0,1]]
 
+tuis03_t_tr_2 :: IO ()
+tuis03_t_tr_2 =
+    sendSupply01 "tuis03" "t_tr0" True $
+    let f p = (<=* p) <$> swhite 1 0 1
+    in  sseq sinf [1, f (1/16), f (1/8), f (1/5)]
+
+tuis05_init :: IO ()
+tuis05_init = do
+    sendSynth "tuis05"
+    sendFx "tuis05" "tuie01"
+
 tuis05_freq_02 :: IO ()
 tuis05_freq_02 =
     sendSupply01 "tuis05" "freq" False $
@@ -299,12 +310,22 @@ tuis05_freq_02 =
 tuis05_freq :: IO ()
 tuis05_freq =
     sendSupply01 "tuis05" "freq" False $
-    fmap (\x -> midiCPS (x+50)) $
-    sseq sinf [ srand 16 [-12, -5, 0, 7, 12, 24]
-              , sseq 2 [0,7,-12,7, 12,7,0,7]
-              ]
+    fmap (\x -> midiCPS (x+62)) $
+    -- sseq sinf
+    -- [ sseq  6 [0,7,14,12]
+    -- , srand 8 [0,7,12,19]
+    -- ]
+    -- sseq sinf [ srand 16 [-12, -5, 0, 7, 12, 24]
+    --           , sseq 2 [0,7,-12,7, 12,7,0,7]
+    --           ]
+    srand sinf [-24, -12, -5, 0, 5, 7, 12, 17, 19, 24]
     -- sseq sinf [0, srand 1 [-12,-5], 7, srand 1 [12,19] ]
     -- ]
+
+tuis05_freq_03 :: IO ()
+tuis05_freq_03 =
+    sendControl "tuis05" "freq" $ \_ ->
+    linLin (lfdNoise0 'a' KR (1/8)) (-1) 1 220 4400 `lag3` 1
 
 tuis05_t_tr0 :: IO ()
 tuis05_t_tr0 =
@@ -316,23 +337,26 @@ tuis05_t_tr0 =
     [ srand 16 [0,0,0,1]
     , sseq 1 [1,1,0,1, 1,0,1,1, 0,1,1,0, 1,0,1,0]
     ]
+    -- [ 1, 0, 0, 0, ]
     -- sseq sinf [ sseq 4 [1], srand 12 [0,1]]
 
 tuis05_idx :: IO ()
 tuis05_idx =
     sendSupply01 "tuis05" "idx" False $
-    -- fmap (const (lfdNoise3 'i' KR 0.25 * 0.5 + 0.5)) $
+    -- fmap (const (lfdNoise3 'i' KR 0.25 * 0.5 + 0.5)) $ snil
+    sstutter 8 $
     -- swhite sinf 0 1
-    sseq sinf $ fmap (/ 10) [1, 2, 4, 8, 1, 8, 4, 8]
-    -- sseq sinf [sseries 96 0 0.01
-    --           ,sseries 96 0.96 (-0.01)
-    --           ]
+    -- sseq sinf $ fmap (/ 10) [1, 2, 4, 8, 1, 8, 4, 8]
+    sseq sinf [sseries 16 0 0.01
+              ,sseries 16 0.16 (-0.01)
+              ]
 
 tuis05_pan :: IO ()
 tuis05_pan =
     sendSupply01 "tuis05" "pan" False $
+    -- fmap (const (sinOsc KR 0.125 0 * 0.5 + 0.5)) snil
     sseq sinf
-    [ sstutter (srand 1 [4,8,16]) $
+    [ sstutter (srand 1 [4,8]) $
       swhite 1 0 1
     ]
 
@@ -350,7 +374,7 @@ speUGen :: UGen
 speUGen = out 0 sig
   where
     sig   = foldr f v (zipWith mce2 (mkRs "abcd") (mkRs "efgh"))
-    f a b = allpassN b 0.1 a 4
+    f a b = allpassN b 0.1 a dcy
     v     = rlpf (pulse AR (mce2 freq (freq*1.01)) bw) cf rq * amp
     rq    = lfdNoise3 'q' KR 1.110 * 0.498 + 0.5
     cf    = lfdNoise3 'n' KR 2.323 * 2000 + 2200
@@ -359,6 +383,7 @@ speUGen = out 0 sig
     freq  = midiCPS (demand tick 0 (evalSupply supSpe (mkStdGen 0x81aafad)))
     amp   = decay2 tick 5e-4 950e-3 * 0.2
     tick  = impulse KR (tfreq*12) 0
+    dcy   = linExp (control KR "dcy" 0 + 0.001) 0.001 1.001 0.1 8
     tfreq = control KR "trate" 0.641025 -- 7.6923
 
 supSpe :: Supply
