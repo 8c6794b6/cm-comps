@@ -168,7 +168,7 @@ playWithDiskIn f path = withSC3 $ do
     _ <- async $ b_read bufn path 0 (-1) 0 True
     play sig
 
--- | 'simpleChrous01' applied to 'orgn04'.
+-- | 'simpleChorus01' applied to 'orgn04'.
 orgn06 :: UGen
 orgn06 = orgn04 simpleChorus01
 
