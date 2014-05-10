@@ -26,8 +26,9 @@ library
                      Sound.Study.ForUserInterfaces.SimpleXY
                      Sound.Study.ForUserInterfaces.GUI01
                      Sound.Study.ForUserInterfaces.GUI02
-                     Sound.Study.ForUserInterfaces.TUI01
                      Sound.Study.ForUserInterfaces.JS
+                     Sound.Study.ForUserInterfaces.TUI01
+                     Sound.Study.ForUserInterfaces.TUI02
                      Sound.Study.ForUserInterfaces.Session01
                      Sound.Study.ForUserInterfaces.Session02
                      Sound.Study.ForUserInterfaces.Session03

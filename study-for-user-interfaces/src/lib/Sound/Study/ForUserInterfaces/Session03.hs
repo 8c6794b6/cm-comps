@@ -6,7 +6,7 @@ Session with textual UI, take 3. Using TUI02.
 -}
 module Sound.Study.ForUserInterfaces.Session03 where
 
-import           Sound.OSC (Transport)
+import           Sound.OSC
 import           Sound.SC3
 import           Sound.SC3.ID
 import           Sound.SC3.Supply
@@ -84,7 +84,7 @@ initSession03 = withSC3 $ do
 
 init_t101 :: IO ()
 init_t101 = withSC3 $ track 101 $ do
-    addSynth "sin02"
+    addSource "sin02"
     addFx "cmb02"
     addFx "ap01"
 
@@ -98,9 +98,7 @@ t101 = withSC3 $ track 101 $ do
 
     source ".sin02" $ do
         "pan"  ==> linLin (lpf (whiteNoise 'w' KR) 5) (-1) 1 0 1
-        "dur"  ==>
-            -- linExp (lfdNoise3 'd' KR (1/3) + 1.001) 0.001 1.001 0.1 0.4
-            vsup 0.3
+        "dur"  ==> vsup 0.3
         "t_tr" ==> do
             let p1 = sseq 1 [ sseq 3 [1,0,0,1,0,0,1,0]
                             , srand 8 [0,1] ]
@@ -139,20 +137,19 @@ t101 = withSC3 $ track 101 $ do
 
     source ".ap01" $ do
         "wet" ==> vsup 1
-        -- "dcy" ==> linLin (sinOsc KR (1/2) 0) (-1) 1 0.01 1
-        "dcy" ==> vsup 0.8
-
+        "dcy" ==> linLin (sinOsc KR (1/2) 0) (-1) 1 0.01 1
+        -- "dcy" ==> vsup 0.8
     source ".cmb02" $ do
-        "wet" ==> line KR 0 1 19 DoNothing
+        "wet" ==> line KR 0 1 119 DoNothing
         "dcy" ==> linLin (lfSaw KR (1/32) 0) (-1) 1 0.05 6 `lag` 0.1
         "dlt" ==> vsup 0.8
 
     source ".router" $ do
-        "amp" ==> vsup 1 -- (sval $ line KR 0 0.4 38 DoNothing)
+        "amp" ==> line KR 0 1 20 DoNothing
 
 init_t102 :: IO ()
 init_t102 = withSC3 $ track 102 $ do
-    addSynth "nz01"
+    addSource "nz01"
     addFx "cmb02"
     addFx "dc01"
     addFx "ap01"
@@ -167,7 +164,7 @@ t102 = withSC3 $ track 102 $ do
         "pan"  ==> do
             vsup $
                 sstutter (srand sinf [2,4,8,16]) $
-                srand sinf [0.5, swhite 1 0 1]
+                srand sinf [0.5, swhite 1 0.25 0.75]
         "t_tr" ==> do
             tsup $
                 -- srand sinf
@@ -198,13 +195,13 @@ t102 = withSC3 $ track 102 $ do
                      , sgeom 4 (0.9*(0.6**4)) (recip 0.6) ]
                 p4 = swhite 8 0 1
             vsup $
-                sseq sinf [sseq 1 p1, sseq 1 p2]
+                -- sseq sinf [sseq 1 p1, sseq 1 p2]
                 -- sseq sinf p1
-                -- sseq sinf
-                -- [ sseq 1 p1
-                -- , srand 1 [sseq 1 p2, p4]
-                -- , sseq 1 p1
-                -- , srand 1 [srand 8 p1, p3, p4]]
+                sseq sinf
+                [ sseq 1 p1
+                , srand 1 [sseq 1 p2, p4]
+                , sseq 1 p1
+                , srand 1 [srand 8 p1, p3, p4]]
 
     source ".ap01" $ do
         "wet" ==>
@@ -214,10 +211,10 @@ t102 = withSC3 $ track 102 $ do
 
     source ".cmb02" $ do
         "wet" ==>
-            vsup
-            (sstutter (srand sinf [2,4,8])
-             (srand sinf [1,0]))
-            -- lfClipNoise 'W' KR 2 * 0.5 + 0.5
+            -- vsup
+            -- (sstutter (srand sinf [2,4,8])
+            --  (srand sinf [1,0]))
+            lfClipNoise 'W' KR 2 * 0.5 + 0.5
         "dcy" ==>
             linExp (lfdNoise0 '0' KR 4 + 1.1) 0.1 1.1 0.1 0.8 `lag` 0.01
         "dlt" ==>
@@ -235,7 +232,7 @@ t102 = withSC3 $ track 102 $ do
 
 initT103 :: IO ()
 initT103 = withSC3 $ track 103 $ do
-    addSynth "poly01"
+    addSource "poly01"
     addFx "ap01"
     addFx "cmb02"
 
@@ -278,14 +275,14 @@ t103 = withSC3 $ track 103 $ do
         "dlt" ==> vsup 0.32
 
     source ".router" $ do
-        "amp" ==> vsup 0.2
+        "amp" ==> line KR 0.8 0.2 19 DoNothing
 
 param :: (Assignable a, Transport m) => String -> a -> Track m ()
 param a b = a ==> b
 
 initT104 :: IO ()
 initT104 = withSC3 $ track 104 $ do
-    addSynth "bd03"
+    addSource "bd03"
     addFx "ap01"
     addFx "cmb02"
     addFx "dc01"
@@ -310,9 +307,9 @@ t104 = withSC3 $ track 104 $ do
         -- Manually typed with printing the contents of current node.
         -- control bus numbers are from t102's wet, dcy, and dlt for
         -- "cmb02" synth.
-        "wet" ==> 1 - in' 1 KR 271
-        "dcy" ==> in' 1 KR 272 * 1.5
-        "dlt" ==> in' 1 KR 273
+        "wet" ==> (1 - in' 1 KR 285) * 0.5
+        "dcy" ==> in' 1 KR 286
+        "dlt" ==> in' 1 KR 287
     source ".dc01" $ do
         "wet" ==> vsup 1
     source ".router" $ do
@@ -320,8 +317,9 @@ t104 = withSC3 $ track 104 $ do
 
 initT105 :: IO ()
 initT105 = withSC3 $ track 105 $ do
-    addSynth "saw01"
+    addSource "saw01"
     addFx  "ap01"
+    addFx "dc01"
 
 dump105 :: IO ()
 dump105 = withSC3 $ track 105 dumpTrack
@@ -330,6 +328,7 @@ t105 :: IO ()
 t105 = withSC3 $ track 105 $ do
     offset 8
     source ".saw01" $ do
+        "lagt" ==> line KR 0 1 30 DoNothing
         "freq" ==> do
             let a = sseq 3
                     [ sseq 1 [0,0,7,0,0,7,0,7]
@@ -340,13 +339,18 @@ t105 = withSC3 $ track 105 $ do
                 sseq sinf [a, b, a + 12, b, a -12, b]
         "cf" ==> do
             vsup $
+                (* 0.1) $
                 sseq sinf
-                [ sseq 3 [2, 5, 2, 5, 8, 2, 5, 8]
-                , srand 8 [2, 4, 5, 8] ] / 10
+                [ sseq 3
+                  [1, 5, 1, 5, 8, 1, 5, 8]
+                , srand 8
+                  [2, 4, 5, 8] ]
         "amp" ==> line KR 0 1 30 DoNothing
     source ".ap01" $ do
+        "wet" ==> vsup 0.8
+        "dcy" ==> linLin (lfSaw KR (1/4) 0) (-1) 1 0 1 `lag` 0.001
+    source ".dc01" $ do
         "wet" ==> vsup 1
-        "dcy" ==> vsup 0.8
     source ".router" $ do
         "amp" ==> line KR 1 0 30 DoNothing
 

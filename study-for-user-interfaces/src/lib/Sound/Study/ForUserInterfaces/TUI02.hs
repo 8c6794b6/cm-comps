@@ -14,10 +14,11 @@ Textual user interface, take 2.
 -}
 module Sound.Study.ForUserInterfaces.TUI02 where
 
-import Control.Applicative
-import Control.Monad.Reader
-import Control.Monad.State
-import System.Random
+import Control.Applicative (Applicative(..))
+import Control.Monad (liftM, when)
+import Control.Monad.State (MonadTrans(..), MonadState(..), StateT(..), modify)
+-- import Data.List (isPrefixOf)
+import System.Random (mkStdGen)
 
 import Sound.OSC
 import Sound.SC3
@@ -90,6 +91,8 @@ data TrackState = TrackState
     , tsTargetNodes   :: [SCNode]
     , tsControlBusNum :: Int
     , tsBeatCount     :: Float
+    -- XXX: Add record field to store node id offset.
+    -- XXX: Add record to hold list of Message to send.
     }
 
 instance SendOSC m => SendOSC (Track m) where
@@ -122,15 +125,17 @@ track groupId trck = do
                            , tsControlBusNum  = truncate currentBusNum
                            , tsBeatCount = cnt
                            }
-    send $ c_set [(controlBusCounter,fromIntegral (tsControlBusNum st))]
+    -- XXX: Send whole message
+    when (currentBusNum /= fromIntegral (tsControlBusNum st)) $
+         send $ c_set [(controlBusCounter,fromIntegral (tsControlBusNum st))]
     return val
 
--- | Add new synth to head of specified group.
-addSynth ::
+-- | Add new source synth to head of specified group.
+addSource ::
     (Transport m)
     => String    -- ^ Synthdef name.
     -> Track m ()
-addSynth name = do
+addSource name = do
     targetNid <- liftM tsGroupId get
     let obus = fromIntegral $ audioBus targetNid
     sendOSC $ bundle immediately $
@@ -147,10 +152,14 @@ addFx name = do
     sendOSC $ s_new name (-1) AddBefore (routerNid targetNid)
         [("out",obus),("in",obus)]
 
--- | Free nodes matching to given condition, in specified group.
+-- | Free nodes matching to given query string, in specified group.
 freeNodes :: Transport m => String -> Track m ()
-freeNodes str =
-    send . n_free . map nodeId . queryN (qString str) . tsCurrentNode =<< get
+freeNodes = freeNodesCond . qString
+
+-- | Free nodes matching to given condition, in specified group.
+freeNodesCond :: Transport m => Condition SCNode -> Track m ()
+freeNodesCond cond =
+    send . n_free . map nodeId . queryN cond . tsCurrentNode =<< get
 
 -- | Apply parameter actions to nodes specified by query string.
 source ::
@@ -159,9 +168,14 @@ source ::
     -> Track m a  -- ^ Action for parameter.
     -> Track m a
 source qstr act = do
+    -- XXX: Add synth to SCNode built from current haskell source code.
     modify $ \st ->
         st {tsTargetNodes = queryN (qString qstr) (tsCurrentNode st)}
     act
+
+-- | Run effect synth, apply paremater actions to nodes.
+effect :: Monad m => String -> Track m a -> Track m a
+effect = undefined
 
 -- | Translate to condition:
 --
@@ -282,6 +296,7 @@ sendControl node pname fu = do
         liftIO $ putStrLn $ unlines
             [ "Updating node       : " ++ show  nid
             , "Parameter UGen name : " ++ pdefname ]
+        -- XXX: Dont send at this moment, add to state.
         send $ withCM
             (d_recv $ synthdef pdefname sdef)
             (bundle immediately
@@ -294,15 +309,32 @@ sendControl node pname fu = do
 
 -- | Dump nodes in track.
 dumpTrack :: Transport m => Track m ()
-dumpTrack = get >>= getNode . tsGroupId >>= liftIO . putStrLn . drawSCNode
+dumpTrack =
+    get >>= getNode . tsGroupId >>=
+    liftIO . putStrLn . drawSCNode
+    -- filterSCNode (isGroup ||? (not . ("p_" `isPrefixOf`) . synthName))
 
 -- | Set offset to update the parameters.
 offset :: Monad m => Int -> Track m ()
 offset count = modify $ \st -> st {tsOffset = count}
 
--- | Type fixed synonym for 'id'.
-dval :: Double -> Double
-dval = id
+
+-- --------------------------------------------------------------------------
+--
+-- * Functions should be defined elsewhere
+--
+-- --------------------------------------------------------------------------
+
+-- | Filter 'SCNode' with given condition.
+filterSCNode :: (SCNode -> Bool) -> SCNode -> SCNode
+filterSCNode p n0 =
+    let f n acc =
+            case n of
+                Group i ns | p n       -> Group i (foldr f [] ns) : acc
+                           | otherwise -> acc
+                Synth {}   | p n       -> n : acc
+                           | otherwise -> acc
+    in head $ foldr f [] [n0]
 
 
 -- --------------------------------------------------------------------------
@@ -393,3 +425,16 @@ queryTree_ex01 = withSC3 $ do
 
 withSC3' :: Connection TCP a -> IO a
 withSC3' = withTransport (openTCP "127.0.0.1" 57111)
+
+-- for taking 'diffMessage'.
+
+nd01 =
+    Group 101
+    [ Synth 10101 "foo" []
+    , Synth 10102 "bar" [] ]
+
+nd02 =
+    Group 101
+    [ Synth 10101 "foo" []
+    , Synth 10103 "buzz" []
+    , Synth 10102 "bar" [] ]
