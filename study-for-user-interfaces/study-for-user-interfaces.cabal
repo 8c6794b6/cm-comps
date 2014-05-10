@@ -28,8 +28,12 @@ library
                      Sound.Study.ForUserInterfaces.GUI02
                      Sound.Study.ForUserInterfaces.TUI01
                      Sound.Study.ForUserInterfaces.JS
+                     Sound.Study.ForUserInterfaces.Session01
+                     Sound.Study.ForUserInterfaces.Session02
+                     Sound.Study.ForUserInterfaces.Session03
                      Paths_study_for_user_interfaces
-  build-depends:     base >=4.6 && <4.7
+  build-depends:     base >=4.6
+                   , containers
                    , filepath
                    , hosc >= 0.14
                    , hsc3 >= 0.14
@@ -48,5 +52,5 @@ executable ui-run
   hs-source-dirs:    src/exec
   default-language:  Haskell2010
   ghc-options:       -Wall -threaded -rtsopts
-  build-depends:     base >= 4.6 && <4.7,
-                     study-for-user-interfaces
+  build-depends:     base >= 4.6
+                   , study-for-user-interfaces
