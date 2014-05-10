@@ -13,7 +13,6 @@ Draws simple GUI with fetching current node from scsynth server.
 -}
 module Sound.Study.ForUserInterfaces.GUI02 where
 
-import           Control.Concurrent (forkIO, killThread)
 import           Control.Monad (void)
 import           Control.Monad.Reader (runReaderT)
 import           Sound.OSC.FD
@@ -35,11 +34,9 @@ import Paths_study_for_user_interfaces (getDataDir)
 main :: IO ()
 main = withSC3 $ \fd0 -> withNotifications fd0 $ \fd -> do
     dataDir <- getDataDir
-    tid <- forkIO $ startGUI
-           defaultConfig { tpStatic     = Just (dataDir ++ "/static")
-                         , tpCustomHTML = Just (dataDir ++ "/gui02.html")
-                         } (setup fd)
-    getChar >> killThread tid
+    startGUI defaultConfig { tpStatic     = Just (dataDir ++ "/static")
+                           , tpCustomHTML = Just (dataDir ++ "/gui02.html")
+                           } (setup fd)
 
 setup :: Transport fd => fd -> Window -> UI ()
 setup fd window = do
