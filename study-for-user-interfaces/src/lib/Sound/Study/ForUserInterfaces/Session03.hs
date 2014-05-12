@@ -80,7 +80,7 @@ initSession03 = withSC3 $ do
     initializeTUI02
 
 t101 :: IO ()
-t101 = withSC3 $ track 101 $ do
+t101 = withSC3 $ runTrack 101 $ do
 
     offset 8
 
@@ -134,11 +134,11 @@ t101 = withSC3 $ track 101 $ do
     router $ do
         "amp" ==>
             (\tr ->
-              envGen KR tr 1 0 1e-9 DoNothing
-              (Envelope [0,1] [1] [EnvCub] Nothing Nothing))
+              envGen KR tr 1 0 rdur DoNothing
+              (Envelope [1,0.6] [1] [EnvCub] Nothing Nothing))
 
 t102 :: IO ()
-t102 = withSC3 $ track 102 $ do
+t102 = withSC3 $ runTrack 102 $ do
     offset 8
     source "nz01" $ do
         "pan"  ==> do
@@ -147,23 +147,23 @@ t102 = withSC3 $ track 102 $ do
                 srand sinf [0.5, swhite 1 0.2 0.8]
         "t_tr" ==> do
             tsup $
-                -- srand sinf
-                -- [ sseq 1 [1,0,0,0]
-                -- , sseq 1 [1,0,1,0]
-                -- , sseq 1 [1,0,0,1]
-                -- , sseq 1 [1,1,0,1]
-                -- , sseq 1 [1,1,1,1] ]
+                srand sinf
+                [ sseq 1 [1,0,0,0]
+                , sseq 1 [1,0,1,0]
+                , sseq 1 [1,0,0,1]
+                , sseq 1 [1,1,0,1]
+                , sseq 1 [1,1,1,1] ]
                 -- srand sinf
                 -- [ sseq 1 [1, 0]
                 -- , sseq 1 [1, 1]
                 -- , sseq 1 [0, 1]]
-                sseq sinf
-                [ sseq 3 [1,1,0,1, 1,0,1,0]
-                , sser 16 [0]
-                , srand 1
-                  [ sseq 1 [srand 4 [0,1], sseq 1 [1,1,1,1]]
-                  , srand 8 [0,1]
-                  , sseq 8 [1] ]]
+                -- sseq sinf
+                -- [ sseq 3 [1,1,0,1, 1,0,1,0]
+                -- , sser 16 [0]
+                -- , srand 1
+                --   [ sseq 1 [srand 4 [0,1], sseq 1 [1,1,1,1]]
+                --   , srand 8 [0,1]
+                --   , sseq 8 [1] ]]
                 -- sseq sinf
                 -- [ sseq 3 [srand 4 [1,0], sseq 12 [0]]
                 -- , srand 8 [0,1,1] ]
@@ -193,20 +193,17 @@ t102 = withSC3 $ track 102 $ do
                 , srand 1 [srand 8 p1, p3, p4]]
 
     effect "ap01" $ do
-        "wet" ==>
-            lfClipNoise 'w' KR 4 * 0.5 + 0.5
-            -- line KR 1 0 33 DoNothing
+        "wet" ==> lfClipNoise 'w' KR 4 * 0.5 + 0.5
         "dcy" ==> vsup 0.83
-
     effect "cmb02" $ do
         "wet" ==>
-            vsup
-            (sstutter (srand sinf [2,4,8])
-             (srand sinf [1,0]))
+            -- vsup
+            -- (sstutter (srand sinf [2,4,8])
+            --  (srand sinf [1,0]))
             -- vsup
             -- (sseq sinf
             --  [sstutter 8 (sseq 1 [0,0,1,0, 0,0,1,1])])
-            -- lfClipNoise 'W' KR 2 * 0.5 + 0.5
+            lfClipNoise 'W' KR 2 * 0.5 + 0.5
             -- vsup 0
         "dcy" ==>
             linExp (lfdNoise0 '0' KR 4 + 1.1) 0.1 1.1 0.1 0.8 `lag` 0.01
@@ -216,7 +213,6 @@ t102 = withSC3 $ track 102 $ do
             --   let sig = linExp nz 0.1 1.1 (recip 100) (recip 33)
             --       nz  = lfdNoise3 'd' KR 4 + 1.1
             --   in  gate sig (coinGate 'g' 0.35 tr) `lag` 0.01)
-
     effect "dc01" $ do
         "wet" ==> vsup 1
 
@@ -227,7 +223,42 @@ t102 = withSC3 $ track 102 $ do
               (Envelope [2,1.5] [1] [EnvCub] Nothing Nothing))
 
 t103 :: IO ()
-t103 = withSC3 $ track 103 $ do
+t103 = withSC3 $ runTrack 103 $ do
+    offset 8
+
+    source "bd03" $ do
+        "t_tr0" ==> do
+            let p x = swhite 1 0 1 <=* x
+            tsup $ sseq sinf [1,p 0.05,p 0.15, p 0.25]
+        "amp"   ==>
+            vsup (sseq sinf
+                  [ swhite 1 0.9 1.5
+                  , swhite 1 0.3 0.5
+                  , swhite 1 0.5 0.8
+                  , swhite 1 0.5 0.9 ])
+
+    effect "ap01" $ do
+        "wet" ==> vsup 0.34
+        "dcy" ==> lfClipNoise 'Y' KR 2 * 0.5 + 0.5
+    effect "cmb02" $ do
+        -- Manually typed with printing the contents of current node.
+        -- control bus numbers are from t102's wet, dcy, and dlt for
+        -- "cmb02" synth.
+        "wet" ==>
+            -- vsup 0
+            -- lfClipNoise 'd' KR (1/2) * 0.5 + 0.5
+            (\tr -> envGen KR tr 1 0 16 DoNothing
+                    (Envelope [0.5,1,0] [0.5,0.5] [EnvLin] Nothing Nothing))
+            -- in' 1 KR 281 * 0.5
+        "dcy" ==> in' 1 KR 282
+        "dlt" ==> in' 1 KR 283
+    effect "dc01" $ do
+        "wet" ==> vsup 1
+    router $ do
+        "amp" ==> vsup 1.2
+
+t104 :: IO ()
+t104 = withSC3 $ runTrack 104 $ do
     offset 8
     source "poly01" $ do
         "freq" ==> do
@@ -268,50 +299,13 @@ t103 = withSC3 $ track 103 $ do
               (Envelope [0,0.3] [1] [EnvCub] Nothing Nothing))
             -- line KR 0 0.5 30 DoNothing
 
-t104 :: IO ()
-t104 = withSC3 $ track 104 $ do
-    offset 8
-
-    source "bd03" $ do
-        "t_tr0" ==> do
-            let p x = swhite 1 0 1 <=* x
-            tsup $ sseq sinf [1,p 0.05,p 0.15, p 0.25]
-        "amp"   ==>
-            vsup (sseq sinf
-                  [ swhite 1 0.9 1.5
-                  , swhite 1 0.3 0.5
-                  , swhite 1 0.5 0.8
-                  , swhite 1 0.5 0.9 ])
-
-    effect "ap01" $ do
-        "wet" ==> vsup 0.34
-        "dcy" ==> vsup 0.98
-    effect "cmb02" $ do
-        -- Manually typed with printing the contents of current node.
-        -- control bus numbers are from t102's wet, dcy, and dlt for
-        -- "cmb02" synth.
-        "wet" ==>
-            -- in' 1 KR 272
-            -- vsup 0
-            -- lfClipNoise 'd' KR (1/2) * 0.5 + 0.5
-            -- (\tr -> envGen KR tr 1 0 16 DoNothing
-            --         (Envelope [0.5,1,0] [0.5,0.5] [EnvLin] Nothing Nothing))
-            -- (1 - in' 1 KR 272) * 0.5
-            vsup 0
-        "dcy" ==> in' 1 KR 273
-        "dlt" ==> in' 1 KR 274
-    effect "dc01" $ do
-        "wet" ==> vsup 1
-    router $ do
-        "amp" ==> vsup 1.2
-
 t105 :: IO ()
-t105 = withSC3 $ track 105 $ do
+t105 = withSC3 $ runTrack 105 $ do
     offset 8
     source "saw01" $ do
         "lagt" ==>
             (\tr ->
-              envGen KR tr 1 0 1e-9 DoNothing
+              envGen KR tr 1 0 rdur DoNothing
               (Envelope [0.1,1] [1] [EnvCub] Nothing Nothing))
             -- linLin (lfdNoise3 'l' KR pi) (-1) 1 0 1
             -- vsup 1
@@ -331,26 +325,26 @@ t105 = withSC3 $ track 105 $ do
                 sseq sinf
                 [ sseq 3
                   [1, 5, 1, 5, 8, 1, 5, 8]
-                , srand 8
-                  [2, 4, 5, 8] ]
+                , sshuf 4
+                  [srand 8 [2, 4, 5, 8]]]
         "amp" ==> line KR 0 1 30 DoNothing
     effect "ap01" $ do
         "wet" ==> vsup 0.8
         "dcy" ==> linLin (lfSaw KR (1/4) 0) (-1) 1 0 1 `lag` 0.001
     effect "cmb02" $ do
-        "wet" ==> in' 1 KR 281
-        "dcy" ==> in' 1 KR 282
-        "dlt" ==> in' 1 KR 283
+        "wet" ==> vsup 0 -- in' 1 KR 272
+        "dcy" ==> in' 1 KR 273
+        "dlt" ==> in' 1 KR 274
     effect "dc01" $ do
         "wet" ==> vsup 1
     router $ do
         "amp" ==>
             (\tr ->
               envGen KR tr 1 0 rdur DoNothing
-              (Envelope [0,0.7] [1] [EnvCub] Nothing Nothing))
+              (Envelope [1.0,0] [1] [EnvCub] Nothing Nothing))
 
 t106 :: IO ()
-t106 = withSC3 $ track 106 $ do
+t106 = withSC3 $ runTrack 106 $ do
     offset 8
     source "pv03" $ do
         "t_tr" ==>
@@ -359,31 +353,32 @@ t106 = withSC3 $ track 106 $ do
                   , sseq 24 [0]])
         "pan" ==> lpf (whiteNoise 'P' KR) 20 * 0.5 + 0.5
     effect "cmb02" $ do
-        "wet" ==> vsup 0 -- 1 -  in' 1 KR 281
-        "dcy" ==> in' 1 KR 282
-        "dlt" ==> in' 1 KR 283
+        "wet" ==> vsup 0 -- in' 1 KR 272
+        "dcy" ==> in' 1 KR 273
+        "dlt" ==> in' 1 KR 274
     effect "dc01" $ do
         "wet" ==> vsup 1
     router $ do
         "amp" ==>
             (\tr ->
              envGen KR tr 1 0 rdur DoNothing
-             (Envelope [0,1.8] [1] [EnvCub] Nothing Nothing))
-
-rdur :: Num a => a
-rdur = 24
+             (Envelope [1.2,0] [1] [EnvCub] Nothing Nothing))
 
 t99 :: IO ()
-t99 = withSC3 $ track 99 $ do
+t99 = withSC3 $ runTrack 99 $ do
     router $ do
         "amp" ==>
             (\tr ->
               envGen KR tr 1 0 16 DoNothing
               (Envelope [0,1] [1] [EnvCub] Nothing Nothing))
 
+rdur :: Num a => a
+rdur = 24
+
+
 routers :: IO ()
 routers = withSC3 $ do
-    let fromTo trck s e d = track trck $ do
+    let fromTo trck s e d = runTrack trck $ do
             offset 8
             router $ do
                 "amp" ==>
@@ -396,4 +391,4 @@ routers = withSC3 $ do
     fromTo 106 1 0 rdur
 
 changes :: IO ()
-changes = sequence_ [t101, t103, t106]
+changes = sequence_ [t101, t102, t103]

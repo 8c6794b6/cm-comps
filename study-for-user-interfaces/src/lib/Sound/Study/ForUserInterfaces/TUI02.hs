@@ -101,7 +101,6 @@ data TrackState = TrackState
     , tsTargetNodes   :: [SCNode]
     , tsControlBusNum :: Int
     , tsBeatCount     :: Float
-    , tsNodeIdOffset  :: Int
       -- XXX: Use difflist?
     , tsSourceNB      :: [SCNode] -> [SCNode]
     , tsMessages      :: [Message] -> [Message]
@@ -118,12 +117,12 @@ instance DuplexOSC m => DuplexOSC (Track m)
 instance Transport m => Transport (Track m)
 
 -- | Do action with 'Track'.
-track ::
+runTrack ::
     Transport m
     => Int       -- ^ Group ID of this track.
     -> Track m a -- ^ Action to do.
     -> m a
-track groupId trck = do
+runTrack groupId trck = do
     -- XXX: Update metro synthdef and use sendReply?
     send (c_get [controlBusCounter,countOut])
     [_,Float currentBusNum,_,Float cnt] <- waitDatum "/c_set"
@@ -136,7 +135,6 @@ track groupId trck = do
                            , tsTargetNodes = []
                            , tsControlBusNum = truncate currentBusNum
                            , tsBeatCount = cnt
-                           , tsNodeIdOffset = groupId * 100
                            , tsSourceNB = id
                            , tsMessages = id
                            }
@@ -144,14 +142,9 @@ track groupId trck = do
          send $ c_set [(controlBusCounter,fromIntegral (tsControlBusNum st))]
 
     let n0 = tidyUpParameters node
-        -- n0 = filterSCNode filterCond node
         n1 = Group groupId $ tsSourceNB st []
         ds = diffMessage n0 n1
         ps = tsMessages st []
-    -- XXX: NodeId mapped by tsSourceNB function will be different when
-    -- adding new node in the middle of the structure. Adding effect synth
-    -- in the middle was not happening when using `addFx` function.
-    -- Removing and adding node will not work as expected.
     liftIO $ do
         putStrLn "=== NODE RUNNING (n0) =============="
         putStrLn $ drawSCNode n0
@@ -165,20 +158,19 @@ track groupId trck = do
 
     return val
 
-filterCond :: Condition SCNode
-filterCond = isGroup ||? not . ("p_" `isPrefixOf`) . synthName
-
+-- | Filters out parameter nodes and mapped control parameter in source and
+-- effect nodes.
 tidyUpParameters :: SCNode -> SCNode
 tidyUpParameters n0 =
     let f n acc = case n of
             Group i ns -> Group i (foldr f [] ns) : acc
             Synth i name ps
-                | "p_" `isPrefixOf` name -> acc
+                | "p:" `isPrefixOf` name -> acc
                 | otherwise              ->
                     let ps' = [p | p <-ps
                                  , paramName p == "out" || paramName p == "in"]
                     in  Synth i name ps' : acc
-        {-# INLINEABLE f #-}
+        {-# INLINE f #-}
     in  head $ foldr f [] [n0]
 {-# INLINEABLE tidyUpParameters #-}
 
@@ -191,50 +183,84 @@ freeNodesCond :: Transport m => Condition SCNode -> Track m ()
 freeNodesCond cond =
     send . n_free . map nodeId . queryN cond . tsCurrentNode =<< get
 
+-- | Set offset to update the parameters.
+offset :: Monad m => Int -> Track m ()
+offset count = modify $ \st -> st {tsBeatOffset = count}
+
 -- | Apply parameter actions to nodes specified by query string.
 source ::
     Monad m
     => String     -- ^ Query string, see 'qString'.
     -> Track m a  -- ^ Action for parameter.
     -> Track m a
-source name act = do
-    modify $ \st ->
-        let nid  = nidInGroupForName (tsGroupId st) name
-            node = Synth nid name ["out":=obus]
-            obus = fromIntegral $ audioBus $ tsGroupId st
-        in  st { -- tsTargetNodes = queryN (qString name) (tsCurrentNode st)
-                 tsTargetNodes = case queryN (qString name) (tsCurrentNode st) of
-                                      [] -> [node]
-                                      ns -> ns
-               , tsNodeIdOffset = nid + 1
-               , tsSourceNB = tsSourceNB st . (node:)
-               }
-    act
+source = genControlledNode (\obus -> ["out":=obus])
 {-# INLINEABLE source #-}
 
-nidInGroupForName :: Int -> String -> Int
-nidInGroupForName gid name =
-    fromIntegral (abs (fromIntegral (joinID gid (hash name)) :: Int32))
-{-# INLINEABLE nidInGroupForName #-}
+source' :: Monad m => Int -> String -> Track m a -> Track m a
+source' i name act =
+    genControlledNodeWithHash (\obus -> ["out":=obus]) i name act
 
 -- | Run effect synth, apply paremater actions to nodes.
 effect :: Monad m => String -> Track m a -> Track m a
-effect name act = do
+effect = genControlledNode (\obus -> ["out":=obus,"in":=obus])
+{-# INLINEABLE effect #-}
+
+effect' :: Monad m => Int -> String -> Track m a -> Track m a
+effect' = genControlledNodeWithHash (\obus -> ["out":=obus,"in":=obus])
+
+
+-- | Make an 'Track' action for source and effect nodes.
+genControlledNode ::
+    Monad m
+    => (Double -> [SynthParam])
+    -- ^ Function taking output bus for this synthdef.
+    -> String    -- ^ Synthdef name.
+    -> Track m a -- ^ Next action.
+    -> Track m a
+genControlledNode fparam name act = do
     modify $ \st ->
-        let nid  = nidInGroupForName (tsGroupId st) name
-            obus = fromIntegral $ audioBus $ tsGroupId st
-            node = Synth nid name ["out":=obus,"in":=obus]
-        in  st { -- tsTargetNodes  = queryN (qString name) (tsCurrentNode st)
-                 -- tsTargetNodes = [node]
-                 tsTargetNodes = case queryN (qString name) (tsCurrentNode st) of
-                                      [] -> [node]
-                                      ns -> ns
-               , tsNodeIdOffset = nid + 1
+        let gid = tsGroupId st
+            nid = fromIntegral
+                  (abs (fromIntegral (joinID gid (hash name)) :: Int32))
+            obus = fromIntegral $ audioBus gid
+            node = Synth nid name (fparam obus)
+        in  st { tsTargetNodes =
+                      case queryN (nodeId ==? nid) (tsCurrentNode st) of
+                          [] -> [node] -- initial case.
+                          ns -> ns
                , tsSourceNB = tsSourceNB st . (node:)
                }
     act
-{-# INLINEABLE effect #-}
+{-# INLINEABLE genControlledNode #-}
 
+-- | Like 'genControlledNode', but with specified value used for getting node
+-- ID with 'hash' function.
+genControlledNodeWithHash ::
+    Monad m
+    => (Double -> [SynthParam])
+    -- ^ Function taking output bus for this synthdef.
+    -> Int       -- ^ Value used for 'hash'.
+    -> String    -- ^ Synthdef name.
+    -> Track m a -- ^ Next action.
+    -> Track m a
+genControlledNodeWithHash fparam i name act = do
+    modify $ \st ->
+        let gid = tsGroupId st
+            nid = fromIntegral
+                  (abs (fromIntegral
+                        (joinID i (joinID gid (hash name))) :: Int32))
+            obus = fromIntegral $ audioBus gid
+            node = Synth nid name (fparam obus)
+        in  st { tsTargetNodes =
+                      case queryN (nodeId ==? nid) (tsCurrentNode st) of
+                          [] -> [node] -- initial case.
+                          ns -> ns
+               , tsSourceNB = tsSourceNB st . (node:)
+               }
+    act
+
+
+-- | Action for 'synth_router'.
 router :: Monad m => Track m a -> Track m a
 router act = do
     modify $ \st ->
@@ -272,7 +298,7 @@ qString str0 = foldr1 (||?) (map parse (words str0))
 
 -- | Assign parameter with given value.
 param :: (Assignable a, Transport m) => String -> a -> Track m ()
-param a b = a ==> b
+param name value = mapM_ (\nd -> assign nd name value) . tsTargetNodes =<< get
 {-# INLINEABLE param #-}
 
 -- | Operator variant of 'param'.
@@ -281,8 +307,8 @@ param a b = a ==> b
     => String  -- ^ Parameter name.
     -> a       -- ^ Value.
     -> Track m ()
-name ==> value =
-    mapM_ (\nd -> assign nd name value) . tsTargetNodes =<< get
+name ==> value = param name value
+
 {-# INLINEABLE (==>) #-}
 
 infixr 1 ==>
@@ -360,7 +386,7 @@ sendControl node pname fu = do
         sdef
             | psynthExist = mrg [osig, fr]
             | otherwise   = osig
-        pdefname = concat ["p_",show nid,"_",pname,"_",show (hashUGen osig)]
+        pdefname = concat ["p:",show nid,":",pname,":",show (hashUGen osig)]
         -- output bus mapped to pname of snth
         mbObus  = queryP' (paramName ==? pname) node
         (reusing,obus) = case mbObus of
@@ -400,10 +426,6 @@ sendControl node pname fu = do
 dumpTrack :: Transport m => Track m ()
 dumpTrack =
     get >>= getNode . tsGroupId >>= liftIO . putStrLn . drawSCNode
-
--- | Set offset to update the parameters.
-offset :: Monad m => Int -> Track m ()
-offset count = modify $ \st -> st {tsBeatOffset = count}
 
 
 -- --------------------------------------------------------------------------
