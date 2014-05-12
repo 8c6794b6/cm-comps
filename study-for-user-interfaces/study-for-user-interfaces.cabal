@@ -44,6 +44,7 @@ library
                    , hsc3-th
                    , hsc3-tree
                    , mtl
+                   , murmur-hash
                    , random
                    , threepenny-gui
                    , transformers

@@ -9,15 +9,25 @@ Maintainer  : 8c6794b6@gmail.com
 Stability   : experimental
 Portability : unknown
 
-Textual user interface, take 2.
+Textual user interface, take 2. TUI02 has a concept of 'Track', which aligns
+given source synths and effect synths with parameter controlling adhoc
+UGens. Source and effect synth setup is idemopotent, initialization and update
+of track could be done with invoking same code block in Haskell code.
 
+Known limitation:
+
+* Single track cannot contain multiple synthdefs with same name. This is because
+synthdef name is used to define node id for each track.
+
+* Ordering nodes may not work properly.
 -}
 module Sound.Study.ForUserInterfaces.TUI02 where
 
 import Control.Applicative (Applicative(..))
 import Control.Monad (liftM, when)
 import Control.Monad.State (MonadTrans(..), MonadState(..), StateT(..), modify)
--- import Data.List (isPrefixOf)
+import Data.Int (Int32)
+import Data.List (isPrefixOf)
 import System.Random (mkStdGen)
 
 import Sound.OSC
@@ -36,7 +46,7 @@ import Sound.Study.ForUserInterfaces.TUI01 as TUI01
 routerNid ::
     Int -- ^ ID of Group node.
     -> Int
-routerNid gid = gid * 1000
+routerNid gid = ((gid + 1) * 100) - 1
 
 -- | Reserved control outbus to get number of used control out bus.
 controlBusCounter :: Num a => a
@@ -53,7 +63,7 @@ initializeTUI02 = do
             [ grp (masterNid+1)
               [ syn "metro" ["out"*=metroOut, "count"*=countOut] ]]
           , grp masterNid
-            [ syn "router" ["in"*=sourceOut] ]]
+            [ syn' (routerNid 99) "router" ["in"*=sourceOut] ]]
         , grp 2 [] ]
     send $ c_set [(controlBusCounter,256)]
     send $ sync (-1)
@@ -73,7 +83,7 @@ addTrack = do
             _     -> error "(Re) initialize the setup"
         obus = Dval $ fromIntegral $ audioBus gid
         g = grp gid
-            [ syn "router" ["in"*=obus, "out"*=sourceOut] ]
+            [ syn' (routerNid gid) "router" ["in"*=obus, "out"*=sourceOut] ]
     addNode defaultTargetNid (nodify g)
     send (sync $ audioBus gid)
     waitMessage
@@ -86,13 +96,15 @@ newtype Track m a = Track {unTrack :: StateT TrackState m a}
 -- | State for single track.
 data TrackState = TrackState
     { tsGroupId       :: Int
-    , tsOffset        :: Int
+    , tsBeatOffset    :: Int
     , tsCurrentNode   :: SCNode
     , tsTargetNodes   :: [SCNode]
     , tsControlBusNum :: Int
     , tsBeatCount     :: Float
-    -- XXX: Add record field to store node id offset.
-    -- XXX: Add record to hold list of Message to send.
+    , tsNodeIdOffset  :: Int
+      -- XXX: Use difflist?
+    , tsSourceNB      :: [SCNode] -> [SCNode]
+    , tsMessages      :: [Message] -> [Message]
     }
 
 instance SendOSC m => SendOSC (Track m) where
@@ -119,38 +131,56 @@ track groupId trck = do
     node <- getNode groupId
     (val,st) <- runStateT (unTrack trck)
                 TrackState { tsGroupId = groupId
-                           , tsOffset  = 0
+                           , tsBeatOffset = 0
                            , tsCurrentNode = node
                            , tsTargetNodes = []
-                           , tsControlBusNum  = truncate currentBusNum
+                           , tsControlBusNum = truncate currentBusNum
                            , tsBeatCount = cnt
+                           , tsNodeIdOffset = groupId * 100
+                           , tsSourceNB = id
+                           , tsMessages = id
                            }
-    -- XXX: Send whole message
     when (currentBusNum /= fromIntegral (tsControlBusNum st)) $
          send $ c_set [(controlBusCounter,fromIntegral (tsControlBusNum st))]
+
+    let n0 = tidyUpParameters node
+        -- n0 = filterSCNode filterCond node
+        n1 = Group groupId $ tsSourceNB st []
+        ds = diffMessage n0 n1
+        ps = tsMessages st []
+    -- XXX: NodeId mapped by tsSourceNB function will be different when
+    -- adding new node in the middle of the structure. Adding effect synth
+    -- in the middle was not happening when using `addFx` function.
+    -- Removing and adding node will not work as expected.
+    liftIO $ do
+        putStrLn "=== NODE RUNNING (n0) =============="
+        putStrLn $ drawSCNode n0
+        putStrLn ""
+        putStrLn "=== NODE IN SOURCE TEXT (n1) ======="
+        putStrLn $ drawSCNode n1
+        putStrLn ""
+        putStrLn "=== diffMessage n0 n1 =============="
+        mapM_ (putStrLn . messagePP) ds
+    sendOSC $ bundle immediately $ (ds ++ ps)
+
     return val
 
--- | Add new source synth to head of specified group.
-addSource ::
-    (Transport m)
-    => String    -- ^ Synthdef name.
-    -> Track m ()
-addSource name = do
-    targetNid <- liftM tsGroupId get
-    let obus = fromIntegral $ audioBus targetNid
-    sendOSC $ bundle immediately $
-        [ s_new name (-1) AddToHead targetNid [("out",obus)]]
+filterCond :: Condition SCNode
+filterCond = isGroup ||? not . ("p_" `isPrefixOf`) . synthName
 
--- | Add new effect synth to specified group before 'synth_router'.
-addFx ::
-    Transport m
-    => String -- ^ Synthdef name.
-    -> Track m ()
-addFx name = do
-    targetNid <- liftM tsGroupId get
-    let obus = fromIntegral $ audioBus targetNid
-    sendOSC $ s_new name (-1) AddBefore (routerNid targetNid)
-        [("out",obus),("in",obus)]
+tidyUpParameters :: SCNode -> SCNode
+tidyUpParameters n0 =
+    let f n acc = case n of
+            Group i ns -> Group i (foldr f [] ns) : acc
+            Synth i name ps
+                | "p_" `isPrefixOf` name -> acc
+                | otherwise              ->
+                    let ps' = [p | p <-ps
+                                 , paramName p == "out" || paramName p == "in"]
+                    in  Synth i name ps' : acc
+        {-# INLINEABLE f #-}
+    in  head $ foldr f [] [n0]
+{-# INLINEABLE tidyUpParameters #-}
 
 -- | Free nodes matching to given query string, in specified group.
 freeNodes :: Transport m => String -> Track m ()
@@ -167,23 +197,67 @@ source ::
     => String     -- ^ Query string, see 'qString'.
     -> Track m a  -- ^ Action for parameter.
     -> Track m a
-source qstr act = do
-    -- XXX: Add synth to SCNode built from current haskell source code.
+source name act = do
     modify $ \st ->
-        st {tsTargetNodes = queryN (qString qstr) (tsCurrentNode st)}
+        let nid  = nidInGroupForName (tsGroupId st) name
+            node = Synth nid name ["out":=obus]
+            obus = fromIntegral $ audioBus $ tsGroupId st
+        in  st { -- tsTargetNodes = queryN (qString name) (tsCurrentNode st)
+                 tsTargetNodes = case queryN (qString name) (tsCurrentNode st) of
+                                      [] -> [node]
+                                      ns -> ns
+               , tsNodeIdOffset = nid + 1
+               , tsSourceNB = tsSourceNB st . (node:)
+               }
     act
+{-# INLINEABLE source #-}
+
+nidInGroupForName :: Int -> String -> Int
+nidInGroupForName gid name =
+    fromIntegral (abs (fromIntegral (joinID gid (hash name)) :: Int32))
+{-# INLINEABLE nidInGroupForName #-}
 
 -- | Run effect synth, apply paremater actions to nodes.
 effect :: Monad m => String -> Track m a -> Track m a
-effect = undefined
+effect name act = do
+    modify $ \st ->
+        let nid  = nidInGroupForName (tsGroupId st) name
+            obus = fromIntegral $ audioBus $ tsGroupId st
+            node = Synth nid name ["out":=obus,"in":=obus]
+        in  st { -- tsTargetNodes  = queryN (qString name) (tsCurrentNode st)
+                 -- tsTargetNodes = [node]
+                 tsTargetNodes = case queryN (qString name) (tsCurrentNode st) of
+                                      [] -> [node]
+                                      ns -> ns
+               , tsNodeIdOffset = nid + 1
+               , tsSourceNB = tsSourceNB st . (node:)
+               }
+    act
+{-# INLINEABLE effect #-}
+
+router :: Monad m => Track m a -> Track m a
+router act = do
+    modify $ \st ->
+        let ibus | tsGroupId st == 99 = 16
+                 | otherwise          = fromIntegral $ audioBus $ tsGroupId st
+            obus | tsGroupId st == 99 = 0
+                 | otherwise          = sourceOut
+            nid  = routerNid $ tsGroupId st
+        in  st { tsTargetNodes = queryN (qString "router") (tsCurrentNode st)
+               , tsSourceNB =
+                      tsSourceNB st .
+                      (Synth nid "router" ["out":=obus,"in":=ibus]:)
+               }
+    act
+{-# INLINEABLE router #-}
 
 -- | Translate to condition:
 --
 -- * \'*\' - entire node
 --
--- * .NAME - synth with synthdef name /NAME/.
---
 -- * #ID   - synth with node id /ID/.
+--
+-- Otherwise, synth with given synthdef name.
 --
 qString :: String -> Condition SCNode
 qString str0 = foldr1 (||?) (map parse (words str0))
@@ -191,11 +265,17 @@ qString str0 = foldr1 (||?) (map parse (words str0))
     parse str =
         case str of
             '*':_    -> const True
-            '.':name -> synthName ==? name
             '#':nid  -> nodeId    ==? read nid
-            _        -> error ("qString: Unknown query " ++ str)
+            '.':name -> synthName ==? name
+            name     -> synthName ==? name
+{-# INLINEABLE qString #-}
 
 -- | Assign parameter with given value.
+param :: (Assignable a, Transport m) => String -> a -> Track m ()
+param a b = a ==> b
+{-# INLINEABLE param #-}
+
+-- | Operator variant of 'param'.
 (==>) ::
     (Transport m, Assignable a)
     => String  -- ^ Parameter name.
@@ -203,6 +283,7 @@ qString str0 = foldr1 (||?) (map parse (words str0))
     -> Track m ()
 name ==> value =
     mapM_ (\nd -> assign nd name value) . tsTargetNodes =<< get
+{-# INLINEABLE (==>) #-}
 
 infixr 1 ==>
 
@@ -229,25 +310,28 @@ class Assignable a where
         -> Track m ()  -- ^ New output bus, could be same as given value.
 
 instance Assignable Double where
-    assign nd name val = do
-        send $ n_set (nodeId nd) [(name,val)]
+    assign nd name val = send $ n_set (nodeId nd) [(name,val)]
+    {-# INLINEABLE assign #-}
 
 instance Assignable UGen where
-    assign nd name val = do
-        sendControl nd name (const val)
+    assign nd name val = sendControl nd name (const val)
+    {-# INLINEABLE assign #-}
 
 instance Assignable (UGen -> UGen) where
     assign nd name f = sendControl nd name f
+    {-# INLINEABLE assign #-}
 
 instance Assignable Vsupply where
     assign nd name (Vsupply val) = do
         let ug tr = demand tr 1 (evalSupply val (mkStdGen 0x12345678))
         sendControl nd name ug
+    {-# INLINEABLE assign #-}
 
 instance Assignable Tsupply where
     assign nd name (Tsupply val) = do
         let ug tr = tr * demand tr 1 (evalSupply val (mkStdGen 0x12345678))
         sendControl nd name ug
+    {-# INLINEABLE assign #-}
 
 
 -- | Send UGen and map control output to synth specified by given 'SCNode'.
@@ -260,7 +344,7 @@ sendControl ::
 sendControl node pname fu = do
     ts <- get
     let cnt         = tsBeatCount ts
-        beatOffset  = tsOffset ts
+        beatOffset  = tsBeatOffset ts
         currentObus = tsControlBusNum ts
         nid    = nodeId node
         cnt'   | beatOffset <= 0 = 0
@@ -292,31 +376,63 @@ sendControl node pname fu = do
         psynthExist = not (null psynths)
         psynthChanged = not (pdefname `elem` map synthName psynths)
         (addAction,targetNid) = (AddBefore, nid)
+        mfunc
+            | psynthChanged =
+                (withCM
+                 (d_recv $ synthdef pdefname sdef)
+                 (bundle immediately
+                  [s_new pdefname (-1) addAction targetNid
+                   [("out",fromIntegral obus),("count",fromIntegral cnt')]
+                  , n_map (-1) [("tr",metroOut)]
+                  , n_map nid [(pname, obus)] ]) :)
+            | otherwise     = id
     when psynthChanged $ do
         liftIO $ putStrLn $ unlines
             [ "Updating node       : " ++ show  nid
             , "Parameter UGen name : " ++ pdefname ]
-        -- XXX: Dont send at this moment, add to state.
-        send $ withCM
-            (d_recv $ synthdef pdefname sdef)
-            (bundle immediately
-             [s_new pdefname (-1) addAction targetNid
-              [("out",fromIntegral obus),("count",fromIntegral cnt')]
-             , n_map (-1) [("tr",metroOut)]
-             , n_map nid [(pname, obus)] ])
     modify $ \st ->
-        st {tsControlBusNum = if reusing then currentObus else currentObus+1}
+        st { tsControlBusNum = if reusing then currentObus else currentObus+1
+           , tsMessages = tsMessages st . mfunc
+           }
+{-# INLINEABLE sendControl #-}
 
 -- | Dump nodes in track.
 dumpTrack :: Transport m => Track m ()
 dumpTrack =
-    get >>= getNode . tsGroupId >>=
-    liftIO . putStrLn . drawSCNode
-    -- filterSCNode (isGroup ||? (not . ("p_" `isPrefixOf`) . synthName))
+    get >>= getNode . tsGroupId >>= liftIO . putStrLn . drawSCNode
 
 -- | Set offset to update the parameters.
 offset :: Monad m => Int -> Track m ()
-offset count = modify $ \st -> st {tsOffset = count}
+offset count = modify $ \st -> st {tsBeatOffset = count}
+
+
+-- --------------------------------------------------------------------------
+--
+-- * Deprecated
+--
+-- --------------------------------------------------------------------------
+
+-- | Add new source synth to head of specified group.
+addSource ::
+    (Transport m)
+    => String    -- ^ Synthdef name.
+    -> Track m ()
+addSource name = do
+    targetNid <- liftM tsGroupId get
+    let obus = fromIntegral $ audioBus targetNid
+    sendOSC $ bundle immediately $
+        [ s_new name (-1) AddToHead targetNid [("out",obus)]]
+
+-- | Add new effect synth to specified group before 'synth_router'.
+addFx ::
+    Transport m
+    => String -- ^ Synthdef name.
+    -> Track m ()
+addFx name = do
+    targetNid <- liftM tsGroupId get
+    let obus = fromIntegral $ audioBus targetNid
+    sendOSC $ s_new name (-1) AddBefore (routerNid targetNid)
+        [("out",obus),("in",obus)]
 
 
 -- --------------------------------------------------------------------------
@@ -419,22 +535,9 @@ audioBus_ex01 = withSC3 $ do
 
 queryTree_ex01 :: IO ()
 queryTree_ex01 = withSC3 $ do
-    send $ g_queryTree [(11,True)]
+    send $ g_queryTree [(101,True)]
     msg <- waitMessage
     liftIO $ putStrLn $ messagePP msg
 
 withSC3' :: Connection TCP a -> IO a
 withSC3' = withTransport (openTCP "127.0.0.1" 57111)
-
--- for taking 'diffMessage'.
-
-nd01 =
-    Group 101
-    [ Synth 10101 "foo" []
-    , Synth 10102 "bar" [] ]
-
-nd02 =
-    Group 101
-    [ Synth 10101 "foo" []
-    , Synth 10103 "buzz" []
-    , Synth 10102 "bar" [] ]
