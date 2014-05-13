@@ -93,6 +93,14 @@ newtype Track m a = Track {unTrack :: StateT TrackState m a}
     deriving ( Functor, Applicative, Monad, MonadTrans, MonadIO
              , MonadState TrackState )
 
+-- | Synonym for simple difference list.
+type DList a = [a] -> [a]
+
+-- | Add single element to end of 'DList'.
+snoc :: a -> DList a -> DList a
+snoc x f = f . (x:)
+{-# INLINE snoc #-}
+
 -- | State for single track.
 data TrackState = TrackState
     { tsGroupId       :: Int
@@ -101,9 +109,8 @@ data TrackState = TrackState
     , tsTargetNodes   :: [SCNode]
     , tsControlBusNum :: Int
     , tsBeatCount     :: Float
-      -- XXX: Use difflist?
-    , tsSourceNB      :: [SCNode] -> [SCNode]
-    , tsMessages      :: [Message] -> [Message]
+    , tsSourceNB      :: DList SCNode
+    , tsMessages      :: DList Message
     }
 
 instance SendOSC m => SendOSC (Track m) where
@@ -193,72 +200,52 @@ source ::
     => String     -- ^ Query string, see 'qString'.
     -> Track m a  -- ^ Action for parameter.
     -> Track m a
-source = genControlledNode (\obus -> ["out":=obus])
+source = genControlledNode (\obus -> ["out":=obus]) Nothing
 {-# INLINEABLE source #-}
 
 source' :: Monad m => Int -> String -> Track m a -> Track m a
 source' i name act =
-    genControlledNodeWithHash (\obus -> ["out":=obus]) i name act
+    genControlledNode (\obus -> ["out":=obus]) (Just i) name act
+{-# INLINEABLE source' #-}
 
 -- | Run effect synth, apply paremater actions to nodes.
 effect :: Monad m => String -> Track m a -> Track m a
-effect = genControlledNode (\obus -> ["out":=obus,"in":=obus])
+effect = genControlledNode (\obus -> ["out":=obus,"in":=obus]) Nothing
 {-# INLINEABLE effect #-}
 
 effect' :: Monad m => Int -> String -> Track m a -> Track m a
-effect' = genControlledNodeWithHash (\obus -> ["out":=obus,"in":=obus])
-
+effect' i name act =
+    genControlledNode (\obus -> ["out":=obus,"in":=obus]) (Just i) name act
+{-# INLINEABLE effect' #-}
 
 -- | Make an 'Track' action for source and effect nodes.
 genControlledNode ::
     Monad m
     => (Double -> [SynthParam])
     -- ^ Function taking output bus for this synthdef.
+    -> Maybe Int -- ^ Value used for 'hash'.
     -> String    -- ^ Synthdef name.
     -> Track m a -- ^ Next action.
     -> Track m a
-genControlledNode fparam name act = do
-    modify $ \st ->
-        let gid = tsGroupId st
-            nid = fromIntegral
-                  (abs (fromIntegral (joinID gid (hash name)) :: Int32))
-            obus = fromIntegral $ audioBus gid
-            node = Synth nid name (fparam obus)
-        in  st { tsTargetNodes =
-                      case queryN (nodeId ==? nid) (tsCurrentNode st) of
-                          [] -> [node] -- initial case.
-                          ns -> ns
-               , tsSourceNB = tsSourceNB st . (node:)
-               }
-    act
-{-# INLINEABLE genControlledNode #-}
-
--- | Like 'genControlledNode', but with specified value used for getting node
--- ID with 'hash' function.
-genControlledNodeWithHash ::
-    Monad m
-    => (Double -> [SynthParam])
-    -- ^ Function taking output bus for this synthdef.
-    -> Int       -- ^ Value used for 'hash'.
-    -> String    -- ^ Synthdef name.
-    -> Track m a -- ^ Next action.
-    -> Track m a
-genControlledNodeWithHash fparam i name act = do
+genControlledNode fparam mbi name act = do
     modify $ \st ->
         let gid = tsGroupId st
             nid = fromIntegral
                   (abs (fromIntegral
-                        (joinID i (joinID gid (hash name))) :: Int32))
+                        (case mbi of
+                              Nothing -> joinID gid (hash name)
+                              Just i  -> joinID i (joinID gid (hash name)))
+                        :: Int32))
             obus = fromIntegral $ audioBus gid
             node = Synth nid name (fparam obus)
         in  st { tsTargetNodes =
                       case queryN (nodeId ==? nid) (tsCurrentNode st) of
                           [] -> [node] -- initial case.
                           ns -> ns
-               , tsSourceNB = tsSourceNB st . (node:)
+               , tsSourceNB = node `snoc` (tsSourceNB st)
                }
     act
-
+{-# INLINEABLE genControlledNode #-}
 
 -- | Action for 'synth_router'.
 router :: Monad m => Track m a -> Track m a
@@ -269,10 +256,9 @@ router act = do
             obus | tsGroupId st == 99 = 0
                  | otherwise          = sourceOut
             nid  = routerNid $ tsGroupId st
+            node = Synth nid "router" ["out":=obus,"in":=ibus]
         in  st { tsTargetNodes = queryN (qString "router") (tsCurrentNode st)
-               , tsSourceNB =
-                      tsSourceNB st .
-                      (Synth nid "router" ["out":=obus,"in":=ibus]:)
+               , tsSourceNB = node `snoc` tsSourceNB st
                }
     act
 {-# INLINEABLE router #-}
@@ -308,7 +294,6 @@ param name value = mapM_ (\nd -> assign nd name value) . tsTargetNodes =<< get
     -> a       -- ^ Value.
     -> Track m ()
 name ==> value = param name value
-
 {-# INLINEABLE (==>) #-}
 
 infixr 1 ==>
@@ -358,7 +343,6 @@ instance Assignable Tsupply where
         let ug tr = tr * demand tr 1 (evalSupply val (mkStdGen 0x12345678))
         sendControl nd name ug
     {-# INLINEABLE assign #-}
-
 
 -- | Send UGen and map control output to synth specified by given 'SCNode'.
 sendControl ::
