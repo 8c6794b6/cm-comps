@@ -16,10 +16,9 @@ of track could be done with invoking same code block in Haskell code.
 
 Known limitation:
 
-* Single track cannot contain multiple synthdefs with same name. This is because
-synthdef name is used to define node id for each track.
+* Ordering nodes may not work properly. Might need couple updated in diff
+related functions in hsc3-tree package.
 
-* Ordering nodes may not work properly.
 -}
 module Sound.Study.ForUserInterfaces.TUI02 where
 
@@ -190,9 +189,15 @@ freeNodesCond :: Transport m => Condition SCNode -> Track m ()
 freeNodesCond cond =
     send . n_free . map nodeId . queryN cond . tsCurrentNode =<< get
 
+-- | Dump nodes in track.
+dumpTrack :: Transport m => Track m ()
+dumpTrack =
+    get >>= getNode . tsGroupId >>= liftIO . putStrLn . drawSCNode
+
 -- | Set offset to update the parameters.
 offset :: Monad m => Int -> Track m ()
 offset count = modify $ \st -> st {tsBeatOffset = count}
+{-# INLINEABLE offset #-}
 
 -- | Apply parameter actions to nodes specified by query string.
 source ::
@@ -282,6 +287,14 @@ qString str0 = foldr1 (||?) (map parse (words str0))
             name     -> synthName ==? name
 {-# INLINEABLE qString #-}
 
+class Assignable a where
+    assign ::
+        Transport m
+        => SCNode       -- ^ Target node to assign value.
+        -> String       -- ^ Parameter name.
+        -> a            -- ^ Value to assign.
+        -> Track m ()  -- ^ New output bus, could be same as given value.
+
 -- | Assign parameter with given value.
 param :: (Assignable a, Transport m) => String -> a -> Track m ()
 param name value = mapM_ (\nd -> assign nd name value) . tsTargetNodes =<< get
@@ -298,28 +311,6 @@ name ==> value = param name value
 
 infixr 1 ==>
 
--- | Data to control synth parameter with 'Supply'.
-data Vsupply = Vsupply Supply
-
--- | Triggered variant of 'Vsupply'.
-data Tsupply = Tsupply Supply
-
--- | Wraps given 'Supply' to synth parameter.
-vsup :: Supply -> Vsupply
-vsup = Vsupply
-
--- | Triggered variang of 'vsup'.
-tsup :: Supply -> Tsupply
-tsup = Tsupply
-
-class Assignable a where
-    assign ::
-        Transport m
-        => SCNode       -- ^ Target node to assign value.
-        -> String       -- ^ Parameter name.
-        -> a            -- ^ Value to assign.
-        -> Track m ()  -- ^ New output bus, could be same as given value.
-
 instance Assignable Double where
     assign nd name val = send $ n_set (nodeId nd) [(name,val)]
     {-# INLINEABLE assign #-}
@@ -332,17 +323,112 @@ instance Assignable (UGen -> UGen) where
     assign nd name f = sendControl nd name f
     {-# INLINEABLE assign #-}
 
+-- | Data to control synth parameter with 'Supply'.
+data Vsupply = Vsupply Supply
+
+-- | Wraps given 'Supply' to synth parameter.
+vsup :: Supply -> Vsupply
+vsup = Vsupply
+
 instance Assignable Vsupply where
     assign nd name (Vsupply val) = do
         let ug tr = demand tr 1 (evalSupply val (mkStdGen 0x12345678))
         sendControl nd name ug
     {-# INLINEABLE assign #-}
 
+-- | Triggered variant of 'Vsupply'.
+data Tsupply = Tsupply Supply
+
+-- | Triggered variang of 'vsup'.
+tsup :: Supply -> Tsupply
+tsup = Tsupply
+
 instance Assignable Tsupply where
     assign nd name (Tsupply val) = do
         let ug tr = tr * demand tr 1 (evalSupply val (mkStdGen 0x12345678))
         sendControl nd name ug
     {-# INLINEABLE assign #-}
+
+-- | Data type for assininng curved change.
+data CurveTo a = CurveTo
+   { ctCurve :: Envelope_Curve a
+   , ctDur   :: Double
+   , ctValue :: Double
+   } deriving (Eq, Show)
+
+instance Assignable (CurveTo UGen) where
+    assign nd name (CurveTo curve d v) = sendCurve nd name curve d v
+    {-# INLINEABLE assign #-}
+
+curveTo :: EnvCurve -> Double -> Double -> CurveTo UGen
+curveTo = CurveTo
+
+-- | Send curve to running scsynth.
+sendCurve ::
+    Transport m
+    => SCNode -- ^ Target node.
+    -> String -- ^ Parameter name.
+    -> EnvCurve -- ^ Curve shape.
+    -> Double   -- ^ Curve duration
+    -> Double   -- ^ Curve target value.
+    -> Track m ()
+sendCurve node pname curve dur toVal = do
+    ts <- get
+    let cnt = tsBeatCount ts
+        beatOffset = tsBeatOffset ts
+        currentObus = tsControlBusNum ts
+        nid = nodeId node
+        cnt' | beatOffset <= 0 = 0
+             | otherwise       =
+                 (ceiling (cnt / fromIntegral beatOffset) + 1) *
+                 beatOffset
+        tr      = gate (control KR "tr" 0) exceed
+        exceed  = in' 1 KR countOut >* control KR "count" 0
+        matched = in' 1 KR countOut ==* (control KR "count" 0 + 1)
+        fr      = free exceed $ mce $ map (constant . nodeId) psynths
+        osig    = out (control KR "out" 0) (gate ug exceed)
+        ug      = envGen KR matched 1 0 (constant dur) DoNothing
+                  (Envelope
+                   [fromVal,constant toVal] [1] [curve] Nothing Nothing)
+        fromVal = case node of
+            Synth _ _ ps -> case [p | p <- ps, paramName p == pname] of
+                (_ :<- bus):_ -> latch (in' 1 KR (fromIntegral bus))
+                                 (in' 1 KR countOut Sound.SC3.ID.<* control KR "count" 0)
+                (_ :=  val):_ -> constant val
+                _             -> constant (0::Double)
+        sdef
+            | psynthExist = mrg [osig, fr]
+            | otherwise   = osig
+        pdefname = concat ["p:",show nid,":",pname,":",show (hashUGen osig)]
+        (reusing,obus) = case queryP' (paramName ==? pname) node of
+            Just (_ :<- v) -> (True,v)
+            _              -> (False,currentObus)
+        pcond p = case p of
+            n := v | n == "out" && v == fromIntegral obus -> True
+            _                                             -> False
+        psynths = queryN (params pcond) (tsCurrentNode ts)
+        psynthExist = not (null psynths)
+        psynthChanged = not (pdefname `elem` map synthName psynths)
+        mfunc
+            | psynthChanged =
+                (withCM
+                 (d_recv $ synthdef pdefname sdef)
+                 (bundle immediately
+                  [ s_new pdefname (-1) AddBefore nid
+                    [("out",fromIntegral obus),("count",fromIntegral cnt')]
+                  , n_map (-1) [("tr",metroOut)]
+                  , n_map nid [(pname,obus)] ]) :)
+            | otherwise    = id
+
+    when psynthChanged $ do
+        liftIO $ putStrLn $ unlines
+            [ "Updating node  : " ++ show  nid
+            , "Parameter UGen : " ++ pdefname ]
+    modify $ \st ->
+        st { tsControlBusNum = if reusing then currentObus else currentObus+1
+           , tsMessages = tsMessages st . mfunc
+           }
+{-# INLINE sendCurve #-}
 
 -- | Send UGen and map control output to synth specified by given 'SCNode'.
 sendControl ::
@@ -372,8 +458,7 @@ sendControl node pname fu = do
             | otherwise   = osig
         pdefname = concat ["p:",show nid,":",pname,":",show (hashUGen osig)]
         -- output bus mapped to pname of snth
-        mbObus  = queryP' (paramName ==? pname) node
-        (reusing,obus) = case mbObus of
+        (reusing,obus) = case queryP' (paramName ==? pname) node of
             Just (_ :<- v) -> (True,v)
             _              -> (False,currentObus)
         -- Condition for synth controlling specified parameter:
@@ -398,19 +483,13 @@ sendControl node pname fu = do
             | otherwise     = id
     when psynthChanged $ do
         liftIO $ putStrLn $ unlines
-            [ "Updating node       : " ++ show  nid
-            , "Parameter UGen name : " ++ pdefname ]
+            [ "Updating node  : " ++ show  nid
+            , "Parameter UGen : " ++ pdefname ]
     modify $ \st ->
         st { tsControlBusNum = if reusing then currentObus else currentObus+1
            , tsMessages = tsMessages st . mfunc
            }
 {-# INLINEABLE sendControl #-}
-
--- | Dump nodes in track.
-dumpTrack :: Transport m => Track m ()
-dumpTrack =
-    get >>= getNode . tsGroupId >>= liftIO . putStrLn . drawSCNode
-
 
 -- --------------------------------------------------------------------------
 --
@@ -533,6 +612,28 @@ controlBus_ex01 = withSC3 $ do
 audioBus_ex01 :: IO ()
 audioBus_ex01 = withSC3 $ do
     return ()
+
+triggerOnce_ex01 :: IO ()
+triggerOnce_ex01 = withSC3 $ do
+    let d1    = out (k "out" 0) (gate e exceed)
+        e     = envGen KR matched 1 0 2 DoNothing
+                (Envelope [from,to] [1] [EnvLin] Nothing Nothing)
+        to      = 880
+        from    = in' 1 KR 100
+        matched = count ==* 4
+        exceed  = count >* 4
+        count = pulseCount tr 1
+        tr    = impulse KR 1 0
+        d2 = out (k "out" 0) (sinOsc AR freq 0 * 0.3)
+        freq = k "freq" 440
+        k    = control KR
+    mapM_ (async . d_recv . uncurry synthdef) [("d1",d1),("d2",d2)]
+    sendOSC $ bundle immediately
+        [ s_new "d1" (-1) AddToHead 1 [("out",100)]
+        , s_new "d2" (-1) AddAfter (-1) [("out",0)]
+        , n_map (-1) [("freq",100)] ]
+
+
 
 -- in dumped message
 -- audio bus 0 = "c-552556612"
