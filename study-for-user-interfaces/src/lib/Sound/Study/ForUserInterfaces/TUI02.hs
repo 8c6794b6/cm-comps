@@ -348,7 +348,9 @@ class Assignable a where
 
 -- | Assign parameter with given value.
 param :: (Assignable a, Transport m) => String -> a -> Track m ()
-param name value = mapM_ (\nd -> assign nd name value) . tsTargetNodes =<< get
+param name value = do
+    st <- get
+    mapM_ (\nd -> assign nd name value) . tsTargetNodes $ st
 {-# INLINEABLE param #-}
 
 -- | Operator variant of 'param'.
@@ -432,6 +434,24 @@ sendCurve ::
     -> String -- ^ Parameter name.
     -> CurveTo UGen -- ^ Curve shape.
     -> Track m ()
+sendCurve node0 pname ct = sendParamUGen node0 pname $ \node _tr ->
+    let crv     = ctCurve ct
+        toVal   = ctValue ct
+        dur     = ctDur ct
+        matched = in' 1 KR countOut ==* (control KR "count" 0 + 1)
+        osig      = envGen KR matched 1 0 (constant dur) DoNothing
+                    (Envelope
+                     [fromVal,constant toVal] [1] [crv] Nothing Nothing)
+        fromVal = case node of
+            Synth _ _ ps -> case [p | p <- ps, paramName p == pname] of
+                (_ :=  val):_ -> constant val
+                (_ :<- bus):_ ->
+                    latch (in' 1 KR (fromIntegral bus))
+                    (in' 1 KR countOut Sound.SC3.ID.<* control KR "count" 0)
+                _             -> constant (0::Double)
+            _            -> constant (0::Double)
+    in  osig
+{-
 sendCurve node pname ct = do
     ts <- get
     let crv   = ctCurve ct
@@ -440,11 +460,8 @@ sendCurve node pname ct = do
         cnt   = tsBeatCount ts
         beatOffset = tsBeatOffset ts
         currentObus = tsControlBusNum ts
-        nid = nodeId node
-        cnt' | beatOffset <= 0 = 0
-             | otherwise       =
-                 (ceiling (cnt / fromIntegral beatOffset) + 1) *
-                 beatOffset
+        nid     = nodeId node
+        cnt'    = nextOffset beatOffset cnt
         exceed  = in' 1 KR countOut >* control KR "count" 0
         matched = in' 1 KR countOut ==* (control KR "count" 0 + 1)
         fr      = free exceed $ mce $ map (constant . nodeId) psynths
@@ -460,18 +477,14 @@ sendCurve node pname ct = do
                     (in' 1 KR countOut Sound.SC3.ID.<* control KR "count" 0)
                 _             -> constant (0::Double)
             _            -> constant (0::Double)
-        sdef
-            | psynthExist = mrg [osig, fr]
-            | otherwise   = osig
+        sdef | psynthExist = mrg [osig, fr]
+             | otherwise   = osig
         pdefname = concat ["p:",show nid,":",pname,":",show (hashUGen osig)]
         (reusing,obus) = case queryP' (paramName ==? pname) node of
             Just (_ :<- v) -> (True,v)
             _              -> (False,currentObus)
-        pcond p = case p of
-            n := v | n == "out" && v == fromIntegral obus -> True
-            _                                             -> False
-        psynths = queryN (params pcond) (tsCurrentNode ts)
-        psynthExist = not (null psynths)
+        psynths       = queryN (paramCondition obus) (tsCurrentNode ts)
+        psynthExist   = not (null psynths)
         psynthChanged = not (pdefname `elem` map synthName psynths)
         mfunc
             | psynthChanged =
@@ -491,7 +504,8 @@ sendCurve node pname ct = do
         st { tsControlBusNum = if reusing then currentObus else currentObus+1
            , tsMessages = tsMessages st . mfunc
            }
-{-# INLINE sendCurve #-}
+-}
+{-# INLINEABLE sendCurve #-}
 
 -- | Send UGen and map control output to synth specified by given 'SCNode'.
 sendControl ::
@@ -500,25 +514,23 @@ sendControl ::
     -> String
     -> (UGen -> UGen)
     -> Track m ()
+sendControl node pname fu = sendParamUGen node pname $ \_ tr -> fu tr
+{-
 sendControl node pname fu = do
     ts <- get
     let cnt         = tsBeatCount ts
         beatOffset  = tsBeatOffset ts
         currentObus = tsControlBusNum ts
         nid    = nodeId node
-        cnt'   | beatOffset <= 0 = 0
-               | otherwise       =
-                   (ceiling (cnt / fromIntegral beatOffset) + 1) *
-                   beatOffset
+        cnt'   = nextOffset beatOffset cnt
         tr     = gate (control KR "tr" 0) exceed
         exceed = in' 1 KR countOut >* control KR "count" 0
         fr     = free exceed $ mce $ map (constant . nodeId) psynths
         osig   = out (control KR "out" 0) (gate (fu tr) exceed)
         -- Free existing synths with new synthdef with 'free' ugen.
         -- Node id of old synthdef is known at this point.
-        sdef
-            | psynthExist = mrg [osig, fr]
-            | otherwise   = osig
+        sdef | psynthExist = mrg [osig, fr]
+             | otherwise   = osig
         pdefname = concat ["p:",show nid,":",pname,":",show (hashUGen osig)]
         -- output bus mapped to pname of snth
         (reusing,obus) = case queryP' (paramName ==? pname) node of
@@ -527,19 +539,15 @@ sendControl node pname fu = do
         -- Condition for synth controlling specified parameter:
         -- - Parameter is mapped to control rate out bus.
         -- - The out bus is mapped to pname of snth.
-        pcond p = case p of
-            n := v | n == "out" && v == fromIntegral obus -> True
-            _                                             -> False
-        psynths = queryN (params pcond) (tsCurrentNode ts)
-        psynthExist = not (null psynths)
+        psynths = queryN (paramCondition obus) (tsCurrentNode ts)
+        psynthExist   = not (null psynths)
         psynthChanged = not (pdefname `elem` map synthName psynths)
-        (addAction,targetNid) = (AddBefore, nid)
         mfunc
             | psynthChanged =
                 (withCM
                  (d_recv $ synthdef pdefname sdef)
                  (bundle immediately
-                  [s_new pdefname (-1) addAction targetNid
+                  [s_new pdefname (-1) AddBefore nid
                    [("out",fromIntegral obus),("count",fromIntegral cnt')]
                   , n_map (-1) [("tr",metroOut)]
                   , n_map nid [(pname, obus)] ]) :)
@@ -552,7 +560,81 @@ sendControl node pname fu = do
         st { tsControlBusNum = if reusing then currentObus else currentObus+1
            , tsMessages = tsMessages st . mfunc
            }
+-}
 {-# INLINEABLE sendControl #-}
+
+sendParamUGen ::
+    Transport m
+    => SCNode
+    -> String
+    -> (SCNode -> UGen -> UGen)
+    -> Track m ()
+sendParamUGen node pname fp = do
+    -- Free existing synths with new synthdef with 'free' ugen.
+    -- Node id of old synthdef is known at this point.
+    --
+    ts <- get
+    let cnt         = tsBeatCount ts
+        beatOffset  = tsBeatOffset ts
+        currentObus = tsControlBusNum ts
+        nid    = nodeId node
+        cnt'   = nextOffset beatOffset cnt
+        tr     = gate (control KR "tr" 0) exceed
+        exceed = in' 1 KR countOut >* control KR "count" 0
+        fr     = free exceed $ mce $ map (constant . nodeId) psynths
+        osig   = out (control KR "out" 0) (gate (fp node tr) exceed)
+        sdef | psynthExist = mrg [osig, fr]
+             | otherwise   = osig
+        pdefname = concat ["p:",show nid,":",pname,":",show (hashUGen osig)]
+        (reusing,obus) = case queryP' (paramName ==? pname) node of
+            Just (_ :<- v) -> (True,v)
+            _              -> (False,currentObus)
+        psynths = queryN (paramCondition obus) (tsCurrentNode ts)
+        psynthExist   = not (null psynths)
+        psynthChanged = not (pdefname `elem` map synthName psynths)
+        mfunc
+            | psynthChanged =
+                (withCM
+                 (d_recv $ synthdef pdefname sdef)
+                 (bundle immediately
+                  [s_new pdefname (-1) AddBefore nid
+                   [("out",fromIntegral obus),("count",fromIntegral cnt')]
+                  , n_map (-1) [("tr",metroOut)]
+                  , n_map nid [(pname, obus)] ]) :)
+            | otherwise     = id
+
+    when psynthChanged $ do
+        liftIO $ dumpParamChange node pdefname
+
+    modify $ \st ->
+        st { tsControlBusNum = if reusing then currentObus else currentObus+1
+           , tsMessages = tsMessages st . mfunc
+           }
+{-# INLINEABLE sendParamUGen #-}
+
+-- | Get next count for let trigger signal to path.
+nextOffset ::
+    Int      -- ^ Beat offset.
+    -> Float -- ^ Current count.
+    -> Int
+nextOffset beatOffset currentCount
+    | beatOffset <= 0 = truncate currentCount
+    | otherwise       =
+        let count = ceiling (currentCount/fromIntegral beatOffset) + 1
+        in  count * beatOffset
+
+-- | Condition to filter out parameter node using given output bus number.
+--
+-- Condition for synth controlling specified parameter is :
+--
+-- * Parameter is mapped to control rate out bus, and:
+--
+-- * The out bus is mapped to pname of snth.
+--
+paramCondition :: Int -> Condition SCNode
+paramCondition bus = params $ \p -> case p of
+    n := v | n == "out" && v == fromIntegral bus -> True
+    _                                             -> False
 
 -- | Dump information of changed parameter synthdef.
 dumpParamChange ::

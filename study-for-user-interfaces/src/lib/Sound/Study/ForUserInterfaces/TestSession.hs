@@ -83,7 +83,7 @@ synth_ap02 = replaceOut obus osig
     wsig = foldr f isig $ zip "abcde" "fghij"
     f (r,l) acc =
          let fr i = rand i 0.001 0.1
-         in  allpassC acc 0.1 (mce [fr r, fr l]) dcy
+         in  allpassN acc 0.1 (mce [fr r, fr l]) dcy
     isig = in' 2 AR ibus
     obus = k "out" 0
     ibus = k "in" 0
@@ -138,7 +138,8 @@ t107 = withSC3 $ runTrack 107 $ do
         "pan" ==> sustain (sval 0.5)
     effect "ap02" $ do
         "wet" ==> curveTo EnvLin 3 1
-        "dcy" ==> curveTo EnvLin 32 16
+        -- "dcy" ==> curveTo EnvLin 32 16
+        "dcy" ==> linLin (sinOsc KR (1/7) 0 + 2) 1 3 4 16
     effect "lp01" $ do
         "wet" ==> curveTo EnvLin 16 1
         "cf"  ==>
@@ -147,11 +148,15 @@ t107 = withSC3 $ runTrack 107 $ do
             in  linExp ((sinOsc KR df 0 * mul) + 2) 1 3 50 12000
         "rq"  ==> curveTo EnvLin 18 0.8
     router $ do
-        "amp" ==> curveTo EnvCub 16 1
+        "amp" ==> curveTo EnvCub 16 0.8
 
 ng01 :: IO ()
 ng01 = withSC3 $ runTrack 107 $ do
-    return ()
+    -- XXX: Writing below is possible in current types.
+    source "bar0" $
+        source "bar1" $
+        source "bar2" $
+        effect "bar3" (param "wet" (1::Double))
 
 -- | Testing curve.
 t106 :: IO ()
@@ -254,6 +259,31 @@ t108 = withSC3 $ runTrack 108 $ do
 
     router $ do
         "amp" ==> curveTo EnvCub 32 0.28
+
+testCurve01 :: IO ()
+testCurve01 = withSC3 $ runTrack 101 $ do
+    offset 4
+    source "sin03" $ do
+        "freq" ==> sustain
+            (sswitch1
+             (sstutter
+              (srand sinf [1,2])
+              (srand sinf [0..3]))
+             [ sval (linLin (lfClipNoise '0' KR 6 + 2) 1 3 60 240)
+             , sval (linLin (lfClipNoise 'g' KR 7 + 2) 1 3 80 8000)
+             , 1320
+             , sval (linLin (sinOsc KR 3 0 + 2) 1 3 80 8000)
+             ])
+        "dur" ==> curveTo EnvCub 8 2
+        "tr" ==>
+            let df = linExp (lfdNoise3 'U' KR (1/23) + 2) 1 3 5 500
+            in  dust 'd' KR df
+        "pan"  ==> sustain (sval 0.5)
+    effect "ap02" $ do
+        "wet" ==> linLin (lfSaw KR (1/16) 0 + 2) 1 3 0 1 ** 4 `lag` 0.1
+        "dcy" ==> linLin (lfdNoise3 'D' KR (1/31) + 2) 1 3 0 1
+    router $ do
+        "amp" ==> curveTo EnvCub 8 1
 
 nd02_before :: SCNode
 nd02_before =

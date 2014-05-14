@@ -202,7 +202,6 @@ dlt2 = \tr ->
         gt  = toggleFF (coinGate 'g' 0.15 tr)
     in  gate sig gt `lag` 0.001
 
-
 f101 ::
     (Assignable a1, Assignable a2, Assignable a3, Assignable a4)
     => a1 -> a2 -> a3 -> a4 -> IO ()
@@ -225,7 +224,7 @@ f101 t_tr cf wet dlt = withSC3 $ runTrack 101 $ do
         "amp" ==> curveTo EnvCub 1e-9 1.5
 
 t101_2 :: IO ()
-t101_2 = f101 t_tr7 cf2 wet1 dlt1
+t101_2 = f101 t_tr1 cf2 wet1 dlt1
 
 t101 :: IO ()
 t101 = withSC3 $ runTrack 101 $ do
