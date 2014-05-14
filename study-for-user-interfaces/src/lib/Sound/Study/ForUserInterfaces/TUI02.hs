@@ -504,7 +504,7 @@ sendParamUGen node pname fp = do
             | otherwise     = id
 
     when psynthChanged $ do
-        liftIO $ dumpParamChange node pdefname
+        liftIO $ dumpParamChange node pname pdefname
 
     modify $ \st ->
         st { tsControlBusNum = if reusing then currentObus else currentObus+1
@@ -539,14 +539,15 @@ paramCondition bus = params $ \p -> case p of
 -- | Dump information of changed parameter synthdef.
 dumpParamChange ::
     SCNode     -- ^ Node containing parameter.
+    -> String  -- ^ Parameter name.
     -> String  -- ^ Parameter synthdef name.
     -> IO ()
-dumpParamChange node pdefName = do
+dumpParamChange node pname pdefName = do
     putStrLn $ unlines
-        [ "Setting : " ++ synthName node ++ " (" ++ show (nodeId node) ++ ")"
+        [ "Setting : " ++ "\"" ++ pname ++ "\" in " ++
+          synthName node ++ " (" ++ show (nodeId node) ++ ")"
         , "Param   : " ++ pdefName
         ]
-
 
 -- --------------------------------------------------------------------------
 --
