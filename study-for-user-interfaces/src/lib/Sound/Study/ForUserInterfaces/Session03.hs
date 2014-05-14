@@ -168,7 +168,6 @@ cf3 =
     , sseq 1 cf_p1
     , srand 1 [srand 8 cf_p1, cf_p3, cf_p4]]
 
-
 wet1, wet2, wet3 :: Sustain Supply
 wet1 = sustain
        (sseq sinf
@@ -224,7 +223,7 @@ f101 t_tr cf wet dlt = withSC3 $ runTrack 101 $ do
         "amp" ==> curveTo EnvCub 1e-9 1.5
 
 t101_2 :: IO ()
-t101_2 = f101 t_tr1 cf2 wet1 dlt1
+t101_2 = f101 t_tr7 cf2 wet1 dlt1
 
 t101 :: IO ()
 t101 = withSC3 $ runTrack 101 $ do
@@ -488,9 +487,10 @@ t106 = withSC3 $ runTrack 106 $ do
     offset 8
     source "pv03" $ do
         "t_tr" ==>
-            trigger (srand sinf
-                  [ sseq 2 [1,srand 3 [1,0]]
-                  , sseq 24 [0]])
+            trigger
+            (srand sinf
+             [ sseq 2 [1,srand 3 [1,0]]
+             , sseq 24 [0]])
         "pan" ==> linLin (lfdNoise3 'P' KR 13) (-1) 1 0 1
     effect "cmb02" $ do
         "wet" ==> lfdClipNoise 'D' KR 4 * 0.5 + 0.5
@@ -499,7 +499,7 @@ t106 = withSC3 $ runTrack 106 $ do
     effect "dc01" $ do
         "wet" ==> sustain (sval 1)
     router $ do
-        "amp" ==> curveTo EnvCub 1e-9 0
+        "amp" ==> curveTo EnvCub 16 0.8
 
 rdur :: Num a => a
 rdur = 32
