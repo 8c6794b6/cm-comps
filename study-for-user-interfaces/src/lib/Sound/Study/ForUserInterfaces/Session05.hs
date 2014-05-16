@@ -1,6 +1,6 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# OPTIONS_GHC -fno-warn-unused-do-bind #-}
-module Sound.Study.ForUserInterfaces.TestSession where
+module Sound.Study.ForUserInterfaces.Session05 where
 
 import Sound.OSC
 import Sound.SC3 hiding (withSC3)
