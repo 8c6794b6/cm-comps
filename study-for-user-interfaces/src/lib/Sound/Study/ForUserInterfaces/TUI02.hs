@@ -40,19 +40,19 @@ import Sound.SC3.TH.Synthdef (synthdefGenerator)
 import Sound.SC3.Tree
 
 import Sound.Study.ForUserInterfaces.TUI01 as TUI01
-    ( audioBus, defaultTargetNid, sourceOut, masterNid, countOut, metroOut
-    , tui01Synthdefs )
+    ( defaultTargetNid, masterNid, countOut, metroOut, tui01Synthdefs )
+
 
 -- --------------------------------------------------------------------------
 --
--- * Constant values
+-- * Reserved values
 --
 -- --------------------------------------------------------------------------
 
 -- | Get node id of 'TUI01.synth_router' synth node. The group containing router
 -- node must be added with 'addTrack'
 routerNid ::
-    Int -- ^ ID of Group node.
+    Int -- ^ Node ID of group.
     -> Int
 routerNid gid = ((gid + 1) * 100) - 1
 
@@ -60,6 +60,17 @@ routerNid gid = ((gid + 1) * 100) - 1
 controlBusCounter :: Num a => a
 controlBusCounter = 126
 
+-- | Get audio rate bus for given group.
+audioBus :: Int -> Int
+audioBus gid
+    | gid == routerNid masterNid = sourceOut 1 -- any number except masterNid.
+    | otherwise                  = 16 + (gid-100) * 2
+
+-- | Get audio rate bus for given group.
+sourceOut :: Num a => Int -> a
+sourceOut gid
+    | gid == masterNid = 0
+    | otherwise        = 16
 
 -- --------------------------------------------------------------------------
 --
@@ -106,16 +117,15 @@ snoc x f = f . (x:)
 addTrack :: Transport m => m Message
 addTrack = do
     currentNodes <- getRootNode
-    let gid = case queryN (nodeId ==? defaultTargetNid) currentNodes of
-            []    -> 101
-            [g10] -> case g10 of
+    let gid = case queryN' (nodeId ==? defaultTargetNid) currentNodes of
+            Nothing  -> 101
+            Just g10 -> case g10 of
                 Group _ ns | not (null ns) -> nodeId (last ns) + 1
                            | otherwise     -> 101
                 _                          -> error "Node id 10 is not a group"
-            _     -> error "(Re) initialize the setup"
         obus = Dval $ fromIntegral $ audioBus gid
         g = grp gid
-            [ syn' (routerNid gid) "router" ["in"*=obus, "out"*=sourceOut] ]
+            [ syn' (routerNid gid) "router" ["in"*=obus, "out"*=sourceOut gid] ]
     addNode defaultTargetNid (nodify g)
     send (sync $ audioBus gid)
     waitMessage
@@ -124,19 +134,25 @@ addTrack = do
 initializeTUI02 :: Transport m => m ()
 initializeTUI02 = do
     mapM_ (async . d_recv) ($(synthdefGenerator) ++ tui01Synthdefs)
+    let f gid =
+            grp gid
+            [ syn' (routerNid gid) "router"
+              [ "in"*=Dval (fromIntegral (audioBus gid))
+              , "out"*=sourceOut gid ]]
     play $
         grp 0
         [ grp 1
           [ grp defaultTargetNid
-            [ grp (masterNid+1)
-              [ syn "metro" ["out"*=metroOut, "count"*=countOut] ]]
+            (grp (masterNid+1)
+              [ syn "metro"
+                ["out"*=metroOut, "count"*=countOut] ]
+             : map f [101..108])
           , grp masterNid
-            [ syn' (routerNid 99) "router" ["in"*=sourceOut] ]]
+            [ syn' (routerNid masterNid) "router"
+              ["in"*=Dval (fromIntegral (audioBus (routerNid masterNid)))] ]]
         , grp 2 [] ]
     send $ c_set [(controlBusCounter,256)]
     send $ sync (-1)
-    _ <- waitMessage
-    sequence_ $ replicate 8 $ addTrack
 
 -- | Do action with 'Track'.
 runTrack ::
@@ -169,8 +185,15 @@ runTrack groupId trck = do
                    Message pat dtm
                        | pat == "/n_set"  -> acc
                        | pat == "/n_free" -> case dtm of
-                           [Int32 nid] -> m : removeParams nid : acc
-                           _           -> m : acc
+                           -- [Int32 nid] ->
+                           --     let (n_frees,d_frees) = removeParams nid
+                           --     in  m : n_frees : d_frees : acc
+                           [] -> m : acc
+                           _  -> foldr
+                                 (\(Int32 nid) acc' ->
+                                   let (n_frees,d_frees) = removeParams nid
+                                   in  n_frees : d_frees : acc')
+                                 (m:acc) dtm
                    _                      -> m : acc)
              (if currentBusNum /= fromIntegral (tsControlBusNum st)
                 then [c_set
@@ -178,24 +201,18 @@ runTrack groupId trck = do
                 else [])
              (diffMessage n0 n1)
         removeParams nid =
-            -- XXX: Send d_free for parameter synthdef.
-            n_free $ map nodeId $
-            queryN ((("p:" ++ show nid) `isPrefixOf`) . synthName) node
+            let paramNodes =
+                    queryN ((("p:" ++ show nid) `isPrefixOf`) . synthName) node
+            in  (n_free $ map nodeId paramNodes,
+                 d_free $ map synthName paramNodes)
+
         ps = tsMessages st []
         ms = ds ++ ps
 
     liftIO $ do
-        -- putStrLn "=== NODE RUNNING (n0) =============="
-        -- putStrLn $ drawSCNode n0
-        -- putStrLn ""
-        -- putStrLn "=== NODE IN SOURCE TEXT (n1) ======="
-        -- putStrLn $ drawSCNode n1
-        -- putStrLn ""
-
         case ds of
             [] -> return ()
             _  -> putStrLn $ unlines $ map messagePP ds
-
     when (not (null ms)) $
         sendOSC $ bundle immediately ms
 
@@ -288,9 +305,12 @@ genControlledNode fparam mbi name act = do
             obus = fromIntegral $ audioBus gid
             node = Synth nid name (fparam obus)
         in  st { tsTargetNodes =
-                      case queryN (nodeId ==? nid) (tsCurrentNode st) of
-                          [] -> [node] -- initial case.
-                          ns -> ns
+                      -- case queryN (nodeId ==? nid) (tsCurrentNode st) of
+                      --     [] -> [node] -- initial case.
+                      --     ns -> ns
+                      case queryN' (nodeId ==? nid) (tsCurrentNode st) of
+                          Nothing -> [node]
+                          Just n  -> [n]
                , tsSourceNB = node `snoc` (tsSourceNB st)
                }
     act
@@ -300,11 +320,10 @@ genControlledNode fparam mbi name act = do
 router :: Monad m => Track m a -> Track m a
 router act = do
     modify $ \st ->
-        let ibus | tsGroupId st == 99 = 16
-                 | otherwise          = fromIntegral $ audioBus $ tsGroupId st
-            obus | tsGroupId st == 99 = 0
-                 | otherwise          = sourceOut
-            nid  = routerNid $ tsGroupId st
+        let gid  = tsGroupId st
+            ibus = fromIntegral (audioBus gid)
+            obus = sourceOut gid
+            nid  = routerNid gid
             node = Synth nid "router" ["out":=obus,"in":=ibus]
         in  st { tsTargetNodes = queryN (qString "router") (tsCurrentNode st)
                , tsSourceNB = node `snoc` tsSourceNB st
@@ -334,7 +353,7 @@ qString str0 = foldr1 (||?) (map parse (words str0))
 
 -- --------------------------------------------------------------------------
 --
--- * Control parameter
+-- * Assignable
 --
 -- --------------------------------------------------------------------------
 
@@ -543,10 +562,10 @@ dumpParamChange ::
     -> String  -- ^ Parameter synthdef name.
     -> IO ()
 dumpParamChange node pname pdefName = do
-    putStrLn $ unlines
-        [ "Setting : " ++ "\"" ++ pname ++ "\" in " ++
-          synthName node ++ " (" ++ show (nodeId node) ++ ")"
-        , "Param   : " ++ pdefName
+    putStrLn $ unwords
+        [ synthName node ++ " (" ++ show (nodeId node) ++ "):"
+        , "\"" ++ pname ++ "\""
+        , " -- ", pdefName
         ]
 
 -- --------------------------------------------------------------------------

@@ -11,9 +11,6 @@ import Sound.SC3.Tree
 
 import Sound.Study.ForUserInterfaces.TUI02
 
-withSC3 :: Connection TCP a -> IO a
-withSC3 = withTransport (openTCP "127.0.0.1" 57111)
-
 -- --------------------------------------------------------------------------
 --
 -- * Synthdef
@@ -83,7 +80,7 @@ synth_ap02 = replaceOut obus osig
     wsig = foldr f isig $ zip "abcde" "fghij"
     f (r,l) acc =
          let fr i = rand i 0.001 0.1
-         in  allpassN acc 0.1 (mce [fr r, fr l]) dcy
+         in  allpassC acc 0.1 (mce [fr r, fr l]) dcy
     isig = in' 2 AR ibus
     obus = k "out" 0
     ibus = k "in" 0
@@ -107,17 +104,24 @@ initTestSession = withSC3 $ do
     mapM_ (async . d_recv) $(synthdefGenerator)
     initializeTUI02
 
-changes :: IO ()
-changes = t99 >> t107
-
 t99 :: IO ()
 t99 = withSC3 $ runTrack 99 $ do
+    offset 4
     router $ do
-        "amp" ==> line KR 0 1 10 DoNothing
+        "amp" ==> curveTo EnvLin 8 1
 
-t107 :: IO ()
-t107 = withSC3 $ runTrack 107 $ do
+amp :: (Transport m, Assignable val) => val -> Track m ()
+amp = param "amp"
+
+t103 :: IO ()
+t103 = withSC3 $ runTrack 103 $ do
     offset 8
+    let freq :: (Transport m, Assignable val) => val -> Track m ()
+        freq = param "freq"
+        amp  :: (Transport m, Assignable val) => val -> Track m ()
+        amp  = param "amp"
+        ap02 :: Monad m => Track m a -> Track m a
+        ap02 = effect "ap02"
     source "sin03" $ do
         "tr" ==>
             trigger
@@ -125,21 +129,22 @@ t107 = withSC3 $ runTrack 107 $ do
               [ sseq 1 [1,0,0,srand 1 [1,0]]
               , sseq 2 [srand 1 [1,0],0] ])
         "dur" ==> curveTo EnvLin 8 0.32
-        "freq" ==>
-            sustain
+        freq $ sustain
             (midiCPS
              (sstutter 4
               ((sseq sinf [4,9,5,8,6,7] * 12) +
                (sseq sinf [0,3,5,7,10]))))
         "atk" ==> linLin (lfdNoise0 'A' KR (1/5)) (-1) 1 0.001 0.999
-        "sus" ==> sustain (sval (linLin (sinOsc KR (1/3) 0) (-1) 1 0.1 0.9))
+        -- "sus" ==> sustain (sval (linLin (sinOsc KR (1/3) 0) (-1) 1 0.1 0.9))
+        "sus" ==> linLin (sinOsc KR (1/3) 0 + 2) 1 3 0.05 0.2
         "vlevel" ==> sustain (sval 8)
         "vrate" ==> sustain (sval 2.5)
         "pan" ==> sustain (sval 0.5)
-    effect "ap02" $ do
+    -- effect "ap02" $ do
+    ap02 $ do
         "wet" ==> curveTo EnvLin 3 1
-        -- "dcy" ==> curveTo EnvLin 32 16
-        "dcy" ==> linLin (sinOsc KR (1/7) 0 + 2) 1 3 4 16
+        -- "dcy" ==> curveTo EnvLin 32 12
+        "dcy" ==> linLin (lfdNoise3 'Y' KR (1/13) + 2) 1 3 4 12
     effect "lp01" $ do
         "wet" ==> curveTo EnvLin 16 1
         "cf"  ==>
@@ -147,16 +152,15 @@ t107 = withSC3 $ runTrack 107 $ do
                 mul = linLin (lfdNoise1 'M' KR (1/9)) (-1) 1 0 1
             in  linExp ((sinOsc KR df 0 * mul) + 2) 1 3 50 12000
         "rq"  ==> curveTo EnvLin 18 0.8
+    effect "dc01" $
+        "wet" ==> curveTo EnvLin 8 1
     router $ do
-        "amp" ==> curveTo EnvCub 16 0.8
+        amp $ curveTo EnvCub 16 1
 
 ng01 :: IO ()
-ng01 = withSC3 $ runTrack 107 $ do
-    -- XXX: Writing below is possible in current types.
-    source "bar0" $
-        source "bar1" $
-        source "bar2" $
-        effect "bar3" (param "wet" (1::Double))
+ng01 = withSC3 $ runTrack 103 $ do
+    router $ do
+        "amp" ==> sustain (sval 0)
 
 -- | Testing curve.
 t106 :: IO ()
@@ -173,18 +177,18 @@ t106 = withSC3 $ runTrack 106 $ do
              , sseq 2 [1,0]
              , sseq 1 [1,0,0,1]
              , sseq 4 [1]])
-        "pan"  ==> curveTo EnvLin 8 0.5
+        "pan" ==> curveTo EnvLin 8 0.5
     effect "ap02" $ do
         "wet" ==> curveTo EnvLin 8 0.5
         "dcy" ==>
-            (let fq = linExp (lfdNoise1 'A' KR (1/32) + 2) 1 3 (1/3) 3
-             in  lfTri KR fq 0 * 0.5 + 0.5)
+            let fq = linExp (lfdNoise1 'A' KR (1/32) + 2) 1 3 (1/3) 3
+            in  lfTri KR fq 0 * 0.5 + 0.5
     router $ do
-        "amp" ==> curveTo EnvCub 24 0.6
+        "amp" ==> curveTo EnvCub 16 0
 
 -- | Using same synthdef multiple times in one track.
-t109 :: IO ()
-t109 = withSC3 $ runTrack 109 $ do
+t107 :: IO ()
+t107 = withSC3 $ runTrack 107 $ do
     offset 8
     source' 0 "sin04" $ do
         "freq" ==> sustain
@@ -197,22 +201,23 @@ t109 = withSC3 $ runTrack 109 $ do
         "tr" ==> trigger
             (srand sinf [sseq 1 [1,1,0,1, 1,1,0], srand 1 [1,0] ])
         "pan"  ==> sustain (sval 0)
-    let fin = in' 1 KR 428
-        tin = in' 1 KR 429
+    let fin = in' 1 KR 286
+        tin = in' 1 KR 287
+        vib rate amount = lfTri KR rate 0 * amount
     source' 1 "sin04" $ do
-        "freq" ==> fin * 2
+        "freq" ==> fin * 2 + vib 3 1.5
         "tr"   ==> tin
         "pan"  ==> sustain (sval (-0.3))
     source' 2 "sin04" $ do
-        "freq" ==> fin * 0.5
+        "freq" ==> (fin * 0.5) + vib 0.3 8
         "tr"   ==> tin
         "pan"  ==> sustain (sval 0.3)
     source' 3 "sin04" $ do
-        "freq" ==> fin * 0.25
+        "freq" ==> (fin * 0.25) + vib 0.2 11
         "tr"   ==> tin
         "pan"  ==> sustain (sval 0.15)
     source' 4 "sin04" $ do
-        "freq" ==> fin * 3
+        "freq" ==> (fin * 3) + vib 8 0.2
         "tr"   ==> tin
         "pan"  ==> sustain (sval (-0.15))
     effect "ap02" $ do
@@ -221,7 +226,6 @@ t109 = withSC3 $ runTrack 109 $ do
     router $ do
         "amp"  ==> curveTo EnvCub 8 0.6
 
-
 -- | Using same source synth multiple times.
 t108 :: IO ()
 t108 = withSC3 $ runTrack 108 $ do
@@ -229,9 +233,15 @@ t108 = withSC3 $ runTrack 108 $ do
 
     let p = sstutter 2
             (sseq sinf
-             [ sseq 3 [ 0,5,7,0, 5,7,0,5
-                      , 7,0,5,7, srand 1 [0,12],5,7,0]
-             , srand 16 [0,5,7,12]
+             [ sseq (siwhite sinf 8 16)
+               [ sseq 3 [ 0,5,7,0, 5,7,0,5
+                        , 7,0,5,7, srand 1 [0,12],5,7,0]
+               , srand 16 [0,5,7,12]]
+             , sseq (siwhite sinf 8 16)
+               [ sseq 3 [ 5,0,7,5, 0,7,5,0
+                        , 7,5,0,7, 5,0,7,srand 1 [0,12] ]
+               , sseq 1 [ 5,0,7,5, 0,7,5,0
+                        , 7, srand 7 [0,5,7,12]] ]
              ])
         t = sseq sinf [1,0,1,1]
 
@@ -258,7 +268,8 @@ t108 = withSC3 $ runTrack 108 $ do
         "dcy" ==> linLin (lfdNoise3 'D' KR 2 + 2) 1 3 0 1
 
     router $ do
-        "amp" ==> curveTo EnvCub 32 0.28
+        "amp" ==> curveTo EnvCub 24 0.28
+        -- "amp" ==> curveTo EnvCub 8 0
 
 testCurve01 :: IO ()
 testCurve01 = withSC3 $ runTrack 101 $ do
@@ -285,8 +296,17 @@ testCurve01 = withSC3 $ runTrack 101 $ do
     router $ do
         "amp" ==> curveTo EnvCub 8 1
 
-nd02_before :: SCNode
-nd02_before =
+-- | @scsynth@ running with TCP, 127.0.0.1:57111.
+withSC3 :: Connection TCP a -> IO a
+withSC3 = withTransport (openTCP "127.0.0.1" 57111)
+
+-- | Default scsynth, UDP, 127.0.0.1:57110,
+-- withSC3 :: Connection UDP a -> IO a
+-- withSC3 = withTransport (openUDP "127.0.0.1" 57110)
+
+
+nd020 :: SCNode
+nd020 =
     Group 101
     [ Synth 1616049966 "sin02"
       ["out":=18]
@@ -297,8 +317,8 @@ nd02_before =
     , Synth 10199 "router"
       ["in":=18,"out":=16] ]
 
-nd02_after :: SCNode
-nd02_after =
+nd021 :: SCNode
+nd021 =
     Group 101
     [ Synth 53822416 "sin03"
       ["out":=18]
@@ -308,3 +328,17 @@ nd02_after =
       ["out":=18,"in":=18]
     , Synth 10199 "router"
       ["in":=18,"out":=16] ]
+
+nd030 :: SCNode
+nd030 =
+    Group 0
+    [ Group 1 []
+    , Group 2 []]
+
+nd031 :: SCNode
+nd031 =
+    Group 0
+    [ Group 1
+      [ Group 10 []
+      , Group 11 [] ]
+    , Group 2 []]
