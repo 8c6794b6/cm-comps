@@ -110,9 +110,6 @@ t99 = withSC3 $ runTrack 99 $ do
     router $ do
         "amp" ==> curveTo EnvLin 8 1
 
-amp :: (Transport m, Assignable val) => val -> Track m ()
-amp = param "amp"
-
 t103 :: IO ()
 t103 = withSC3 $ runTrack 103 $ do
     offset 8
@@ -120,8 +117,6 @@ t103 = withSC3 $ runTrack 103 $ do
         freq = param "freq"
         amp  :: (Transport m, Assignable val) => val -> Track m ()
         amp  = param "amp"
-        ap02 :: Monad m => Track m a -> Track m a
-        ap02 = effect "ap02"
     source "sin03" $ do
         "tr" ==>
             trigger
@@ -141,10 +136,9 @@ t103 = withSC3 $ runTrack 103 $ do
         "vrate" ==> sustain (sval 2.5)
         "pan" ==> sustain (sval 0.5)
     -- effect "ap02" $ do
-    ap02 $ do
-        "wet" ==> curveTo EnvLin 3 1
-        -- "dcy" ==> curveTo EnvLin 32 12
-        "dcy" ==> linLin (lfdNoise3 'Y' KR (1/13) + 2) 1 3 4 12
+    --     "wet" ==> curveTo EnvLin 3 1
+    --     -- "dcy" ==> curveTo EnvLin 32 12
+    --     "dcy" ==> linLin (lfdNoise3 'Y' KR (1/13) + 2) 1 3 4 12
     effect "lp01" $ do
         "wet" ==> curveTo EnvLin 16 1
         "cf"  ==>
@@ -155,7 +149,7 @@ t103 = withSC3 $ runTrack 103 $ do
     effect "dc01" $
         "wet" ==> curveTo EnvLin 8 1
     router $ do
-        amp $ curveTo EnvCub 16 1
+        amp $ curveTo EnvCub 16 0
 
 ng01 :: IO ()
 ng01 = withSC3 $ runTrack 103 $ do
@@ -184,52 +178,78 @@ t106 = withSC3 $ runTrack 106 $ do
             let fq = linExp (lfdNoise1 'A' KR (1/32) + 2) 1 3 (1/3) 3
             in  lfTri KR fq 0 * 0.5 + 0.5
     router $ do
-        "amp" ==> curveTo EnvCub 16 0
+        "amp" ==> curveTo EnvCub 8 0
+
 
 -- | Using same synthdef multiple times in one track.
 t107 :: IO ()
 t107 = withSC3 $ runTrack 107 $ do
+    let sus name val = name ==> sustain val
+        trg name val = name ==> trigger val
     offset 8
     source' 0 "sin04" $ do
-        "freq" ==> sustain
+        sus "freq"
             (midiCPS
-              (sseq sinf [0,4,5,7, 2,4,5,7] +
-               (sstutter
-                (srand sinf [1,1,1,2,4,8])
-                (12 * srand sinf [3,4..8]))
-             ))
-        "tr" ==> trigger
-            (srand sinf [sseq 1 [1,1,0,1, 1,1,0], srand 1 [1,0] ])
-        "pan"  ==> sustain (sval 0)
-    let fin = in' 1 KR 286
-        tin = in' 1 KR 287
+             ((sstutter (siwhite sinf 1 5)
+              (sseq sinf
+               [ srand 1 [-12,0], 2, 5, srand 1 [7, 14]
+               , 2,7,5,7 ]))
+              +
+              (12 * sseq sinf [2,3,6,5, 6,5,6,5 ,6,7,6,9, 5])
+              +
+              sstutter (sibrown sinf 1 128 8)
+              (srand sinf [0,2,5,7]))
+             -- (sswitch1
+             --  (sstutter
+             --   (srand sinf [1,2,4,8,16])
+             --   (sseq sinf [0,1,2]))
+             --  [ srand sinf [48,60,72]
+             --  , sibrown sinf 20 100 1
+             --  , siwhite sinf 20 100 ])
+            )
+        trg "tr"
+            (srand sinf
+             [ sseq 1 [1,1,0,1, 1,1,0]
+             , srand 1 [1,0] ])
+        sus "pan" (sval 0)
+    let ncond = synthName ==? "sin04"
+        fin = input 107 ncond (paramName ==? "freq")
+        tin = input 107 ncond (paramName ==? "tr")
         vib rate amount = lfTri KR rate 0 * amount
     source' 1 "sin04" $ do
-        "freq" ==> fin * 2 + vib 3 1.5
-        "tr"   ==> tin
+        "freq" ==> fin (\sig -> (sig*1.5) + vib 3 1.5)
+        "tr"   ==> tin id
         "pan"  ==> sustain (sval (-0.3))
     source' 2 "sin04" $ do
-        "freq" ==> (fin * 0.5) + vib 0.3 8
-        "tr"   ==> tin
+        "freq" ==> fin (\sig -> (sig*1.003) + vib 0.3 8)
+        "tr"   ==> tin id
         "pan"  ==> sustain (sval 0.3)
     source' 3 "sin04" $ do
-        "freq" ==> (fin * 0.25) + vib 0.2 11
-        "tr"   ==> tin
+        "freq" ==> fin (\sig -> (sig*3.002) + vib 0.2 11)
+        "tr"   ==> tin id
         "pan"  ==> sustain (sval 0.15)
     source' 4 "sin04" $ do
-        "freq" ==> (fin * 3) + vib 8 0.2
-        "tr"   ==> tin
+        "freq" ==> fin (\sig -> (sig*4.008) + vib 8 0.2)
+        "tr"   ==> tin id
+        "pan"  ==> sustain (sval (-0.15))
+    source' 5 "sin04" $ do
+        "freq" ==> fin (\sig -> (sig*0.508) + vib 7 9.32)
+        "tr"   ==> tin (\tr -> pulseDivider tr 0 3)
         "pan"  ==> sustain (sval (-0.15))
     effect "ap02" $ do
-        "wet"  ==> linLin (lfSaw KR (1/32) 0) (-1) 1 0 1 `lag` 2
-        "dcy"  ==> linLin (lfdNoise3 'D' KR (1/5)) (-1) 1 0 1
+        "wet"  ==> (1 - squared (lfdNoise3 'D' KR (1/5)))
+        "dcy"  ==> linLin (lfTri KR (1/32) 0) (-1) 1 0 1 `lag` 2
+
+    effect "dc01" $ do
+        sus "wet" (sval 1)
     router $ do
-        "amp"  ==> curveTo EnvCub 8 0.6
+        "amp"  ==> curveTo EnvCub 16 0
 
 -- | Using same source synth multiple times.
 t108 :: IO ()
 t108 = withSC3 $ runTrack 108 $ do
-    offset 32
+    -- offset 32
+    offset 2
 
     let p = sstutter 2
             (sseq sinf
@@ -269,7 +289,7 @@ t108 = withSC3 $ runTrack 108 $ do
 
     router $ do
         "amp" ==> curveTo EnvCub 24 0.28
-        -- "amp" ==> curveTo EnvCub 8 0
+        -- "amp" ==> curveTo EnvCub 1e-9 0
 
 testCurve01 :: IO ()
 testCurve01 = withSC3 $ runTrack 101 $ do

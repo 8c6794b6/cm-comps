@@ -6,6 +6,7 @@
 {-# LANGUAGE NoMonomorphismRestriction #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# OPTIONS_GHC -fno-warn-unused-do-bind #-}
+{-# OPTIONS_GHC -fcontext-stack=128 #-}
 module Sound.Study.ForUserInterfaces.Session04 where
 
 import Sound.OSC
@@ -60,11 +61,44 @@ initSession04 = withSC3 $ do
 
 t99 :: IO ()
 t99 = withSC3 $ runTrack 99 $ do
-    offset 8
-    effect "cmb03" $ do
-        "wet" ==> curveTo EnvLin 32 1
-        "dlt" ==> sustain (sval 0.38)
-        "dcy" ==> curveTo EnvLin 64 8
+    offset 4
+
+    -- effect "cmb03" $ do
+    --     "wet" ==> -- curveTo EnvLin 32 1
+    --         sustain
+    --         (sstutter 2
+    --          (sseq sinf
+    --           (li
+    --            -- XXX: context reduction size has limitation.
+    --            -- Use quosi-quote?
+    --            0 0 1 0  0 0 1 0  0 0 1 0  0 0 1 0
+    --            0 0 1 0  0 0 1 0  0 1 0 1  0 1 0 1
+    --            0 1 0 1  0 1 0 1  0 0 1 0  1 0 1 0
+    --            1 0 0 0  1 0 0 0  1 0 0 1  0 1 0 1
+    --           )))
+    --         -- (sstutter
+    --         --  (siwhite sinf 1 3 * 4)
+    --         --  (srand sinf (li 0 0 0 0 1)))
+    --     "dcy" ==>
+    --         let df = tExpRand 'F' 1.7 5 (dust 'T' KR (1/4))
+    --         -- in  (sinOsc KR df 0 + 1) * 0.8
+    --         in  linExp (lfdNoise0 'd' KR 0.7 + 2) 1 3 0.5 2
+    --         -- \_tr -> constant 0.4
+    --     "dlt" ==> \tr ->
+    --         -- linExp (lfdNoise3 'a' KR 3.59 +2) 1 3 (recip 50) (recip 10)
+    --         -- sustain (sval 0.2231)
+    --         let tr' = coinGate 'T' (5/8) tr
+    --         in  (60/120) / (tIRand 'a' 2 16 tr')
+    --         -- in  tExpRand 'a' 0.1132 0.44 tr'
+
+    -- effect "eq02" $ do
+    --     "wet"   ==> curveTo EnvLin 32 1
+    --     "lfreq" ==> curveTo EnvCub 12 0.98
+    --     "hfreq" ==> curveTo EnvCub 12 0.02
+
+    effect "dc01" $ do
+        "wet" ==> curveTo EnvLin 8 1
+
     router $ do
         "amp" ==> curveTo EnvCub 16 1.2
 
@@ -72,45 +106,46 @@ t106 :: IO ()
 t106 = withSC3 $ runTrack 106 $ do
     offset 8
     source "fm01" $ do
-        (param "freq"
-         (sustain
+        param "freq"
+            (sustain
 
-          -- (midiCPS
-          --  (sstutter
-          --   (srand sinf [1,2,4,8])
-          --   (srand sinf [0,3,7] +
-          --    (12 * sseq sinf
-          --     [3,5,5,srand 1 [3,8], 3,5,7,5 ]))))
-          -- (sseq sinf [0,7,12,0, 7,12,0,24] + 60)
+             -- (midiCPS
+             --  (sstutter
+             --   (srand sinf [1,2,4,8])
+             --   (srand sinf [0,3,7] +
+             --    (12 * sseq sinf
+             --     [3,5,5,srand 1 [3,8], 3,5,7,5 ]))))
+             -- (sseq sinf [0,7,12,0, 7,12,0,24] + 60)
 
-          (midiCPS
-           (sstutter
-            -- (1 * sseq sinf [2,1,4,1])
-            (srand sinf [2,4] * sseq sinf [2,2,1,3])
-            (let x = srand 1 [0,3,7,10]
-             in  sseq sinf
-                 [ sseq 3
-                   [ sseq 2 [0,3,x,0, 3,x,0,x]
-                   , sseq 2 [0,3,x,10, 10,x,3,0] ]
-                 , sseq 1 [0,x,3,x,7,x,10,x]
-                 , srand 17 [0,3,x,7]
-                 ] +
-                 sstutter
-                 (srand sinf [1,2,4])
-                 (srand sinf [0,-3,0,0,0,0,2]) +
-                 sseq sinf
-                  [ 3,5,7,5
-                  , srand 1 [3,5],5,7,5] * 12)))
-          -- (midiCPS
-          --  (sseq sinf [-24,7,12,0, 7,12,0,24] + 36))
-          -- (sseq sinf [0,7,12,0, 7,12,0,))
-          -- (sswitch
-          --  (sstutter (srand sinf [1,2,4,8,16])
-          --    (srand sinf [0,1]))
-          --      [ sval
-          --        (linExp (lfdNoise3 'F' KR (1/2) + 2) 1 3 110 1380)
-          --      , midiCPS (sseq sinf [0,7,12,0, 7,12,0,24] + 60)])
-         ))
+             (midiCPS
+              (sstutter
+               -- (1 * sseq sinf [2,1,4,1])
+               (srand sinf [1,2,4,8] * sseq sinf [2,2,1,3])
+               (let x = srand 1 [0,3,7,10]
+                in  sseq sinf
+                    [ sseq 3
+                      [ sseq 2 [0,3,x,0, 3,x,0,x]
+                      , sseq 2 [0,3,x,10, 10,x,3,0] ]
+                    , sseq 1 [0,x,3,x,7,x,10,x]
+                    , srand 17 [0,3,x,7]
+                    ] +
+                    sstutter
+                    (srand sinf [1,2,4])
+                    (srand sinf [0,-3,0,0,0,0,2]) +
+                    sseq sinf
+                    [ 3,5,7,5
+                    , srand 1 [3,5],5,7,5] * 12)))
+
+             -- (midiCPS
+             --  (sseq sinf [-24,7,12,0, 7,12,0,24] + 36))
+             -- (sseq sinf [0,7,12,0, 7,12,0,))
+             -- (sswitch
+             --  (sstutter (srand sinf [1,2,4,8,16])
+             --    (srand sinf [0,1]))
+             --      [ sval
+             --        (linExp (lfdNoise3 'F' KR (1/2) + 2) 1 3 110 1380)
+             --      , midiCPS (sseq sinf [0,7,12,0, 7,12,0,24] + 60)])
+            )
         param "mfac"
             -- linExp (lfdNoise3 'M' KR 5 + 2) 1 3 0.25 4
             -- (sustain
@@ -123,8 +158,19 @@ t106 = withSC3 $ runTrack 106 $ do
              (sstutter
               (sseq sinf [1,1,2])
               (sseq sinf [ 1,2,srand 1 [3,5,7] ,1
-                         , 1,2,srand 1 [1,2,4,8,16], 2] * 0.25
-              )))
+                         , 1,2,srand 1 [1,2,4,8,16], 2] * 0.25))
+
+             -- (sseq sinf
+             --  (li
+             --   (sseq 4
+             --    (li (siwhite 1 0 10) 1 2 3  4 0 0 0))
+             --   (sgeom 32 (0.6*(1.12**32)) (recip 1.12))
+             --   (sstutter
+             --    (sseq sinf (li 2 1 1))
+             --    (swhite 8 0 9))
+             --   (sgeom 32 0.6 1.12)
+             --  ))
+            )
             -- (\tr ->
             --   let vs = mce [0.25,0.75,1,1.5,2,2.5,8]
             --   in  tChoose 'v' (coinGate 'g' 0.5 tr) vs `lag` 0.08))
@@ -136,16 +182,37 @@ t106 = withSC3 $ runTrack 106 $ do
             --    , srand 8 [0,0.5,2,8,10,12] ])))
             -- linLin (squared (lfdNoise3 'd' KR 1.8)) 0 1 0 8
             sustain
+
+            -- (sseq sinf
+            --  (li
+            --   (sseq 4
+            --    (li (siwhite 1 0 10) 1 2 3  4 0 0 0))
+            --   (sgeom 32 (0.6*(1.12**32)) (recip 1.12))
+            --   (sstutter
+            --    (sseq sinf (li 2 1 1))
+            --    (swhite 8 0 9))
+            --   (sgeom 32 0.6 1.12)
+            --  ))
+
+            -- (sstutter
+            --   (srand sinf [1,2,4])
+            --   (sseq sinf
+            --    [ sseq 3 [8,7,0,6, 8,7,6,0]
+            --    , swhite 8 0 10 ]))
+
+            (sstutter
+             (srand sinf (li 1 2 4))
+             (sseq sinf
+              (li
+               (sseq 3 (li 8 7 0 6  8 7 6 0))
+               (swhite 8 0 10)))
+            )
+
+        param "pan"
+            (sustain
              (sstutter
               (srand sinf [1,2,4])
-              (sseq sinf
-               [ sseq 3 [8,7,0,6, 8,7,6,0]
-               , swhite 8 0 10 ]))
-
-        (param "pan"
-         (sustain
-          (sstutter (srand sinf [1,2,4])
-           (swhite sinf (-0.3) 0.3))))
+              (swhite sinf (-0.3) 0.3)))
 
         param "tr"
             -- (trigger
@@ -178,6 +245,15 @@ t106 = withSC3 $ runTrack 106 $ do
              (sval 0)
              -- (sstutter 4
              --  (sseq sinf
+             --   (li
+             --    (sseq 3 (li 0 0 0 1))
+             --    (srand 2 (li 0 1)) 1 1
+             --    (sseq 3
+             --     (li 0 (srand 1 (li 0 1)) 0 (srand 1 (li 0 1))))
+             --    (srand 1 (li 1 0)) 1 1 1)))
+
+             -- (sstutter 4
+             --  (sseq sinf
              --   [ sseq 3 [0,0,0,1]
              --   , srand 2 [1,0], 1,1
              --   , sseq 3 [0,srand 1 [0,1], 0,srand 1 [0,1]]
@@ -196,14 +272,15 @@ t106 = withSC3 $ runTrack 106 $ do
             -- linLin (lfdNoise3 'Y' KR (1/64)) (-1) 1 0.003 0.8
         param "dcy" (curveTo EnvCub 32 8)
 
-
     effect "dc01" $
         "wet" ==> curveTo EnvSin 4 1
 
     router $ do
-        param "amp" (curveTo EnvCub 32 0)
+        param "amp" (curveTo EnvCub 16 0)
         -- param "amp" (squared (lfdNoise3 'a' KR (1/9)) * 0.8)
 
+
+-- list builder
 
 class BuildList a r | r -> a where
     build' :: [a] -> a -> r
@@ -214,8 +291,9 @@ instance BuildList a [a] where
 instance BuildList a r => BuildList a (a->r) where
     build' l x = \y -> build' (x:l) y
 
-bl :: BuildList a r => a -> r
-bl x = build' [] x
+li :: BuildList a r => a -> r
+li x = build' [] x
+
 
 -- --------------------------------------------------------------------------
 --

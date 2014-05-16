@@ -65,6 +65,7 @@ controlBusCounter = 126
 audioBus :: Int -> Int
 audioBus gid
     | gid == routerNid masterNid = sourceOut 1 -- any number except masterNid.
+    | gid == masterNid           = sourceOut 1 -- again, for effect.
     | otherwise                  = 16 + (gid-100) * 2
 
 -- | Get audio rate bus for given group.
@@ -261,7 +262,7 @@ offset count = modify $ \st -> st {tsBeatOffset = count}
 -- | Apply parameter actions to nodes specified by query string.
 source ::
     Monad m
-    => String     -- ^ Query string, see 'qString'.
+    => String     -- ^ Synthdef name.
     -> Track m a  -- ^ Action for parameter.
     -> Track m a
 source = genControlledNode (\obus -> ["out":=obus]) Nothing
@@ -320,7 +321,7 @@ router act = do
             obus = sourceOut gid
             nid  = routerNid gid
             node = Synth nid "router" ["out":=obus,"in":=ibus]
-        in  st { tsTargetNodes = queryN (qString "router") (tsCurrentNode st)
+        in  st { tsTargetNodes = queryN (synthName ==? "router") (tsCurrentNode st)
                , tsSourceNB = node `snoc` tsSourceNB st
                }
     act
@@ -398,9 +399,9 @@ newtype Sustain a = Sustain {unSustain :: a}
 sustain :: a -> Sustain a
 sustain = Sustain
 
-instance Assignable (Sustain Double) where
-    assign nd name (Sustain val) = do
-        sendControl nd name (\_ -> constant val)
+instance Assignable (Sustain UGen) where
+    assign nd name (Sustain ug) = do
+        sendControl nd name (\_ -> ug)
     {-# INLINEABLE assign #-}
 
 instance Assignable (Sustain Supply) where
@@ -466,6 +467,44 @@ sendCurve node0 pname ct = sendParamUGen node0 pname $ \node _tr ->
             _            -> constant (0::Double)
     in  osig
 {-# INLINEABLE sendCurve #-}
+
+data Input = Input Int (Condition SCNode) (Condition SynthParam) (UGen -> UGen)
+
+-- | Route input signal from other node.
+input ::
+    Int -- ^ Group node ID to query.
+    -> Condition SCNode -- ^ Condition to query synth.
+    -> Condition SynthParam -- ^ Condition to query param.
+    -> (UGen->UGen) -- ^ Function applied to input.
+    -> Input
+input = Input
+
+instance Assignable Input where
+    assign node pname (Input gid scond pcond fu) = do
+        st <- get
+        let -- Building node from `tsSourceNB st []' will not work since
+            -- parameter names and mapped bus numbers are not tracked.
+            -- Currently using SCNode built from `/g_queryTree.reply' message.
+            tmpNode = tsCurrentNode st
+            gnode   = queryN' (nodeId ==? gid) tmpNode
+            snode   = queryN' scond =<< gnode
+            mbprm   = queryP' pcond =<< snode
+            -- mbprm = queryN' (nodeId ==? gid) tmpNode >>=
+            --         queryN' scond >>=
+            --         queryP' pcond
+
+        -- liftIO $ mapM_ putStrLn
+        --     ["tmpNode:" ++ show tmpNode
+        --     ,"gnode:" ++ show gnode
+        --     ,"snode:" ++ show snode
+        --     ,"mbprm:" ++ show mbprm]
+
+        case mbprm of
+            Just (_ :<- bus) ->
+                let bus' = fromIntegral bus
+                in  sendControl node pname (\_ -> fu (in' 1 KR bus'))
+            _                -> return ()
+
 
 -- | Send UGen and map control output to synth specified by given 'SCNode'.
 sendControl ::

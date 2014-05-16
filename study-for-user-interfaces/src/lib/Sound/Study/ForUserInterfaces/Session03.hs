@@ -1,4 +1,7 @@
 {-# LANGUAGE TemplateHaskell #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE FunctionalDependencies #-}
+{-# LANGUAGE FlexibleInstances #-}
 {-|
 
 Session with textual UI, take 3. Using TUI02.
@@ -7,7 +10,7 @@ Session with textual UI, take 3. Using TUI02.
 module Sound.Study.ForUserInterfaces.Session03 where
 
 import           Sound.OSC
-    (Connection, TCP, UDP, openTCP, openUDP, withTransport)
+    (Connection, TCP, openTCP, withTransport)
 import           Sound.SC3 hiding (withSC3)
 import           Sound.SC3.ID hiding (withSC3)
 import           Sound.SC3.Supply
@@ -238,14 +241,22 @@ t101 = withSC3 $ runTrack 101 $ do
                 sseq sinf
                 [ sseq 24 [0.5]
                 , swhite 8 0 1 ]
-        "t_tr" ==> do
-            trigger $
-                srand sinf
-                [ sseq 1 [1,0,0,0]
-                , sseq 1 [1,0,1,0]
-                , sseq 1 [1,0,0,1]
-                , sseq 1 [1,1,0,1]
-                , sseq 1 [1,1,1,1] ]
+        "t_tr" ==> trigger
+            (
+                -- srand sinf
+                -- [ sseq 1 [1,0,0,0]
+                -- , sseq 1 [1,0,1,0]
+                -- , sseq 1 [1,0,0,1]
+                -- , sseq 1 [1,1,0,1]
+                -- , sseq 1 [1,1,1,1] ]
+                sstutter (sseq sinf [1])
+                (sxrand sinf
+                 [ sseq 1 [1,1,0,1, 1,0,1,1]
+                 , sseq 1 [1,0,0,1, 0,0,1,0]
+                 , sseq 2 [0,1,0,1]
+                 , sseq 1 [0,1,0,1, 0,0,1,0]
+                 , sseq 1 [0,1,1,0, 1,1,0,1]
+                 , sseq 1 [1,srand 7 [1,0]] ])
                 -- srand sinf
                 -- [ sseq 1 [1, 0]
                 -- , sseq 1 [1, 1]
@@ -269,6 +280,7 @@ t101 = withSC3 $ runTrack 101 $ do
                 --   [ 0, 0, 0, 0, srand 4 [0,1]]
                 -- , srand 16 [0,1]
                 -- , sseq 16 [0] ]
+             )
         "cf" ==> do
             let b = 0.05
                 h = 0.96
@@ -280,13 +292,13 @@ t101 = withSC3 $ runTrack 101 $ do
                      , sgeom 4 (0.9*(0.6**4)) (recip 0.6) ]
                 p4 = swhite 8 0 1
             sustain $
-                -- sseq sinf
-                -- [ sseq 3 [sseq 1 p1, sseq 1 p2]
-                -- , srand 1 [sseq 1 p1, p3], p4 ]
-                -- sseq sinf [ sseq 1 p1, sseq 1 p2 ]
                 sseq sinf
                 [ sseq 3 [sseq 1 p1, sseq 1 p2]
-                , sseq 1 p1, srand 1 [p3, p4] ]
+                , srand 1 [sseq 1 p1, p3], p4 ]
+                -- sseq sinf [ sseq 1 p1, sseq 1 p2 ]
+                -- sseq sinf
+                -- [ sseq 3 [sseq 1 p1, sseq 1 p2]
+                -- , sseq 1 p1, srand 1 [p3, p4] ]
                 -- sseq sinf
                 -- [ sseq 1 p1
                 -- , srand 1 [sseq 1 p2, p4]
@@ -304,16 +316,16 @@ t101 = withSC3 $ runTrack 101 $ do
             --  [ sseq 3 [sseq 8 [0]]
             --  , sseq 1 [srand 4 [0,1], sseq 4 [1]] ])
 
-            sustain
-            (sstutter (srand sinf [2,4,8])
-             (srand sinf [1,0]))
-
             -- sustain
-            -- (sseq sinf
-            --  [sstutter 8
-            --   (srand sinf
-            --    [ sseq 1 [0,0,1,0]
-            --    , sseq 1 [0,0,1,1]])])
+            -- (sstutter (srand sinf [2,4,8])
+            --  (srand sinf [1,0]))
+
+            sustain
+            (sseq sinf
+             [sstutter 8
+              (srand sinf
+               [ sseq 1 [0,0,1,0]
+               , sseq 1 [0,0,1,1]])])
 
             -- lfClipNoise 'W' KR 2 * 0.5 + 0.5
             -- curveTo EnvLin 32 0
@@ -330,7 +342,8 @@ t101 = withSC3 $ runTrack 101 $ do
         "wet" ==> sustain (sval 1)
 
     router $ do
-        "amp" ==> curveTo EnvCub 1e-9 1.8
+        -- "amp" ==> curveTo EnvCub 1e-9 1.8
+        "amp" ==> curveTo EnvCub 2 2.1
         -- "amp" ==> curveTo EnvCub 1e-9 0
 
 t102 :: IO ()
@@ -352,21 +365,55 @@ t102 = withSC3 $ runTrack 102 $ do
         "wet" ==> sustain (sval 0.34)
         "dcy" ==> lfCub KR (1/4) 0 * 0.5 + 0.5
     effect "cmb02" $ do
-        -- XXX: Manually typed with printing the contents of current node.
-        -- control bus numbers are from t102's wet, dcy, and dlt for
-        -- "cmb02" synth. E.g;
-        -- > 101 group
-        -- > ...
-        -- >    1425562103 cmb02
-        -- >    dcy: c262 dlt: c263 in: 18.0 wet: c261 out: 18.0
-        -- >    ...
         "wet" ==>
-            curveTo EnvLin 16 0
+            -- curveTo EnvLin 16 0
             -- (lfdNoise3 'W' KR (3/5) * 0.5 + 0.5) ** 4
             -- (lfClipNoise 'd' KR (3/5) * 0.5 + 0.5) `lag` 0.05
             -- in' 1 KR 261
-        "dcy" ==> in' 1 KR 262
-        "dlt" ==> in' 1 KR 263 * 1.25
+            input 101 (synthName ==? "cmb02") (paramName ==? "wet") id
+        "dcy" ==>
+            input 101 (synthName ==? "cmb02") (paramName ==? "dcy") id
+        "dlt" ==>
+            input 101 (synthName ==? "cmb02") (paramName ==? "dlt") id
+            -- in' 1 KR 263 * 1.25
+
+    effect "cmb03" $ do
+        "wet" ==>
+            curveTo EnvLin 32 0
+            -- sustain
+            -- (sstutter 4
+            --  (sseq sinf
+            --   (li
+            --    -- XXX: context reduction size has limitation.
+            --    -- Use quosi-quote?
+            --    0 0 1 0  0 0 1 0  0 0 1 0  0 0 1 0
+            --    0 0 1 0  0 0 1 0  0 1 0 1  0 1 0 1
+            --    0 1 0 1  0 1 0 1  0 0 1 0  1 0 1 0
+            --    1 0 0 0  1 0 0 0  1 0 0 1  0 1 0 1
+            --   )))
+            -- (sstutter
+            --  (siwhite sinf 1 3 * 4)
+            --  (srand sinf (li 0 0 0 0 1)))
+        "dcy" ==>
+            let df = tExpRand 'F' 1.7 5 (dust 'T' KR (1/4))
+            in  linExp (lfdNoise0 'd' KR 0.7 + 2) 1 3 1.6 2
+
+        -- "dlt" ==> \tr ->
+        --     let tr' = coinGate 'T' (5/8) tr
+        --     in  (60/120) / (tIRand 'a' 3 16 tr')
+
+        param "dlt" $
+            let r = sstutter 2
+                    (sseq sinf
+                     (li
+                      8 16 15 (srand 2 (li 1 2 3 4) * 2) 14 2 13)
+                    )
+            in  sustain ((60/120) * recip r)
+
+    effect' 1 "ap02" $ do
+        "wet" ==> curveTo EnvLin 64 0
+        "dcy" ==> sustain (sval 4) -- lfCub KR (1/4) 0 * 0.5 + 0.5
+
     effect "dc01" $ do
         "wet" ==> sustain (sval 1)
     router $ do
@@ -427,7 +474,7 @@ t103 = withSC3 $ runTrack 103 $ do
 
     router $ do
         -- "amp" ==> curveTo EnvCub 4 1
-        "amp" ==> curveTo EnvCub 8 1
+        "amp" ==> curveTo EnvCub 8 0
 
 t104 :: IO ()
 t104 = withSC3 $ runTrack 104 $ do
@@ -459,7 +506,7 @@ t104 = withSC3 $ runTrack 104 $ do
         "dlt" ==> sustain (sval 0.32)
 
     router $ do
-        "amp" ==> curveTo EnvLin 24 0.40
+        "amp" ==> curveTo EnvLin 32 0.40
         -- "amp" ==> curveTo EnvLin 4 0
 
 t105 :: IO ()
@@ -467,7 +514,7 @@ t105 = withSC3 $ runTrack 105 $ do
     offset 8
     source "saw01" $ do
         "lagt" ==> linLin (lfdNoise3 'L' KR (1/3) + 2) 1 3 0.89 1
-        -- "lagt" ==> curveTo EnvSin 16 0.1
+        -- "lagt" ==> curveTo EnvSin 16 0.3
         "freq" ==> do
             let a = sseq 3
                     [ sseq 1 [0,0,7,0, 0,0,7,0,7]
@@ -478,6 +525,9 @@ t105 = withSC3 $ runTrack 105 $ do
                 (sstutter 4
                  (sseq sinf [3,4,5] * 12)) +
                 (sseq sinf [a, b, a + 12, b, a -12, b])
+            -- sustain
+            --     (srand sinf [0,2,5,7] +
+            --      srand sinf [3,4,5] * 12)
         "cf" ==> do
             sustain $
                 (* 0.1) $
@@ -497,8 +547,8 @@ t105 = withSC3 $ runTrack 105 $ do
     effect "dc01" $ do
         "wet" ==> sustain (sval 1)
     router $ do
-        -- "amp" ==> curveTo EnvCub 0.5 0.8
-        "amp" ==> curveTo EnvCub 2 0
+        "amp" ==> curveTo EnvCub 18 0
+        -- "amp" ==> curveTo EnvCub 2 1
 
 t106 :: IO ()
 t106 = withSC3 $ runTrack 106 $ do
@@ -548,3 +598,16 @@ withSC3 = withTransport (openTCP "127.0.0.1" 57111)
 -- | Default scsynth, UDP, 127.0.0.1:57110,
 -- withSC3 :: Connection UDP a -> IO a
 -- withSC3 = withTransport (openUDP "127.0.0.1" 57110)
+
+
+class BuildList a r | r -> a where
+    build' :: [a] -> a -> r
+
+instance BuildList a [a] where
+    build' l x = reverse $ x : l
+
+instance BuildList a r => BuildList a (a->r) where
+    build' l x = \y -> build' (x:l) y
+
+li :: BuildList a r => a -> r
+li x = build' [] x
