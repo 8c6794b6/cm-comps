@@ -16,8 +16,9 @@ of track could be done with invoking same code block in Haskell code.
 
 Known limitation:
 
-* Ordering nodes may not work properly. Might need couple updated in diff
-related functions in hsc3-tree package.
+* Ordering nodes may not work properly, need to remove the node once, then send
+again with new ordering. Might need couple updates in diff related functions in
+hsc3-tree package.
 
 -}
 module Sound.Study.ForUserInterfaces.TUI02 where
@@ -185,9 +186,6 @@ runTrack groupId trck = do
                    Message pat dtm
                        | pat == "/n_set"  -> acc
                        | pat == "/n_free" -> case dtm of
-                           -- [Int32 nid] ->
-                           --     let (n_frees,d_frees) = removeParams nid
-                           --     in  m : n_frees : d_frees : acc
                            [] -> m : acc
                            _  -> foldr
                                  (\(Int32 nid) acc' ->
@@ -305,9 +303,6 @@ genControlledNode fparam mbi name act = do
             obus = fromIntegral $ audioBus gid
             node = Synth nid name (fparam obus)
         in  st { tsTargetNodes =
-                      -- case queryN (nodeId ==? nid) (tsCurrentNode st) of
-                      --     [] -> [node] -- initial case.
-                      --     ns -> ns
                       case queryN' (nodeId ==? nid) (tsCurrentNode st) of
                           Nothing -> [node]
                           Just n  -> [n]
