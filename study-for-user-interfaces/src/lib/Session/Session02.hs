@@ -1,117 +1,44 @@
-{-# LANGUAGE TemplateHaskell #-}
 {-|
+Copyright   : 8c6794b6, 2014
+License     : BSD3
+
+Maintainer  : 8c6794b6@gmail.com
+Stability   : experimental
+Portability : unknown
 
 Session with TUI01, take 2.
 
 -}
-module Sound.Study.ForUserInterfaces.Session02 where
+module Session.Session02 where
 
 import           Sound.OSC
 import           Sound.SC3
 import           Sound.SC3.ID
 import           Sound.SC3.Supply
-import           Sound.SC3.TH.Synthdef (synthdefGenerator)
 import           Sound.SC3.Tree
 
-import           Sound.Study.ForUserInterfaces.TUI01
-import qualified Sound.Study.ForUserInterfaces.Session01 as Session01
+import           Sound.Study.ForUserInterfaces.TUI.TUI01
 
 -- --------------------------------------------------------------------------
 --
--- * Synthdefs
---
--- --------------------------------------------------------------------------
-
-sendSynthdefs :: Transport m => m ()
-sendSynthdefs = mapM_ (async . d_recv) synthdefs
-
-synthdefs :: [Synthdef]
-synthdefs =  Session01.synthdefs ++ $(synthdefGenerator)
-
-synth_sin01 :: UGen
-synth_sin01 = out obus (pan2 osig pan 1)
-  where
-    osig = sinOsc AR freq 0 * aenv * 0.3
-    aenv = envGen KR tr 1 0 dur DoNothing (envPerc 0.01 1)
-    obus = k "out" 0
-    freq = k "freq" 440
-    dur  = k "dur" 0.2
-    pan  = linControl "pan" (-1) 1 0
-    tr   = tr_control "t_tr" 0
-    k    = control KR
-
-linControl :: String -> Double -> Double -> Double -> UGen
-linControl name minv maxv iniv =
-    let iniv' = (iniv - minv) / (maxv - minv)
-        c     = constant
-    in  linLin (control KR name iniv') 0 1 (c minv) (c maxv)
-
-synth_nz01 :: UGen
-synth_nz01 = out obus (pan2 osig pan 1)
-  where
-    osig = resonz (whiteNoise 'W' AR) cf rq * aenv * 0.5
-    aenv = envGen KR tr 1 0 dur DoNothing (envPerc 0.01 1)
-    tr   = tr_control "t_tr" 0
-    dur  = 0.3
-    cf   = linControl "cf" 200 8000 1200
-    rq   = linControl "rq" 0.1 0.95 0.5
-    obus = k "out" 0
-    pan  = linControl "pan" (-1) 1 0
-    k    = control KR
-
-synth_cmb01 :: UGen
-synth_cmb01 = replaceOut obus osig
-  where
-    osig = wsig * wet + isig * (1-wet)
-    wsig = combC isig 1 dlt dct
-    dlt  = control KR "dlt" 0.2
-    dct  = control KR "dct" 2
-    isig = in' 2 AR (control KR "in" 0)
-    wet  = control KR "wet" 0
-    obus = control KR "out" 0
-
-synth_pv03:: UGen
-synth_pv03 = out obus (pan2 osig pan 1)
-    where
-      osig = muld
-      muld = 0.1 * pv_with2Inputs inA inB pv_MagMul * 0.3
-      inA  = mix $ lfSaw AR frqs 0 * 0.1
-      frqs = mce [midiCPS (tChoose i tr (mce pchs))|i<-"abcdefg"]
-      pchs = foldr (\o acc -> map ((+ofst) . (+o)) degs ++ acc) [] octs
-      degs = [0,thrd,7,10]
-      thrd = tIRand '3' 3 4 (coinGate '#' (1/15) tr)
-      octs = take 5 $ iterate (+12) 33
-      ofst = tIRand 'O' (-6) 6 (coinGate 'g' (1/31) tr)
-      tr   = control KR "t_tr" 0
-      inB  = playBuf 1 AR bufn (bufRateScale KR bufn * rt) 1 0 Loop DoNothing
-      rt   = mouseY KR 0.25 4 Exponential 0.1
-      bufn = control KR "bufn" 12
-      obus = control KR "out" 0
-      pan  = linLin (control KR "pan" 0) 0 1 (-1) 1
-
-pv_with2Inputs :: UGen -> UGen -> (UGen -> UGen -> UGen) -> UGen
-pv_with2Inputs sigA sigB fpv = osig
-  where
-    osig = ifft' $ fpv chainA chainB
-    chainA = f 'x' sigA
-    chainB = f 'y' sigB
-    f i sig = fft' (mrg2 (localBuf i 2048 1) (maxLocalBufs 2)) sig
-
-
--- --------------------------------------------------------------------------
---
--- * Control functions
+-- * Setup
 --
 -- --------------------------------------------------------------------------
 
 initSession02 :: IO ()
-initSession02 = withSC3 (initializeTUI01 >> sendSynthdefs)
+initSession02 = withSC3 initializeTUI01
 
 setupSession02 :: IO ()
 setupSession02 = withSC3 $ do
     mapM_ sendSynth $ words "nz01 sin01"
     sendParam (nodeId ==? defaultTargetNid ||?
                nodeId ==? masterNid) "amp" 1 8
+
+-- --------------------------------------------------------------------------
+--
+-- * Control functions
+--
+-- --------------------------------------------------------------------------
 
 param_sin01 :: IO ()
 param_sin01 = withSC3 $ do

@@ -7,56 +7,23 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# OPTIONS_GHC -fno-warn-unused-do-bind #-}
 {-# OPTIONS_GHC -fcontext-stack=128 #-}
-module Sound.Study.ForUserInterfaces.Session04 where
+module Session.Session04 where
 
 import Sound.OSC
 import Sound.SC3 hiding (withSC3)
 import Sound.SC3.ID hiding (withSC3)
 import Sound.SC3.Supply
-import Sound.SC3.TH.Synthdef (synthdefGenerator)
 import Sound.SC3.Tree
 
-import Sound.Study.ForUserInterfaces.TUI02
+import Sound.Study.ForUserInterfaces.TUI.TUI02
+import Session.Synthdefs (synthdefs)
 
-synth_fm01 :: UGen
-synth_fm01 = out obus osig
-  where
-    osig = pan2 sosc pan 1
-    sosc = sinOsc AR freq phs * aenv * 0.3
-    aenv = envGen KR tr 1 0 dur DoNothing
-           (Envelope [0,1,0] [atk,1-atk] [EnvCub] Nothing Nothing)
-    phs  = sinOsc AR (freq*mfac) 0 * idx
-    idx  = k "idx" 1
-    mfac = k "mfac" 1
-    obus = k "out" 0
-    freq = k "freq" 440
-    atk  = k "atk" 1e-3
-    dur  = k "dur" 1
-    pan  = k "pan" 1
-    tr   = tr_control "tr" 0
-    k    = control KR
-
-synth_cmb03 :: UGen
-synth_cmb03 = replaceOut obus osig
-  where
-    osig = wet * wsig + (1-wet) * isig
-    wsig = combC isig 1 dlt dcy
-    dlt  = k "dlt" 0.22
-    dcy  = k "dcy" 4
-    isig = in' 2 AR (k "in" 0)
-    wet  = k "wet" 0
-    obus = k "out" 0
-    k    = control KR
-
-synthdefs :: [Synthdef]
-synthdefs = $(synthdefGenerator)
-
-sendSynthdefs :: IO ()
-sendSynthdefs = withSC3 $ mapM_ (async . d_recv) synthdefs
+sendSynthdefs :: IO Message
+sendSynthdefs =
+    withSC3 . async . foldr1 withCM $ map d_recv $ synthdefs
 
 initSession04 :: IO ()
 initSession04 = withSC3 $ do
-    mapM_ (async . d_recv) $(synthdefGenerator)
     initializeTUI02
 
 t99 :: IO ()
@@ -365,10 +332,6 @@ controlBus_ex01 = withSC3 $ do
     mapM_ (async . d_recv . uncurry synthdef)
         [("def1",synth_def1),("def2",synth_def2),("def3",synth_def3)]
     play nd
-
-audioBus_ex01 :: IO ()
-audioBus_ex01 = withSC3 $ do
-    return ()
 
 triggerOnce_ex01 :: IO ()
 triggerOnce_ex01 = withSC3 $ do

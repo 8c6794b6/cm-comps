@@ -18,7 +18,7 @@ Considering the ideal set of functions to write before writing the
 implementation of functions.
 
 -}
-module Sound.Study.ForUserInterfaces.PreSession where
+module Sound.Study.ForUserInterfaces.Misc.PreSession where
 
 import Data.Monoid
 import System.Random

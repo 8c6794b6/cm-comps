@@ -16,7 +16,7 @@ dedicated for realtime performance. Use other method than OSC score to record
 the audio output of performance.
 
 -}
-module Sound.Study.ForUserInterfaces.TUI01 where
+module Sound.Study.ForUserInterfaces.TUI.TUI01 where
 
 import Control.Concurrent (forkIO, killThread)
 import Control.Monad (foldM, foldM_, forever)

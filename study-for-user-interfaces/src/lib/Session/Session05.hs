@@ -1,15 +1,15 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# OPTIONS_GHC -fno-warn-unused-do-bind #-}
-module Sound.Study.ForUserInterfaces.Session05 where
+module Session.Session05 where
 
 import Sound.OSC
 import Sound.SC3 hiding (withSC3)
 import Sound.SC3.ID hiding (withSC3)
 import Sound.SC3.Supply
-import Sound.SC3.TH.Synthdef (synthdefGenerator)
 import Sound.SC3.Tree
 
-import Sound.Study.ForUserInterfaces.TUI02
+import Sound.Study.ForUserInterfaces.TUI.TUI02
+import Session.Synthdefs (synthdefs)
 
 -- --------------------------------------------------------------------------
 --
@@ -17,81 +17,9 @@ import Sound.Study.ForUserInterfaces.TUI02
 --
 -- --------------------------------------------------------------------------
 
-synth_sin03 :: UGen
-synth_sin03 = out obus osig
-  where
-    osig   = pan2 (sinOsc AR (freq+vib) 0 * aenv * 0.3) pan 1
-    aenv   = envGen KR tr 1 0 dur DoNothing $
-             Envelope [0,1,1,0] [atk,sus,dec] [EnvCub] Nothing Nothing
-    vib    = lfTri KR vrate 0 * vlevel
-    pan    = linLin (k "pan" 0) 0 1 (-1) 1
-    dur    = k "dur" 0.4
-    atk    = k "atk" 0.01
-    sus    = k "sus" 0.29
-    dec    = abs (1 - atk - sus) + 0.001
-    freq   = k "freq" 440
-    vrate  = k "vrate" 3
-    vlevel = k "vlevel" 10
-    tr     = tr_control "tr" 1
-    obus   = k "out" 0
-    k      = control KR
-
-synth_sin04 :: UGen
-synth_sin04 = out obus osig
-  where
-    osig = pan2 (sosc * aenv * 0.3) pan 1
-    sosc = sinOsc AR freq 0
-    aenv = envGen KR tr 1 0 0.3 DoNothing (envPerc 1e-3 1)
-    obus = k "out" 0
-    freq = k "freq" 440
-    pan  = k "pan" 0
-    tr   = tr_control "tr" 0
-    k    = control KR
-
-synth_saw02 :: UGen
-synth_saw02 = out obus osig
-  where
-    osig = pan2 (saw AR freq * aenv * 0.3) pan 1
-    aenv = envGen KR tr 1 0 0.3 DoNothing
-           (Envelope [0,1,1,0] [1e-3,0.2,0.799] [EnvSin] Nothing Nothing)
-    obus = k "out" 0
-    freq = k "freq" 220
-    pan  = k "pan" 0
-    tr   = tr_control "tr" 0
-    k    = control KR
-
-synth_lp01 :: UGen
-synth_lp01 = replaceOut obus osig
-  where
-    osig = wet * wsig + (1-wet) * isig
-    wsig = rlpf isig cf rq
-    isig = in' 2 AR ibus
-    obus = k "out" 0
-    ibus = k "in" 0
-    wet  = k "wet" 0
-    cf   = k "cf" 2000
-    rq   = k "rq" 0.3
-    k    = control KR
-
-synth_ap02 :: UGen
-synth_ap02 = replaceOut obus osig
-  where
-    osig = wet * wsig + (1-wet) * isig
-    wsig = foldr f isig $ zip "abcde" "fghij"
-    f (r,l) acc =
-         let fr i = rand i 0.001 0.1
-         in  allpassC acc 0.1 (mce [fr r, fr l]) dcy
-    isig = in' 2 AR ibus
-    obus = k "out" 0
-    ibus = k "in" 0
-    wet  = k "wet" 0
-    dcy  = k "dcy" 0.5
-    k    = control KR
-
-sendSynthdefs :: IO ()
+sendSynthdefs :: IO Message
 sendSynthdefs =
-    withSC3 $ mapM_ (async . d_recv) $(synthdefGenerator)
-
+    withSC3 . async . foldr1 withCM $ map d_recv synthdefs
 
 -- --------------------------------------------------------------------------
 --
@@ -101,14 +29,13 @@ sendSynthdefs =
 
 initTestSession :: IO ()
 initTestSession = withSC3 $ do
-    mapM_ (async . d_recv) $(synthdefGenerator)
     initializeTUI02
 
 t99 :: IO ()
 t99 = withSC3 $ runTrack 99 $ do
     offset 4
     router $ do
-        "amp" ==> curveTo EnvLin 8 1
+        "amp" ==> curveTo EnvLin 32 0
 
 t103 :: IO ()
 t103 = withSC3 $ runTrack 103 $ do
@@ -149,7 +76,8 @@ t103 = withSC3 $ runTrack 103 $ do
     effect "dc01" $
         "wet" ==> curveTo EnvLin 8 1
     router $ do
-        amp $ curveTo EnvCub 16 0
+        amp $ curveTo EnvCub 16 1
+        -- amp $ curveTo EnvCub 1e-9 0
 
 ng01 :: IO ()
 ng01 = withSC3 $ runTrack 103 $ do
@@ -159,7 +87,7 @@ ng01 = withSC3 $ runTrack 103 $ do
 -- | Testing curve.
 t106 :: IO ()
 t106 = withSC3 $ runTrack 106 $ do
-    offset 4
+    offset 8
     source "sin03" $ do
         "freq" ==> sustain
             (midiCPS
@@ -178,7 +106,8 @@ t106 = withSC3 $ runTrack 106 $ do
             let fq = linExp (lfdNoise1 'A' KR (1/32) + 2) 1 3 (1/3) 3
             in  lfTri KR fq 0 * 0.5 + 0.5
     router $ do
-        "amp" ==> curveTo EnvCub 8 0
+        "amp" ==> curveTo EnvCub 1e-9 0
+        -- "amp" ==> curveTo EnvCub 24 1
 
 
 -- | Using same synthdef multiple times in one track.
@@ -249,8 +178,7 @@ t107 = withSC3 $ runTrack 107 $ do
 t108 :: IO ()
 t108 = withSC3 $ runTrack 108 $ do
     -- offset 32
-    offset 2
-
+    offset 8
     let p = sstutter 2
             (sseq sinf
              [ sseq (siwhite sinf 8 16)
@@ -288,8 +216,8 @@ t108 = withSC3 $ runTrack 108 $ do
         "dcy" ==> linLin (lfdNoise3 'D' KR 2 + 2) 1 3 0 1
 
     router $ do
-        "amp" ==> curveTo EnvCub 24 0.28
-        -- "amp" ==> curveTo EnvCub 1e-9 0
+        -- "amp" ==> curveTo EnvCub 24 0.28
+        "amp" ==> curveTo EnvCub 1e-9 0
 
 testCurve01 :: IO ()
 testCurve01 = withSC3 $ runTrack 101 $ do
@@ -323,42 +251,3 @@ withSC3 = withTransport (openTCP "127.0.0.1" 57111)
 -- | Default scsynth, UDP, 127.0.0.1:57110,
 -- withSC3 :: Connection UDP a -> IO a
 -- withSC3 = withTransport (openUDP "127.0.0.1" 57110)
-
-
-nd020 :: SCNode
-nd020 =
-    Group 101
-    [ Synth 1616049966 "sin02"
-      ["out":=18]
-    , Synth 1777095663 "ap01"
-      ["in":=18,"out":=18]
-    , Synth 1425562103 "cmb02"
-      ["in":=18,"out":=18]
-    , Synth 10199 "router"
-      ["in":=18,"out":=16] ]
-
-nd021 :: SCNode
-nd021 =
-    Group 101
-    [ Synth 53822416 "sin03"
-      ["out":=18]
-    , Synth 112652199 "ap02"
-      ["in":=18,"out":=18]
-    , Synth 690662386 "lp01"
-      ["out":=18,"in":=18]
-    , Synth 10199 "router"
-      ["in":=18,"out":=16] ]
-
-nd030 :: SCNode
-nd030 =
-    Group 0
-    [ Group 1 []
-    , Group 2 []]
-
-nd031 :: SCNode
-nd031 =
-    Group 0
-    [ Group 1
-      [ Group 10 []
-      , Group 11 [] ]
-    , Group 2 []]

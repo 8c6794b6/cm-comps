@@ -9,7 +9,7 @@ Portability  : unknown
 Simple GUI using web browser, done with threepenny-gui.
 
 -}
-module Sound.Study.ForUserInterfaces.SimpleRange where
+module Sound.Study.ForUserInterfaces.GUI.SimpleRange where
 
 import           Control.Concurrent (forkIO, killThread)
 import           Data.Unique (hashUnique, newUnique)

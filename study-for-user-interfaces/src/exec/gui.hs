@@ -5,11 +5,11 @@ import           System.Console.GetOpt
 import           System.Environment (getArgs, getProgName)
 import           System.Exit (exitFailure)
 
-import qualified Sound.Study.ForUserInterfaces.GUI01 as GUI01
-import qualified Sound.Study.ForUserInterfaces.GUI02 as GUI02
-import qualified Sound.Study.ForUserInterfaces.SimpleRange as SimpleRange
-import qualified Sound.Study.ForUserInterfaces.SimpleStatus as SimpleStatus
-import qualified Sound.Study.ForUserInterfaces.SimpleXY as SimpleXY
+import qualified Sound.Study.ForUserInterfaces.GUI.GUI01 as GUI01
+import qualified Sound.Study.ForUserInterfaces.GUI.GUI02 as GUI02
+import qualified Sound.Study.ForUserInterfaces.GUI.SimpleRange as SimpleRange
+import qualified Sound.Study.ForUserInterfaces.GUI.SimpleStatus as SimpleStatus
+import qualified Sound.Study.ForUserInterfaces.GUI.SimpleXY as SimpleXY
 
 data MainModule
     = GUI01

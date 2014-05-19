@@ -1,4 +1,3 @@
-{-# LANGUAGE TemplateHaskell #-}
 {-|
 Copyright   : 8c6794b6, 2014
 License     : BSD3
@@ -11,139 +10,21 @@ Sample session using functions from "Sound.Study.ForUserInterfaces.TUI01", take
 1.
 
 -}
-module Sound.Study.ForUserInterfaces.Session01 where
+module Session.Session01 where
 
 import Control.Applicative ((<$>), (<*>))
 import System.Random
 
-import Sound.OSC
 import Sound.SC3
 import Sound.SC3.ID
 import Sound.SC3.Supply
 import Sound.SC3.Tree
-import Sound.SC3.TH.Synthdef (synthdefGenerator)
 
-import Sound.Study.ForUserInterfaces.TUI01
-
-
--- --------------------------------------------------------------------------
---
--- * Synthdefs
---
--- --------------------------------------------------------------------------
-
--- | Sample synth controlled by mapping control rate bus with signals from
--- demand ugen.
-synth_saw01 :: UGen
-synth_saw01 = out (control KR "out" 0) $ osig
-  where
-    osig  = rlpf (saw AR (mce [freq,freq*1.001])) cf rq  * 0.1 * amp
-    rq    = control KR "rq" 0.1
-    cf    = linExp (control KR "cf" 0.5 + 0.001) 0.001 1.001 20 20000 `lag` lagt
-    freq  = control KR "freq" 440 `lag` lagt
-    lagt  = linExp (control KR "lagt" 0 + 0.001) 0.001 1.001 0.001 1
-    amp   = control KR "amp" 0
-
--- | Percussive synth with 'resonz'ated 'whiteNoise'.
-synth_nz02 :: UGen
-synth_nz02 = out (control KR "out" 0) $ pan2 osig pan 1
-  where
-    osig  = mix (resonz (whiteNoise 'w' AR) (mce [2232,3123,4502]) 0.3 * aenv)
-    aenv  = decay t_tr0 0.2
-    pan   = linLin (control KR "pan" 0.5) 0 1 (-1) 1
-    t_tr0 = tr_control "t_tr0" 0.3
-
--- | Percussive synth with 'sineOsc' and 'saw'.
-synth_bd03 :: UGen
-synth_bd03 = out (control KR "out" 0) $ pan2 osig pan 1
-  where
-    osig  = (sig1 + sig2) * amp
-    sig1  = mix (sinOsc AR (mce frq1s) 0 * aenv1 * 0.3)
-    frq1s = map (*frq1) [1,1.423,2.87,4.12,5.83,7.32]
-    aenv1 = envGen KR t_tr0 1 0 dur1 DoNothing $
-            Envelope [0,1,0] [0.001, 0.999] [EnvCub] (Just 0) Nothing
-    sig2  = saw AR frq2 * aenv2 * 0.2
-    aenv2 = envGen KR t_tr0 1 0 dur2 DoNothing $
-            Envelope [0,1,0.8,0] [0.01,0.98,0.01] [EnvCub] (Just 0) Nothing
-    frq1  = linExp (control KR "frq1" 0.1 + 0.001) 0.001 1.001 20 80
-    frq2  = linExp (control KR "frq2" 0.1 + 0.001) 0.001 1.001 200 2000
-    dur1  = linExp (control KR "dur1" 0.2 + 0.001) 0.001 1.001 0.1 1
-    dur2  = linExp (control KR "dur2" 0.2 + 0.001) 0.001 1.001 0.001 0.01
-    amp   = control KR "amp" 0
-    pan   = linLin (control KR "pan" 0.5) 0 1 (-1) 1
-    t_tr0 = tr_control "t_tr0" 1
-
-synth_poly01 :: UGen
-synth_poly01 = out obus (pan2 osig pan 1)
-  where
-    npoly  = 8
-    osig   = sum $ map fsig [1..npoly::Int]
-    c      = constant
-    fsig i = rlpf (pulse AR freq wd) cf rq * aenv * 0.1
-      where
-        tr   = pulseDivider tr0 (c npoly) (c i)
-        aenv = envGen KR tr 1 0 dur DoNothing $
-               Envelope [0,1,0.8,0] [0.001,0.5,0.4999] [EnvSqr] (Just 0) Nothing
-        freq = gate freq0 tr
-        wd   = linLin (lfdNoise3 i KR (15.2 * aenv)) (-1) 1 0.25 0.5
-        cf   = squared aenv * freq * 8
-        rq   = 0.8
-    freq0 = control KR "freq" 440
-    dur   = linExp (control KR "dur" 0.5 + 0.001) 0.001 1.001 0.1 16
-    tr0   = tr_control "t_tr0" 1
-    pan   = linLin (control KR "pan" 0.5) 0 1 (-1) 1
-    obus  = control KR "out" 0
-
-synth_tuis05 :: UGen
-synth_tuis05 = out obus (pan2 osig pan 1)
-  where
-    osig = sinOsc AR freq phs * aenv * 0.3
-    aenv = envGen KR tr0 1 0 dur DoNothing $
-           Envelope [0,1,0.3,0.2,0] [0.02,0.2,0.78] [EnvCub] (Just 0) Nothing
-    tr0  = tr_control "t_tr0" 1
-    freq = control KR "freq" 440
-    phs  = sinOsc AR (freq * 2.4995) 0 * idx
-    idx  = linLin (control KR "idx" 0) 0 1 0 15
-    pan  = linLin (control KR "pan" 0) 0 1 (-1) 1
-    dur  = linExp (control KR "dur" 0 + 0.001) 0.001 1.001 0.1 8
-    obus = control KR "out" 0
-
--- | Reverb effect with 'allpassN' and foldr.
---
--- Requires /out/ control for specifying audio rate output bus of 'replaceOut',
--- and /in/ control for specifying audio rate input bus.
---
-synth_ap01 :: UGen
-synth_ap01 = replaceOut (control KR "out" 0) osig
-  where
-    osig    = wsig * wet + isig * (1-wet)
-    wsig    = foldr f isig (zipWith mce2 (rs "abcd") (rs "efgh"))
-    f x acc = allpassN acc 0.1 x dcy
-    rs      = map (\i -> rand i 0.001 0.05)
-    isig    = in' 2 AR (control KR "in" 0)
-    wet     = control KR "wet" 0 `lag2` 0.1
-    dcy     = linExp (control KR "dcy" 0.2 + 0.001) 0.001 1.001 0.25 8
-
--- | Eeffect synth with 'rlpf' and 'rhpf', /rq/ values are shared.
-synth_eq02 :: UGen
-synth_eq02 = replaceOut (control KR "out" 0) osig
-  where
-    osig   = wsig * wet + isig * (1-wet)
-    wsig   = rlpf isig0 lfreq rq
-    isig0  = rhpf isig hfreq rq
-    rq     = clip (control KR "rq" 0.5) 0.001 1
-    isig   = in' 2 AR (control KR "in" 0)
-    lfreq  = linExp (control KR "lfreq" 1 + 0.001) 0.001 1.001 20 17000
-    hfreq  = linExp (control KR "hfreq" 0 + 0.001) 0.001 1.001 20 17000
-    wet    = control KR "wet" 0
+import Sound.Study.ForUserInterfaces.TUI.TUI01
 
 -- | Sends synthdefs defined in this Haskell module.
-sendSynthdefs :: Transport m => m ()
-sendSynthdefs = mapM_ (async . d_recv) synthdefs
-
--- | Synthdefs defined in this haskell module.
-synthdefs :: [Synthdef]
-synthdefs = $(synthdefGenerator)
+-- sendSynthdefs :: Transport m => m ()
+-- sendSynthdefs = mapM_ (async . d_recv) synthdefs
 
 -- --------------------------------------------------------------------------
 --
@@ -154,7 +35,7 @@ synthdefs = $(synthdefGenerator)
 -- | Do this before invoking 'sampleSetup'.
 initSession01 :: IO ()
 initSession01 = withSC3 $ do
-    sendSynthdefs
+    -- sendSynthdefs
     initializeTUI01
 
 -- | Sample setup.

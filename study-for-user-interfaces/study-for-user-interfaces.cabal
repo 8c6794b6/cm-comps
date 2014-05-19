@@ -21,18 +21,20 @@ library
   default-language:  Haskell2010
   ghc-options:       -Wall
   exposed-modules:   Graphics.UI.Threepenny.Extra
-                     Sound.Study.ForUserInterfaces.SimpleRange
-                     Sound.Study.ForUserInterfaces.SimpleStatus
-                     Sound.Study.ForUserInterfaces.SimpleXY
-                     Sound.Study.ForUserInterfaces.GUI01
-                     Sound.Study.ForUserInterfaces.GUI02
-                     Sound.Study.ForUserInterfaces.JS
-                     Sound.Study.ForUserInterfaces.TUI01
-                     Sound.Study.ForUserInterfaces.TUI02
-                     Sound.Study.ForUserInterfaces.Session01
-                     Sound.Study.ForUserInterfaces.Session02
-                     Sound.Study.ForUserInterfaces.Session03
+                     Sound.Study.ForUserInterfaces.GUI.SimpleRange
+                     Sound.Study.ForUserInterfaces.GUI.SimpleStatus
+                     Sound.Study.ForUserInterfaces.GUI.SimpleXY
+                     Sound.Study.ForUserInterfaces.GUI.GUI01
+                     Sound.Study.ForUserInterfaces.GUI.GUI02
+                     Sound.Study.ForUserInterfaces.GUI.JS
+                     Sound.Study.ForUserInterfaces.TUI.TUI01
+                     Sound.Study.ForUserInterfaces.TUI.TUI02
                      Paths_study_for_user_interfaces
+  other-modules:     Session.Session01
+                     Session.Session02
+                     Session.Session03
+                     Session.Session04
+                     Session.Session05
   build-depends:     base >=4.6
                    , containers
                    , filepath
@@ -49,8 +51,8 @@ library
                    , threepenny-gui
                    , transformers
 
-executable ui-run
-  main-is:           run.hs
+executable gui
+  main-is:           gui.hs
   hs-source-dirs:    src/exec
   default-language:  Haskell2010
   ghc-options:       -Wall -threaded -rtsopts

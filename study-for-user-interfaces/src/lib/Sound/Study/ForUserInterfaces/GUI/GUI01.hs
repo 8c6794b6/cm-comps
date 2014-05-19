@@ -16,7 +16,7 @@ synthdef, some uses for percussive hit, some for picking up new pitches, and so
 on.
 
 -}
-module Sound.Study.ForUserInterfaces.GUI01 where
+module Sound.Study.ForUserInterfaces.GUI.GUI01 where
 
 import           Control.Arrow (first)
 import           Control.Concurrent (forkIO, killThread)
@@ -37,7 +37,7 @@ import qualified Graphics.UI.Threepenny as UI
 import           Graphics.UI.Threepenny.Core hiding (stepper)
 
 import qualified Graphics.UI.Threepenny.Extra as Extra
-import qualified Sound.Study.ForUserInterfaces.JS as JS
+import qualified Sound.Study.ForUserInterfaces.GUI.JS as JS
 import           Paths_study_for_user_interfaces (getDataDir)
 
 -- --------------------------------------------------------------------------

@@ -1,4 +1,4 @@
-module Sound.Study.ForUserInterfaces.JS
+module Sound.Study.ForUserInterfaces.GUI.JS
     ( getFileName
     , bar
     , toggle

@@ -9,7 +9,7 @@ Portability  : unknown
 Simple GUI to show status of scsynth.
 
 -}
-module Sound.Study.ForUserInterfaces.SimpleStatus where
+module Sound.Study.ForUserInterfaces.GUI.SimpleStatus where
 
 import           Control.Concurrent (forkIO, killThread)
 import           Control.Monad (void)

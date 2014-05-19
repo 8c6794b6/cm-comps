@@ -11,7 +11,7 @@ Graphical user interface, take 2.
 Draws simple GUI with fetching current node from scsynth server.
 
 -}
-module Sound.Study.ForUserInterfaces.GUI02 where
+module Sound.Study.ForUserInterfaces.GUI.GUI02 where
 
 import           Control.Monad (void)
 import           Control.Monad.Reader (runReaderT)

@@ -9,7 +9,7 @@ Portability  : unknown
 Simple example with xy coordinate area.
 
 -}
-module Sound.Study.ForUserInterfaces.SimpleXY where
+module Sound.Study.ForUserInterfaces.GUI.SimpleXY where
 
 import           Control.Monad (void)
 import           Text.Printf (printf)

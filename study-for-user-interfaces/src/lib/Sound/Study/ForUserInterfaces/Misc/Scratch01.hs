@@ -6,10 +6,10 @@ Maintainer  : 8c6794b6@gmail.com
 Stability   : experimental
 Portability : unknown
 
-Miscellaneous functions.
+Scratches, take 1
 
 -}
-module Sound.Study.ForUserInterfaces.Misc where
+module Sound.Study.ForUserInterfaces.Misc.Scratch01 where
 
 import Control.Arrow (first)
 import Control.Concurrent (forkIO, killThread)
@@ -20,7 +20,7 @@ import Sound.OSC
 import Sound.SC3
 import Sound.SC3.ID
 
-import qualified Sound.Study.ForUserInterfaces.GUI01 as GUI01
+import qualified Sound.Study.ForUserInterfaces.GUI.GUI01 as GUI01
 
 
 -- --------------------------------------------------------------------------

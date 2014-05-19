@@ -9,38 +9,52 @@ Maintainer  : 8c6794b6@gmail.com
 Stability   : experimental
 Portability : unknown
 
-Textual user interface, take 2. TUI02 has a concept of 'Track', which aligns
-given source synths and effect synths with parameter controlling adhoc
-UGens. Source and effect synth setup is idemopotent, initialization and update
-of track could be done with invoking same code block in Haskell code.
+Textual user interface, take 2.
 
-Known limitation:
+TUI02 has a concept of 'Track', which aligns given source synths and effect
+synths with parameter controlling adhoc UGens. Source and effect synth setup is
+idemopotent, initialization and update of track could be done with invoking same
+code block in Haskell code.
+
+/Known limitations/:
 
 * Ordering nodes may not work properly, need to remove the node once, then send
 again with new ordering. Might need couple updates in diff related functions in
 hsc3-tree package.
 
+* Returned @/g_queryTree.reply@ could get too large for single UDP communication
+to receive. Current workarounds are: query single group only, or drop support
+for UDP which means support TCP connection only.
+
 -}
-module Sound.Study.ForUserInterfaces.TUI02 where
+module Sound.Study.ForUserInterfaces.TUI.TUI02
+       ( module Sound.OSC
+       , module Sound.SC3
+       , module Sound.SC3.ID
+       , module Sound.SC3.Supply
+       , module Sound.SC3.TH.Synthdef
+       , module Sound.SC3.Tree
+       , module Sound.Study.ForUserInterfaces.TUI.TUI02
+       ) where
 
 import Control.Applicative (Applicative(..))
 import Control.Monad (liftM, when)
 import Control.Monad.State (MonadTrans(..), MonadState(..), StateT(..), modify)
-import Control.Monad.IO.Class (MonadIO(..))
 import Data.Int (Int32)
 import Data.List (isPrefixOf)
 import System.Random (mkStdGen)
 
 import Sound.OSC
-    ( Datum(..), DuplexOSC, RecvOSC(..), Message(..), SendOSC(..)
-    , Transport, bundle, immediately, messagePP, waitDatum, waitMessage
-    )
-import Sound.SC3.ID
-import Sound.SC3.Supply (Supply, evalSupply)
+    -- ( Datum(..), DuplexOSC, RecvOSC(..), Message(..), SendOSC(..)
+    -- , Transport, bundle, immediately, messagePP, waitDatum, waitMessage
+    -- )
+import Sound.SC3 hiding (withSC3)
+import Sound.SC3.ID hiding (withSC3)
+import Sound.SC3.Supply
 import Sound.SC3.TH.Synthdef (synthdefGenerator)
 import Sound.SC3.Tree
 
-import Sound.Study.ForUserInterfaces.TUI01 as TUI01
+import Sound.Study.ForUserInterfaces.TUI.TUI01 as TUI01
     ( defaultTargetNid, masterNid, countOut, metroOut, tui01Synthdefs )
 
 
@@ -97,7 +111,7 @@ instance Transport m => Transport (Track m)
 
 -- | State for single track.
 data TrackState = TrackState
-    { tsGroupId       :: Int
+    { tsGroupId       :: !Int
     , tsBeatOffset    :: Int
     , tsCurrentNode   :: SCNode
     , tsTargetNodes   :: [SCNode]
@@ -136,11 +150,6 @@ addTrack = do
 initializeTUI02 :: Transport m => m ()
 initializeTUI02 = do
     mapM_ (async . d_recv) ($(synthdefGenerator) ++ tui01Synthdefs)
-    let f gid =
-            grp gid
-            [ syn' (routerNid gid) "router"
-              [ "in"*=Dval (fromIntegral (audioBus gid))
-              , "out"*=sourceOut gid ]]
     play $
         grp 0
         [ grp 1
@@ -148,7 +157,13 @@ initializeTUI02 = do
             (grp (masterNid+1)
               [ syn "metro"
                 ["out"*=metroOut, "count"*=countOut] ]
-             : map f [101..108])
+             : flip map [101..108]
+             (\gid ->
+               grp gid
+               [ syn' (routerNid gid) "router"
+                 [ "in"  *= Dval (fromIntegral (audioBus gid))
+                 , "out" *= sourceOut gid ]])
+              )
           , grp masterNid
             [ syn' (routerNid masterNid) "router"
               ["in"*=Dval (fromIntegral (audioBus (routerNid masterNid)))] ]]
@@ -226,7 +241,7 @@ tidyUpParameters n0 =
             Synth i name ps
                 | "p:" `isPrefixOf` name -> acc
                 | otherwise              ->
-                    let ps' = [p | p <-ps
+                    let ps' = [p | p <- ps
                                  , paramName p == "out" || paramName p == "in"]
                     in  Synth i name ps' : acc
         {-# INLINE f #-}
@@ -523,7 +538,7 @@ sendParamUGen ::
     -> (SCNode -> UGen -> UGen)
     -> Track m ()
 sendParamUGen node pname fp = do
-    -- Free existing synths with new synthdef with 'free' ugen.
+    -- Freeing existing synths with new synthdef with 'free' ugen.
     -- Node id of old synthdef is known at this point.
     --
     ts <- get
@@ -587,7 +602,7 @@ nextOffset beatOffset currentCount
 paramCondition :: Int -> Condition SCNode
 paramCondition bus = params $ \p -> case p of
     n := v | n == "out" && v == fromIntegral bus -> True
-    _                                             -> False
+    _                                            -> False
 
 -- | Dump information of changed parameter synthdef.
 dumpParamChange ::
@@ -598,9 +613,8 @@ dumpParamChange ::
 dumpParamChange node pname pdefName = do
     putStrLn $ unwords
         [ synthName node ++ " (" ++ show (nodeId node) ++ "):"
-        , "\"" ++ pname ++ "\""
-        , " -- ", pdefName
-        ]
+        , "\"" ++ pname ++ "\"", " -- ", pdefName ]
+
 
 -- --------------------------------------------------------------------------
 --
