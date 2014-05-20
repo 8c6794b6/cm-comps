@@ -217,6 +217,7 @@ runTrack groupId trck = do
         removeParams nid =
             let paramNodes =
                     queryN ((("p:" ++ show nid) `isPrefixOf`) . synthName) node
+                -- XXX: Check whether "/d_free" frees running nodes.
             in  (n_free $ map nodeId paramNodes,
                  d_free $ map synthName paramNodes)
 

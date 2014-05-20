@@ -209,15 +209,15 @@ t106 = withSC3 $ runTrack 106 $ do
              --  [ sseq 4 [0,0,srand 1 [1,0],0, 0,1,0,1]
              --  , sseq 2 [sseq 4 [0], srand 4 [1,0]]
              --  , srand 16 [0,1] ])
-             (sval 0)
-             -- (sstutter 4
-             --  (sseq sinf
-             --   (li
-             --    (sseq 3 (li 0 0 0 1))
-             --    (srand 2 (li 0 1)) 1 1
-             --    (sseq 3
-             --     (li 0 (srand 1 (li 0 1)) 0 (srand 1 (li 0 1))))
-             --    (srand 1 (li 1 0)) 1 1 1)))
+             -- (sval 0)
+             (sstutter 4
+              (sseq sinf
+               (li
+                (sseq 3 (li 0 0 0 1))
+                (srand 2 (li 0 1)) 1 1
+                (sseq 3
+                 (li 0 (srand 1 (li 0 1)) 0 (srand 1 (li 0 1))))
+                (srand 1 (li 1 0)) 1 1 1)))
 
              -- (sstutter 4
              --  (sseq sinf

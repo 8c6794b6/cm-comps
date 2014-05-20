@@ -62,10 +62,10 @@ t103 = withSC3 $ runTrack 103 $ do
         "vlevel" ==> sustain (sval 8)
         "vrate" ==> sustain (sval 2.5)
         "pan" ==> sustain (sval 0.5)
-    -- effect "ap02" $ do
-    --     "wet" ==> curveTo EnvLin 3 1
-    --     -- "dcy" ==> curveTo EnvLin 32 12
-    --     "dcy" ==> linLin (lfdNoise3 'Y' KR (1/13) + 2) 1 3 4 12
+    effect "ap02" $ do
+        "wet" ==> curveTo EnvLin 3 1
+        -- "dcy" ==> curveTo EnvLin 32 12
+        "dcy" ==> linLin (lfdNoise3 'Y' KR (1/13) + 2) 1 3 4 12
     effect "lp01" $ do
         "wet" ==> curveTo EnvLin 16 1
         "cf"  ==>
@@ -78,6 +78,7 @@ t103 = withSC3 $ runTrack 103 $ do
     router $ do
         amp $ curveTo EnvCub 16 1
         -- amp $ curveTo EnvCub 1e-9 0
+        -- amp $ curveTo EnvCub 16 0
 
 ng01 :: IO ()
 ng01 = withSC3 $ runTrack 103 $ do
@@ -106,8 +107,8 @@ t106 = withSC3 $ runTrack 106 $ do
             let fq = linExp (lfdNoise1 'A' KR (1/32) + 2) 1 3 (1/3) 3
             in  lfTri KR fq 0 * 0.5 + 0.5
     router $ do
-        "amp" ==> curveTo EnvCub 1e-9 0
-        -- "amp" ==> curveTo EnvCub 24 1
+        -- "amp" ==> curveTo EnvCub 1e-9 0
+        "amp" ==> curveTo EnvCub 12 1
 
 
 -- | Using same synthdef multiple times in one track.
@@ -216,8 +217,8 @@ t108 = withSC3 $ runTrack 108 $ do
         "dcy" ==> linLin (lfdNoise3 'D' KR 2 + 2) 1 3 0 1
 
     router $ do
-        -- "amp" ==> curveTo EnvCub 24 0.28
-        "amp" ==> curveTo EnvCub 1e-9 0
+        "amp" ==> curveTo EnvCub 24 0.28
+        -- "amp" ==> curveTo EnvCub 12 0
 
 testCurve01 :: IO ()
 testCurve01 = withSC3 $ runTrack 101 $ do

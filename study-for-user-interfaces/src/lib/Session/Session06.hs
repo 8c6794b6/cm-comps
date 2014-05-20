@@ -42,10 +42,11 @@ t103 = withSC3 $ runTrack 103 $ do
         "freq" ==>
             sustain
             (sswitch1
-             (sxrand sinf
-              [ sseq (siwhite sinf 1 4 * 256) [0]
-              , sseq (siwhite sinf 1 4 * 16) [1]
-              , sseq (siwhite sinf 1 4 * 8) [2]])
+             -- (sxrand sinf
+             --  [ sseq (siwhite sinf 1 4 * 256) [0]
+             --  , sseq (siwhite sinf 1 4 * 16) [1]
+             --  , sseq (siwhite sinf 1 4 * 8) [2]])
+             (sseq sinf [0])
              [ let deg  = [0,0,0,2, 2,5,7,7]
                    stt1 = [1,1,1,1, 1,1,1,1, 2,2,2,2, 4,4, 8]
                in sstutter
@@ -80,18 +81,16 @@ t103 = withSC3 $ runTrack 103 $ do
              , midiCPS
                ((sibrown sinf 0 11 1) + sibrown sinf 3 9 1 * 12)
              ])
+
         "tr" ==> trigger
             (sseq sinf
              [ 1, 1, 0, 1,  1, 0, 1, 0
-             , 1, 0, 1, 0, srand 4 [1,1,0]])
+             , 1, 0, 1, 0,  srand 4 [1,1,0] ])
 
         "dur" ==> sustain
             ((sstutter (siwhite sinf 1 4)
-              (srand sinf [2,4,8])) *
-             sseq sinf [0.5, 0.5, 0.25, 0.75] *
-             (sstutter
-              (siwhite sinf 2 4 * 4)
-              (swhite sinf 1 2)))
+              (srand sinf [1,2,4,8])) *
+             sseq sinf [0.5, 0.5, 0.25, 0.75])
         "pan" ==>
             sustain (sval 0.5)
         "amp" ==> curveTo EnvCub 8 0.3
@@ -111,12 +110,13 @@ t103 = withSC3 $ runTrack 103 $ do
     fsin2 1 (*0.25) (*2.8) $ ld3 'd' 7
     fsin2 2 (*0.5)  (*2) $ ld3 'e' 9
     fsin2 3 (*1.008) (*1.8) $ ld3 'f' 8
-    fsin2 4 (*2) (*1.2)$ ld3 'g' 7
-    fsin2 5 (*3) (*1.3) $ ld3 'h' 8
-    fsin2 6 (*4) (*0.9) $ ld3 'i' 9
-    fsin2 7 (*5) (*0.8) $ ld3 'j' 7
-    fsin2 8 (*6) (*0.8) $ ld3 'k' 8
-    fsin2 9 (*7) (*0.8) $ ld3 'l' 9
+    fsin2 4 (*2) (*2)$ ld3 'g' 7
+    fsin2 5 (*3) (*3) $ ld3 'h' 8
+    fsin2 6 (*4) (*2.5) $ ld3 'i' 9
+    fsin2 7 (*5) (*3.1) $ ld3 'j' 7
+    fsin2 8 (*6) (*2.1) $ ld3 'k' 8
+    fsin2 9 (*7) (*2.2) $ ld3 'l' 9
+    fsin2 10 (*0.998) (*1.8) $ ld3 'f' 8
 
     effect' 1 "ap01" $ do
         "wet" ==> curveTo EnvLin 16 0.5
@@ -149,14 +149,13 @@ t103 = withSC3 $ runTrack 103 $ do
                 m  = linLin (lfdNoise3 'M' KR (1/8)) (-1) 1 0 1
             in  linExp ((sinOsc KR df 0) * m + 2) 1 3 200 20000
         "rq"  ==>
-            -- curveTo EnvLin 16 0.3
             let df = linExp (lfdNoise1 'G' KR (1/3) + 2) 1 3 (1/8) 8
                 m  = linLin (lfdNoise3 'L' KR (1/8)) (-1) 1 0 1
             in  linExp ((sinOsc KR df 0) * m + 2) 1 3 0.2 0.9
 
-    -- effect' 2 "ap01" $ do
-    --     "wet" ==> curveTo EnvLin 16 0.25
-    --     "dcy" ==> curveTo EnvLin 16 0.3
+    effect' 2 "ap01" $ do
+        "wet" ==> curveTo EnvLin 16 0.95
+        "dcy" ==> curveTo EnvLin 16 6
 
     effect "dc01" $ do
         "wet" ==> curveTo EnvLin 8 1
