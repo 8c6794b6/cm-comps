@@ -189,12 +189,12 @@ t101 = withSC3 $ runTrack 101 $ do
                 , swhite 8 0 1 ]
         "t_tr" ==> trigger
             (
-                srand sinf
-                [ sseq 1 [1,0,0,0]
-                , sseq 1 [1,0,1,0]
-                , sseq 1 [1,0,0,1]
-                , sseq 1 [1,1,0,1]
-                , sseq 1 [1,1,1,1] ]
+                -- srand sinf
+                -- [ sseq 1 [1,0,0,0]
+                -- , sseq 1 [1,0,1,0]
+                -- , sseq 1 [1,0,0,1]
+                -- , sseq 1 [1,1,0,1]
+                -- , sseq 1 [1,1,1,1] ]
 
                 -- sstutter (sseq sinf [1])
                 -- (sxrand sinf
@@ -210,7 +210,7 @@ t101 = withSC3 $ runTrack 101 $ do
                 -- , sseq 1 [1, 1]
                 -- , sseq 1 [0, 1]]
 
-                -- srand sinf [sseq 1 [1,0], sseq 1 [1,1]]
+                srand sinf [sseq 1 [1,0], sseq 1 [1,1]]
 
                 -- sseq sinf
                 -- [ sseq 1 [1,1,0,1, 0,1,0,1]
@@ -264,14 +264,14 @@ t101 = withSC3 $ runTrack 101 $ do
 
     effect "cmb02" $ do
         "wet" ==>
-            -- sustain
-            -- (sseq sinf
-            --  [ sseq 3 [sseq 8 [0]]
-            --  , sseq 1 [srand 4 [0,1], sseq 4 [1]] ])
-
             sustain
-            (sstutter (srand sinf [2,4,8])
-             (srand sinf [1,0]))
+            (sseq sinf
+             [ sseq 3 [sseq 8 [0]]
+             , sseq 1 [srand 4 [0,1], sseq 4 [1]] ])
+
+            -- sustain
+            -- (sstutter (srand sinf [2,4,8])
+            --  (srand sinf [1,0]))
 
             -- sustain
             -- (sseq sinf
@@ -313,10 +313,10 @@ t102 = withSC3 $ runTrack 102 $ do
     source "bd03" $ do
         "t_tr0" ==> do
             let r x = swhite 1 0 1 <=* x
-            -- trigger $ sseq sinf [1,r 0.05,r 0.15, r 0.25]
-            trigger $ sseq sinf
-                [1,      r 0.05, r 0.15, r 0.25
-                ,r 0.42, r 0.12, r 0.22, r 0.23 ]
+            trigger $ sseq sinf [1,r 0.05,r 0.15, r 0.25]
+            -- trigger $ sseq sinf
+            --     [1,      r 0.05, r 0.15, r 0.25
+            --     ,r 0.42, r 0.12, r 0.22, r 0.23 ]
         "amp"   ==>
             sustain
             (sseq sinf
@@ -439,8 +439,8 @@ t103 = withSC3 $ runTrack 103 $ do
         "dlt" ==> sustain (sval 0.25)
 
     router $ do
-        -- "amp" ==> curveTo EnvCub 4 1
-        "amp" ==> curveTo EnvCub 32 0
+        "amp" ==> curveTo EnvCub 4 1
+        -- "amp" ==> curveTo EnvCub 32 0
 
 t104 :: IO ()
 t104 = withSC3 $ runTrack 104 $ do

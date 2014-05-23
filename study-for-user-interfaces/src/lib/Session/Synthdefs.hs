@@ -439,3 +439,10 @@ synth_bypass = mrg outs
   where
     outs = [control KR [n] 0| n <- ns]
     ns   = ['0'..'Z']
+
+-- | Triggers when input signal has changed.
+--
+-- > changed i threshold = abs (hpz1 i) >* threshold
+--
+changed :: UGen -> UGen -> UGen
+changed i thres = abs (hpz1 i) >* thres

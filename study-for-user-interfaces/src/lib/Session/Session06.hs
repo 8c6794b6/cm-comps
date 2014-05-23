@@ -2,8 +2,7 @@ module Session.Session06 where
 
 import Sound.Study.ForUserInterfaces.TUI.TUI01 (masterNid)
 import Sound.Study.ForUserInterfaces.TUI.TUI02
-import Session.Synthdefs (synthdefs)
-
+import Session.Synthdefs (synthdefs, changed)
 
 withSC3 :: Connection TCP a -> IO a
 withSC3 = withTransport (openTCP "127.0.0.1" 57111)
@@ -180,15 +179,14 @@ t104 = withSC3 $ runTrack 104 $ do
                , sseq rep1 [2,1,1]
                , srand rep1 [sseq 1 [3,5], sseq 1 [5,3]]
                , sseq (2 ** siwhite sinf 1 7) [1]
-               , 4
                , sseq 1 [ 2,1,1, 1,2,1
                         , srand 1
                           [ srand 1 [4, sseq 1 [2,2]]
                           , sseq 1 [1,1,1,1] ]]
+               , 4, 8
                ])
               (midiCPS
                (sseq sinf
-                -- [ sshuf (2 ** siwhite sinf 1 5) [0,3,5,7,10] ] +
                 [ sxrand sinf
                   [ sseq rep1 degs
                   , sseq rep1 [0,3,5,8,10]
@@ -207,19 +205,19 @@ t104 = withSC3 $ runTrack 104 $ do
                ))))
         param "tr"
             (infreq
-             (\tr isig -> changed isig 0 + coinGate 'd' 0.05 tr)
-            )
+             (\tr isig ->
+               changed isig 0 + coinGate 'd' 0.05 tr))
         param "en"
             (linLin (lfdNoise1 'E' KR (1/7) + 2) 1 3 (-5) 5)
         param "pan"
             (infreq
-             (\tr isig ->
+             (\_tr isig ->
                tRand 'P' 0 1 (changed isig 0)))
         param "dur"
-            (curveTo EnvCub 8 0.3)
+            (curveTo EnvCub 8 3.3)
         param "atk"
             (infreq
-             (\tr isig ->
+             (\_tr isig ->
                tExpRand 'A' 1e-3 0.999 (changed isig 0)))
 
     effect "muladd" $ do
@@ -240,13 +238,13 @@ t104 = withSC3 $ runTrack 104 $ do
             (infreq
              (\tr isig ->
                let tr' = coinGate 'T' 0.01 tr + changed isig 0
-                   dur = tExpRand 'D' 0.4 1.8 tr'
+                   dur = tExpRand 'D' 0.4 0.8 tr'
                    ccf = linExp (squared (lfdNoise1 'L' KR (5/3)) + 1) 1 2
                          2000 12000
                in  decay tr' dur * ccf))
         param "rq"
-            -- (linLin (sinOsc KR (1/31) 0) (-1) 1 0.1 0.3)
-            (curveTo EnvLin 8 0.8)
+            -- (linLin (sinOsc KR (1/3) 0) (-1) 1 0.1 0.8)
+            (curveTo EnvLin 8 0.6)
 
     effect "cmb02" $ do
         param "wet" (curveTo EnvCub 32 0.003)
@@ -255,8 +253,8 @@ t104 = withSC3 $ runTrack 104 $ do
 
     effect "ap02" $ do
         param "wet"
-            (curveTo EnvLin 8 1)
-            -- (squared (squared (lfSaw KR (1/128) 0)) `lag` 0.1)
+            -- (curveTo EnvLin 8 1)
+            (squared (squared (lfSaw KR (1/128) 0)) `lag` 0.1)
         param "dcy" (curveTo EnvCub 64 8)
 
     effect' 1 "ap02" $ do
@@ -267,28 +265,22 @@ t104 = withSC3 $ runTrack 104 $ do
         "wet" ==> curveTo EnvCub 8 1
 
     router $ do
-        "amp" ==> curveTo EnvCub 8 0.8
-        -- "amp" ==> curveTo EnvCub 8 0
+        -- "amp" ==> curveTo EnvCub 8 0.8
+        "amp" ==> curveTo EnvCub 8 0
 
--- | Triggers when input signal has changed.
---
--- > changed i threshold = abs (hpz1 i) >* threshold
---
-changed :: UGen -> UGen -> UGen
-changed i thres = abs (hpz1 i) >* thres
+t108_freqbuf :: Num a => a
+t108_freqbuf = 13
 
+b013_pchs :: [Double]
 b013_pchs =
     let pchs = takeWhile (\x -> midiCPS x < 20000) $
                foldr (\o acc -> map (+o) degs ++ acc) [] octs
-        degs = [0,3,5,7,10]
+        degs = [0,3,4,5,7,10]
         octs = iterate (+12) 24
     in  pchs
 
 b013 :: IO ()
-b013 = withSC3 $ do
-    let bufn :: Num a => a
-        bufn = 13
-    send $ b_alloc_setn1 bufn 0 b013_pchs
+b013 = withSC3 $ send $ b_alloc_setn1 t108_freqbuf 0 b013_pchs
 
 t108 :: IO ()
 t108 = withSC3 $ runTrack 108 $ do
@@ -334,7 +326,7 @@ t108 = withSC3 $ runTrack 108 $ do
     effect "lmt01" $ do
         "wet" ==> curveTo EnvLin 8 1
     router $ do
-        "amp" ==> curveTo EnvCub 8 1
+        "amp" ==> curveTo EnvCub 8 0
 
 main :: IO ()
 main = t99 >> t103

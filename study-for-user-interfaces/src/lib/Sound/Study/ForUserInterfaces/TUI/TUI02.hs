@@ -43,7 +43,6 @@ import Control.Monad.State (MonadTrans(..), MonadState(..), StateT(..), modify)
 import Data.Hashable (hash)
 import Data.Int (Int32)
 import Data.List (isPrefixOf)
-import System.Random (mkStdGen)
 
 import Sound.OSC
 import Sound.SC3 hiding (withSC3)
@@ -52,10 +51,32 @@ import Sound.SC3.Supply
 import Sound.SC3.TH.Synthdef (synthdefGenerator)
 import Sound.SC3.Tree
 
-import Sound.Study.ForUserInterfaces.TUI.TUI01 as TUI01
-    ( defaultTargetNid, masterNid, countOut, metroOut, tui01Synthdefs )
 import Sound.Study.ForUserInterfaces.Orphan ()
 
+-- --------------------------------------------------------------------------
+--
+-- * Synthdefs
+--
+-- --------------------------------------------------------------------------
+
+-- | Synth to synchronize other synths, mainly demand UGens.
+synth_metro :: UGen
+synth_metro = mrg [ out (control KR "out" 0) osig
+                  , out (control KR "count" 0) pcnt ]
+  where
+    osig = impulse KR (beat*bpm/60) 0
+    bpm  = control KR "bpm" 120
+    beat = control KR "beat" 4
+    pcnt = pulseCount (pulseDivider osig beat 0) 0
+
+-- | Default mixer for new synth added to scsynth server.
+synth_router :: UGen
+synth_router = out obus osig
+  where
+    osig = in' 2 AR isig * amp
+    obus = control KR "out" 0
+    isig = control KR "in" 0
+    amp  = control KR "amp" 0
 
 -- --------------------------------------------------------------------------
 --
@@ -63,12 +84,28 @@ import Sound.Study.ForUserInterfaces.Orphan ()
 --
 -- --------------------------------------------------------------------------
 
+-- | Reserved node id for master output.
+masterNid :: Num a => a
+masterNid = 99
+
+-- | Reserved node id for default target node to add new nodes.
+defaultTargetNid :: Num a => a
+defaultTargetNid = 10
+
 -- | Get node id of 'TUI01.synth_router' synth node. The group containing router
 -- node must be added with 'addTrack'
 routerNid ::
     Int -- ^ Node ID of group.
     -> Int
 routerNid gid = ((gid + 1) * 100) - 1
+
+-- | Reserved control output bus number for output of beat count.
+countOut :: Num a => a
+countOut = 127
+
+-- | Reserved control output bus number for output of metro trigger.
+metroOut :: Num a => a
+metroOut = 128
 
 -- | Reserved control outbus to get number of used control out bus.
 controlBusCounter :: Num a => a
@@ -149,8 +186,7 @@ addTrack = do
 initializeTUI02 :: Transport m => m ()
 initializeTUI02 = do
     sendOSC $ bundle immediately
-        (c_set [(controlBusCounter,256)] :
-         map d_recv ($(synthdefGenerator) ++ tui01Synthdefs))
+        (c_set [(controlBusCounter,256)] : map d_recv ($(synthdefGenerator)))
         -- foldr withCM (c_set [(controlBusCounter,256)])
         -- (map d_recv ($(synthdefGenerator) ++ tui01Synthdefs))
     play $
@@ -408,7 +444,7 @@ instance Assignable (Sustain UGen) where
 
 instance Assignable (Sustain Supply) where
     assign nd name (Sustain val) = do
-        let ug tr = demand tr 1 (evalSupply val (mkStdGen 0x12345678))
+        let ug tr = demand tr 1 (supply 0x12345678 val)
         sendControl nd name ug
 
 -- | Wrapper for triggered pattern.
@@ -421,7 +457,7 @@ trigger = Trigger
 
 instance Assignable (Trigger Supply) where
     assign nd name (Trigger val) = do
-        let ug tr = tr * demand tr 1 (evalSupply val (mkStdGen 0x12345678))
+        let ug tr = tr * demand tr 1 (supply 0x12345678 val)
         sendControl nd name ug
 
 -- | Data type for assininng curved change.

@@ -84,10 +84,6 @@ sourceOut = 16
 defaultTargetNid :: Num a => a
 defaultTargetNid = 10
 
--- | Reserved node id for master output.
-masterNid :: Num a => a
-masterNid = 99
-
 -- | Initial setup.
 initialTUI01Nodes :: Nd
 initialTUI01Nodes =

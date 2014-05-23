@@ -120,22 +120,22 @@ t107 = withSC3 $ runTrack 107 $ do
     source' 0 "sin04" $ do
         sus "freq"
             (midiCPS
-             ((sstutter (siwhite sinf 1 5)
-              (sseq sinf
-               [ srand 1 [-12,0], 2, 5, srand 1 [7, 14]
-               , 2,7,5,7 ]))
-              +
-              (12 * sseq sinf [2,3,6,5, 6,5,6,5 ,6,7,6,9, 5])
-              +
-              sstutter (sibrown sinf 1 128 8)
-              (srand sinf [0,2,5,7]))
-             -- (sswitch1
-             --  (sstutter
-             --   (srand sinf [1,2,4,8,16])
-             --   (sseq sinf [0,1,2]))
-             --  [ srand sinf [48,60,72]
-             --  , sibrown sinf 20 100 1
-             --  , siwhite sinf 20 100 ])
+             -- ((sstutter (siwhite sinf 1 5)
+             --  (sseq sinf
+             --   [ srand 1 [-12,0], 2, 5, srand 1 [7, 14]
+             --   , 2,7,5,7 ]))
+             --  +
+             --  (12 * sseq sinf [2,3,6,5, 6,5,6,5 ,6,7,6,9, 5])
+             --  +
+             --  sstutter (sibrown sinf 1 128 8)
+             --  (srand sinf [0,2,5,7]))
+             (sswitch1
+              (sstutter
+               (srand sinf [1,2,4,8,16])
+               (sseq sinf [0,1,2]))
+              [ srand sinf [48,60,72]
+              , sibrown sinf 20 100 1
+              , siwhite sinf 20 100 ])
             )
         trg "tr"
             (srand sinf
