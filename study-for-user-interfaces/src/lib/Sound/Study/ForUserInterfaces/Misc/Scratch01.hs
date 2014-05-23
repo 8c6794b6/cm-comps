@@ -496,7 +496,7 @@ s_new_with_c100 :: IO ()
 s_new_with_c100 = withSC3 $ do
     let def1 = out (k "out" 0) (sinOsc AR (k "freq" 440) 0 * 0.2)
         def2 = out (k "out" 0)
-               (lfdClipNoise 'd' KR (k "freq" 3) * (k "mul" 1) + (k "add" 0))
+               (lfClipNoise 'd' KR (k "freq" 3) * (k "mul" 1) + (k "add" 0))
         def3 = replaceOut (k "out" 0) (combC (a "in" 0) 0.2 dlt dcy)
         dcy  = lfCub KR (k "dcyf" 1) 0 * 3 + 3
         dlt  = lfCub KR (k "dltf" 1) 0 * 0.5 + 0.6
@@ -567,3 +567,40 @@ replace_ex01b = withSC3 $ do
         bundle immediately
         [ s_noid [1000]
         , s_new "def2" 1001 AddReplace (-1) [] ]
+
+-- Sending bundled message with overwriting anonymous synthdef.
+--
+-- Synthdef named /Anonymous/ is sent with @/d_recv@ and @/s_new@ completion
+-- message. Then soon follows another @/d_recv@ message and @/s_new@, with using
+-- /Anonymous/ as synthdef name.
+--
+overwriting_anonymous_ex01 :: IO ()
+overwriting_anonymous_ex01 = withSC3 $ do
+    let def1 = out 0 (sinOsc AR 440 0 * e)
+        def2 = out 1 (saw AR 110 * e)
+        def3 = out 0 (pulse AR 220 0.5 * e)
+        def4 = out 1 (resonz (whiteNoise 'W' AR) 2000 0.6 * e)
+        e    = envGen KR 1 0.1 0 3 RemoveSynth (envPerc 0.1 1)
+        dr u = d_recv (synthdef "Anonymous" u)
+        sn   = s_new "Anonymous" (-1) AddToTail 1 []
+    sendOSC $ bundle immediately
+        [ withCM (dr def1) sn
+        , withCM (dr def2) sn
+        , withCM (dr def3) sn
+        , withCM (dr def4) sn ]
+
+-- Sending @/d_free@ message while synthdef is running.
+-- Will not free the running node with freed synthdef.
+d_free_running_ex01 :: IO ()
+d_free_running_ex01 = withSC3 $ do
+    let def1 = out 0 (sinOsc AR 440 0 *
+                      decay (dust 'a' KR 8 * 0.3) (1/9))
+    send $ withCM
+        (d_recv (synthdef "def1" def1))
+        (s_new "def1" (-1) AddToHead 1 [])
+    liftIO $ threadDelay 2000000
+    send $ d_free ["def1"]
+    liftIO $ putStrLn "sent /d_free"
+    liftIO $ threadDelay 2000000
+    send $ n_free [-1]
+    liftIO $ putStrLn "sent /n_free"

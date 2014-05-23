@@ -338,9 +338,6 @@ data SupplyInfo = SupplyInfo
      , siSupply :: Supply
      } deriving (Eq, Show)
 
-supply :: String -> Bool -> Supply -> SupplyInfo
-supply = SupplyInfo
-
 sendSupplys ::
     Transport m
     => Condition SCNode

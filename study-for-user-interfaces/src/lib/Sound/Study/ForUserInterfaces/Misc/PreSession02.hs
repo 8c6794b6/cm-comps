@@ -9,6 +9,7 @@ module Sound.Study.ForUserInterfaces.Misc.PreSession02 where
 import Control.Monad
 import Data.Monoid
 
+import Sound.OSC
 import Sound.SC3
 import Sound.SC3.UGen.MCE
 import Sound.SC3.Supply
@@ -73,6 +74,23 @@ instance Monoid (MCE u) where
     mappend (MCE_Vector as) (MCE_Unit b)    = MCE_Vector (as ++ [b])
     mappend (MCE_Vector []) (MCE_Vector []) = MCE_Vector []
     mappend (MCE_Vector as) (MCE_Vector bs) = MCE_Vector (as ++ bs)
+
+class MCEBuilder a r | r -> a where
+    mb :: MCE a -> a -> r
+
+instance MCEBuilder a (MCE a) where
+    mb m x = mceRev (mceCons x m)
+
+instance MCEBuilder a r => MCEBuilder a (a->r) where
+    mb m x = mb (mceCons x m)
+
+mceRev :: MCE a -> MCE a
+mceRev (MCE_Vector as) = MCE_Vector (reverse as)
+mceRev m               = m
+
+mceCons :: a -> MCE a -> MCE a
+mceCons x (MCE_Unit y)    = MCE_Vector [x,y]
+mceCons x (MCE_Vector ys) = MCE_Vector (x:ys)
 
 class Num v => DU v where
     sup :: v -> Demand UGen
@@ -172,4 +190,5 @@ instance (Mariadic acc out r, a ~ acc) => Mariadic acc out (a->r) where
 mceu :: Mariadic a a b => a -> b
 mceu x = mariadic id mempty x
 
+mu :: MCE UGen -> UGen
 mu = MCE_U

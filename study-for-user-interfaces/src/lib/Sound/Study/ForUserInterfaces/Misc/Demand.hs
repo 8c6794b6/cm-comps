@@ -813,11 +813,58 @@ dwhite_ex01 = f_demand_06 t a
 --
 -- --------------------------------------------------------------------------
 
+-- XXX: Not working with hsc3-0.14.
 dwrand_ex01 :: IO ()
 dwrand_ex01 = f_demand_06 t a
   where
     t = impulse KR (mouseX KR 1 400 Exponential 0.1) 0
     a = evalSupply0 $ swrand sinf [0,1,2,7] [0.4,0.4,0.1,0.1]
+
+dwrand' :: ID i => i -> UGen -> UGen -> UGen -> UGen
+dwrand' z l a w =
+    let n = mceDegree a
+        w' = mceExtend n w
+    in mkOscMCEId z DR "Dwrand" (l:constant n:w') a 1
+
+dwrand'_ex01 :: IO ()
+dwrand'_ex01 = withSC3 $ do
+    let a    = dwrand' 'a' dinf (mce [0,1,2,7]) (mce [0.4,0.4,0.1,0.1])
+        freq = demand tr 1 a * 30 + 340
+        tr   = impulse KR (mouseX KR 1 400 Exponential 0.1) 0
+        osig = out 0 (sinOsc AR freq 0 * 0.1)
+    play osig
+
+dwrand_ex02 :: IO ()
+dwrand_ex02 = withSC3 $ do
+    let def1 = out 0 (pan2 (sinOsc AR freq 0 * 0.3) 0 1)
+        freq = demand tr 1 pat
+        tr   = impulse KR (mouseX KR 1 400 Exponential 0.1) 0
+        pat  = dwrand' 'd' dinf
+               (mce [ 220,  330,  440,  8800])
+               (mce [0.45, 0.25, 0.25,  0.05])
+    send $ withCM
+        (d_recv (synthdef "temp__4" def1))
+        (s_new "temp__4" (-1) AddToTail 1 [])
+
+dwrand_ex03 :: IO ()
+dwrand_ex03 = withSC3 $ do
+    let def1 = out 0 (pan2 (combC (sinOsc AR freq 0 * aenv)
+                            (recip 55) dlt 0.38) 0 1)
+        dlt  = linLin (sinOsc KR (1/33) 0 + 2) (-1) 1 (recip 55) (recip 54)
+        freq = demand tr 1 pf `lag3` 0.2
+        aenv = decay (demand tr 1 pa * tr) (1/4)
+        tr   = impulse KR (mouseX KR 1 400 Exponential 0.1) 0
+        pf   = dseq 'Γ' dinf
+               (mce [110,220,440,220, 880,220,440,220])
+        pa   = dwrand' 'Ω' dinf
+               (mce [ dseq 'd' 1 (mce [1,0,1,0, 1,0,0,1])
+                    , dseq 'f' 1 (mce [1,0,0,1, 0,0,1,0])
+                    , dseq 'e' 1 (mce [1,0,0,0, 1,0,0,0])
+                    , dseq 'g' 1 (mce [1,1,0,1, 1,0,1,1]) ])
+               (mce [0.6, 0.25, 0.10, 0.05])
+    send $ withCM
+        (d_recv (synthdef "temp__5" def1))
+        (s_new "temp__5" (-1) AddToTail 1 [])
 
 
 -- --------------------------------------------------------------------------
@@ -958,7 +1005,7 @@ cmp_ex01 = f_demand_08 (fmap midiCPS sup)
 --
 -- --------------------------------------------------------------------------
 
--- | Simple example showing polyphony sound with 'gate' and 'pulseDivider'.
+-- | Simple example showing polyphony with 'gate' and 'pulseDivider'.
 --
 -- Each sound source is built with /fsig/, which takes index value to identify
 -- the voicing.  Number of voices is specified at the time of defining the
@@ -976,8 +1023,8 @@ poly_01 = audition $ out 0 osig
     npoly   :: Num a => a
     npoly   = 12
 
-    freq0   = demand tr0 0 (midiCPS (dxrand 'a' dinf (mce pchs)))
-    pan0    = demand tr0 0 (dwhite 'w' dinf (-1) 1)
+    freq0   = demand tr0 1 (midiCPS (dxrand 'a' dinf (mce pchs)))
+    pan0    = demand tr0 1 (dwhite 'w' dinf (-1) 1)
     tr0     = coinGate 'a' 0.5 (impulse KR 4 0)
 
     pchs    = foldr (\p ps -> map (+p) degs ++ ps) [] octs

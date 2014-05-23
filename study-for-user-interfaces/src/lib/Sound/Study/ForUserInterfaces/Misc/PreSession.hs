@@ -5,6 +5,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE NoMonomorphismRestriction #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
 
@@ -21,6 +22,7 @@ implementation of functions.
 module Sound.Study.ForUserInterfaces.Misc.PreSession where
 
 import Data.Monoid
+import Data.Tree
 import System.Random
 
 import Sound.OSC
@@ -396,3 +398,38 @@ is an instance of `SomeClass'.
 What is this `SomeClass', and what are its instances?
 
 -}
+
+
+leaf x = Node x []
+
+node x xs = mcb (Node x xs)
+
+
+class BT bt where
+    btree :: Int -> [Tree Int] -> bt
+
+instance BT (Tree Int) where
+    btree x xs = Node x (reverse xs)
+
+instance (BT t) => BT (Tree Int -> t) where
+    btree x xs = \t -> btree x (t:xs)
+
+type T = Tree Int
+
+t0 :: T
+t0 = btree 3 []
+
+class BT2 t where
+    bt2 :: Int -> [Tree Int] -> t
+
+-- instance BT2 (Tree Int) where
+--     bt2 x ts = Node x ts
+
+instance BT2 [Tree Int] where
+    bt2 x ts = [Node x ts]
+
+instance (BT2 t) => BT2 ([Tree Int] -> t) where
+    bt2 x ts = \t -> bt2 x (ts ++ t)
+
+bt2' :: BT2 t => Int -> t
+bt2' x = bt2 x []
