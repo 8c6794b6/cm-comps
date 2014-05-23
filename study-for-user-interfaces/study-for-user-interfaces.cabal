@@ -20,6 +20,7 @@ library
   hs-source-dirs:    src/lib
   default-language:  Haskell2010
   ghc-options:       -Wall
+  ghc-prof-options:  -auto-all
   exposed-modules:   Graphics.UI.Threepenny.Extra
                      Sound.Study.ForUserInterfaces.GUI.SimpleRange
                      Sound.Study.ForUserInterfaces.GUI.SimpleStatus
@@ -29,6 +30,7 @@ library
                      Sound.Study.ForUserInterfaces.GUI.JS
                      Sound.Study.ForUserInterfaces.TUI.TUI01
                      Sound.Study.ForUserInterfaces.TUI.TUI02
+                     Sound.Study.ForUserInterfaces.Orphan
                      Paths_study_for_user_interfaces
   other-modules:     Session.Session01
                      Session.Session02
@@ -38,6 +40,7 @@ library
   build-depends:     base >=4.6
                    , containers
                    , filepath
+                   , hashable
                    , hosc >= 0.14
                    , hsc3 >= 0.14
                    , hsc3-db
@@ -57,4 +60,14 @@ executable gui
   default-language:  Haskell2010
   ghc-options:       -Wall -threaded -rtsopts
   build-depends:     base >= 4.6
+                   , study-for-user-interfaces
+
+executable profile-tui02
+  main-is:           profile-tui02.hs
+  hs-source-dirs:    src/exec
+  default-language:  Haskell2010
+  ghc-options:       -Wall -threaded -rtsopts
+  build-depends:     base >= 4.6
+                   , hsc3
+                   , hosc
                    , study-for-user-interfaces

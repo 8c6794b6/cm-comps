@@ -28,34 +28,33 @@ for UDP which means support TCP connection only.
 
 -}
 module Sound.Study.ForUserInterfaces.TUI.TUI02
-       ( module Sound.OSC
-       , module Sound.SC3
-       , module Sound.SC3.ID
-       , module Sound.SC3.Supply
-       , module Sound.SC3.TH.Synthdef
-       , module Sound.SC3.Tree
-       , module Sound.Study.ForUserInterfaces.TUI.TUI02
-       ) where
+    ( module Sound.OSC
+    , module Sound.SC3
+    , module Sound.SC3.ID
+    , module Sound.SC3.Supply
+    , module Sound.SC3.TH.Synthdef
+    , module Sound.SC3.Tree
+    , module Sound.Study.ForUserInterfaces.TUI.TUI02
+    ) where
 
 import Control.Applicative (Applicative(..))
 import Control.Monad (liftM, when)
 import Control.Monad.State (MonadTrans(..), MonadState(..), StateT(..), modify)
+import Data.Hashable (hash)
 import Data.Int (Int32)
 import Data.List (isPrefixOf)
 import System.Random (mkStdGen)
 
 import Sound.OSC
-    -- ( Datum(..), DuplexOSC, RecvOSC(..), Message(..), SendOSC(..)
-    -- , Transport, bundle, immediately, messagePP, waitDatum, waitMessage
-    -- )
 import Sound.SC3 hiding (withSC3)
-import Sound.SC3.ID hiding (withSC3)
+import Sound.SC3.ID hiding (withSC3, hash)
 import Sound.SC3.Supply
 import Sound.SC3.TH.Synthdef (synthdefGenerator)
 import Sound.SC3.Tree
 
 import Sound.Study.ForUserInterfaces.TUI.TUI01 as TUI01
     ( defaultTargetNid, masterNid, countOut, metroOut, tui01Synthdefs )
+import Sound.Study.ForUserInterfaces.Orphan ()
 
 
 -- --------------------------------------------------------------------------
@@ -126,8 +125,8 @@ type DList a = [a] -> [a]
 
 -- | Add single element to end of 'DList'.
 snoc :: a -> DList a -> DList a
-snoc x f = f . (x:)
-{-# INLINE snoc #-}
+-- snoc x f = f . (x:)
+snoc x f = let f' = f . (x:) in f' `seq` f'
 
 -- | Add and setup new group used by 'Track'.
 addTrack :: Transport m => m Message
@@ -149,27 +148,30 @@ addTrack = do
 -- | Add nodes and empty groups used by TUI02.
 initializeTUI02 :: Transport m => m ()
 initializeTUI02 = do
-    mapM_ (async . d_recv) ($(synthdefGenerator) ++ tui01Synthdefs)
+    sendOSC $ bundle immediately
+        (c_set [(controlBusCounter,256)] :
+         map d_recv ($(synthdefGenerator) ++ tui01Synthdefs))
+        -- foldr withCM (c_set [(controlBusCounter,256)])
+        -- (map d_recv ($(synthdefGenerator) ++ tui01Synthdefs))
     play $
         grp 0
         [ grp 1
           [ grp defaultTargetNid
             (grp (masterNid+1)
-              [ syn "metro"
-                ["out"*=metroOut, "count"*=countOut] ]
+             [ syn "metro"
+               ["out"*=metroOut, "count"*=countOut] ]
              : flip map [101..108]
              (\gid ->
                grp gid
                [ syn' (routerNid gid) "router"
                  [ "in"  *= Dval (fromIntegral (audioBus gid))
                  , "out" *= sourceOut gid ]])
-              )
+            )
           , grp masterNid
             [ syn' (routerNid masterNid) "router"
-              ["in"*=Dval (fromIntegral (audioBus (routerNid masterNid)))] ]]
+              ["in"*=Dval (fromIntegral (audioBus (routerNid masterNid))) ]]]
         , grp 2 [] ]
-    send $ c_set [(controlBusCounter,256)]
-    send $ sync (-1)
+
 
 -- | Do action with 'Track'.
 runTrack ::
@@ -217,7 +219,6 @@ runTrack groupId trck = do
         removeParams nid =
             let paramNodes =
                     queryN ((("p:" ++ show nid) `isPrefixOf`) . synthName) node
-                -- XXX: Check whether "/d_free" frees running nodes.
             in  (n_free $ map nodeId paramNodes,
                  d_free $ map synthName paramNodes)
 
@@ -247,7 +248,6 @@ tidyUpParameters n0 =
                     in  Synth i name ps' : acc
         {-# INLINE f #-}
     in  head $ foldr f [] [n0]
-{-# INLINEABLE tidyUpParameters #-}
 
 -- | Free nodes matching to given query string, in specified group.
 freeNodes :: Transport m => String -> Track m ()
@@ -266,7 +266,6 @@ dumpTrack =
 -- | Set offset to update the parameters.
 offset :: Monad m => Int -> Track m ()
 offset count = modify $ \st -> st {tsBeatOffset = count}
-{-# INLINEABLE offset #-}
 
 
 -- --------------------------------------------------------------------------
@@ -282,22 +281,18 @@ source ::
     -> Track m a  -- ^ Action for parameter.
     -> Track m a
 source = genControlledNode (\obus -> ["out":=obus]) Nothing
-{-# INLINEABLE source #-}
 
 source' :: Monad m => Int -> String -> Track m a -> Track m a
 source' i name act =
     genControlledNode (\obus -> ["out":=obus]) (Just i) name act
-{-# INLINEABLE source' #-}
 
 -- | Run effect synth, apply paremater actions to nodes.
 effect :: Monad m => String -> Track m a -> Track m a
 effect = genControlledNode (\obus -> ["out":=obus,"in":=obus]) Nothing
-{-# INLINEABLE effect #-}
 
 effect' :: Monad m => Int -> String -> Track m a -> Track m a
 effect' i name act =
     genControlledNode (\obus -> ["out":=obus,"in":=obus]) (Just i) name act
-{-# INLINEABLE effect' #-}
 
 -- | Make an 'Track' action for source and effect nodes.
 genControlledNode ::
@@ -326,7 +321,6 @@ genControlledNode fparam mbi name act = do
                , tsSourceNB = node `snoc` (tsSourceNB st)
                }
     act
-{-# INLINEABLE genControlledNode #-}
 
 -- | Action for 'synth_router'.
 router :: Monad m => Track m a -> Track m a
@@ -341,7 +335,6 @@ router act = do
                , tsSourceNB = node `snoc` tsSourceNB st
                }
     act
-{-# INLINEABLE router #-}
 
 -- | Translate to condition:
 --
@@ -360,7 +353,6 @@ qString str0 = foldr1 (||?) (map parse (words str0))
             '#':nid  -> nodeId    ==? read nid
             '.':name -> synthName ==? name
             name     -> synthName ==? name
-{-# INLINEABLE qString #-}
 
 
 -- --------------------------------------------------------------------------
@@ -382,7 +374,6 @@ param :: (Assignable a, Transport m) => String -> a -> Track m ()
 param name value = do
     st <- get
     mapM_ (\nd -> assign nd name value) . tsTargetNodes $ st
-{-# INLINEABLE param #-}
 
 -- | Operator variant of 'param'.
 (==>) ::
@@ -391,21 +382,17 @@ param name value = do
     -> a       -- ^ Value.
     -> Track m ()
 name ==> value = param name value
-{-# INLINEABLE (==>) #-}
 
 infixr 1 ==>
 
 instance Assignable Double where
     assign nd name val = sendControl nd name (const (constant val))
-    {-# INLINEABLE assign #-}
 
 instance Assignable UGen where
     assign nd name val = sendControl nd name (const val)
-    {-# INLINEABLE assign #-}
 
 instance Assignable (UGen -> UGen) where
     assign nd name f = sendControl nd name f
-    {-# INLINEABLE assign #-}
 
 -- | Data to control synth parameter with 'Supply'.
 newtype Sustain a = Sustain {unSustain :: a}
@@ -418,13 +405,11 @@ sustain = Sustain
 instance Assignable (Sustain UGen) where
     assign nd name (Sustain ug) = do
         sendControl nd name (\_ -> ug)
-    {-# INLINEABLE assign #-}
 
 instance Assignable (Sustain Supply) where
     assign nd name (Sustain val) = do
         let ug tr = demand tr 1 (evalSupply val (mkStdGen 0x12345678))
         sendControl nd name ug
-    {-# INLINEABLE assign #-}
 
 -- | Wrapper for triggered pattern.
 newtype Trigger a = Trigger {unTrigger :: a}
@@ -438,7 +423,6 @@ instance Assignable (Trigger Supply) where
     assign nd name (Trigger val) = do
         let ug tr = tr * demand tr 1 (evalSupply val (mkStdGen 0x12345678))
         sendControl nd name ug
-    {-# INLINEABLE assign #-}
 
 -- | Data type for assininng curved change.
 data CurveTo a = CurveTo
@@ -449,7 +433,6 @@ data CurveTo a = CurveTo
 
 instance Assignable (CurveTo UGen) where
     assign = sendCurve
-    {-# INLINEABLE assign #-}
 
 -- | Assign curved value to parameter
 curveTo :: EnvCurve -> Double -> Double -> CurveTo UGen
@@ -482,43 +465,33 @@ sendCurve node0 pname ct = sendParamUGen node0 pname $ \node _tr ->
                 _             -> constant (0::Double)
             _            -> constant (0::Double)
     in  osig
-{-# INLINEABLE sendCurve #-}
 
-data Input = Input Int (Condition SCNode) (Condition SynthParam) (UGen -> UGen)
+data Input = Input Int (Condition SCNode) (Condition SynthParam)
+             (UGen -> UGen -> UGen)
 
 -- | Route input signal from other node.
 input ::
     Int -- ^ Group node ID to query.
     -> Condition SCNode -- ^ Condition to query synth.
     -> Condition SynthParam -- ^ Condition to query param.
-    -> (UGen->UGen) -- ^ Function applied to input.
+    -> (UGen->UGen->UGen) -- ^ Function applied to input.
     -> Input
 input = Input
 
 instance Assignable Input where
     assign node pname (Input gid scond pcond fu) = do
         st <- get
-        let -- Building node from `tsSourceNB st []' will not work since
-            -- parameter names and mapped bus numbers are not tracked.
-            -- Currently using SCNode built from `/g_queryTree.reply' message.
-            tmpNode = tsCurrentNode st
+        -- Building node from `tsSourceNB st []' will not work since
+        -- parameter names and mapped bus numbers are not tracked.
+        -- Currently using SCNode built from `/g_queryTree.reply' message.
+        let tmpNode = tsCurrentNode st
             gnode   = queryN' (nodeId ==? gid) tmpNode
             snode   = queryN' scond =<< gnode
             mbprm   = queryP' pcond =<< snode
-            -- mbprm = queryN' (nodeId ==? gid) tmpNode >>=
-            --         queryN' scond >>=
-            --         queryP' pcond
-
-        -- liftIO $ mapM_ putStrLn
-        --     ["tmpNode:" ++ show tmpNode
-        --     ,"gnode:" ++ show gnode
-        --     ,"snode:" ++ show snode
-        --     ,"mbprm:" ++ show mbprm]
-
         case mbprm of
             Just (_ :<- bus) ->
                 let bus' = fromIntegral bus
-                in  sendControl node pname (\_ -> fu (in' 1 KR bus'))
+                in  sendControl node pname (\tr -> fu tr (in' 1 KR bus'))
             _                -> return ()
 
 
@@ -530,7 +503,6 @@ sendControl ::
     -> (UGen -> UGen)
     -> Track m ()
 sendControl node pname fu = sendParamUGen node pname $ \_ tr -> fu tr
-{-# INLINEABLE sendControl #-}
 
 sendParamUGen ::
     Transport m
@@ -539,10 +511,9 @@ sendParamUGen ::
     -> (SCNode -> UGen -> UGen)
     -> Track m ()
 sendParamUGen node pname fp = do
-    -- Freeing existing synths with new synthdef with 'free' ugen.
-    -- Node id of old synthdef is known at this point.
-    --
     ts <- get
+    -- Freeing existing synths with new synthdef, by 'free' ugen.
+    -- Node IDs of the old synthdefs is known at this point.
     let cnt         = tsBeatCount ts
         beatOffset  = tsBeatOffset ts
         currentObus = tsControlBusNum ts
@@ -554,32 +525,54 @@ sendParamUGen node pname fp = do
         osig   = out (control KR "out" 0) (gate (fp node tr) exceed)
         sdef | psynthExist = mrg [osig, fr]
              | otherwise   = osig
-        pdefname = concat ["p:",show nid,":",pname,":",show (hashUGen osig)]
+        -- pdefname = concat ["p:",show nid,":",pname,":",show (hashUGen osig)]
+        pdefname = concat ["p:",show nid,":",pname,":",show (hash osig)]
         (reusing,obus) = case queryP' (paramName ==? pname) node of
             Just (_ :<- v) -> (True,v)
             _              -> (False,currentObus)
         psynths = queryN (paramCondition obus) (tsCurrentNode ts)
-        psynthExist   = not (null psynths)
-        psynthChanged = not (pdefname `elem` map synthName psynths)
-        mfunc
-            | psynthChanged =
-                (withCM
-                 (d_recv $ synthdef pdefname sdef)
-                 (bundle immediately
-                  [s_new pdefname (-1) AddBefore nid
-                   [("out",fromIntegral obus),("count",fromIntegral cnt')]
-                  , n_map (-1) [("tr",metroOut)]
-                  , n_map nid [(pname, obus)] ]) :)
-            | otherwise     = id
+        psynthExist   = case psynths of
+            [] -> False
+            _  -> True
+        psynthNames   = map synthName psynths
+        psynthChanged = not (pdefname `elem` psynthNames)
+
+        newMessage =
+            withCM
+            (d_recv $ synthdef pdefname sdef)
+            (bundle immediately
+             [s_new pdefname (-1) AddBefore nid
+              [("out",fromIntegral obus),("count",fromIntegral cnt')]
+             , n_map (-1) [("tr",metroOut)]
+             , n_map nid [(pname, obus)]
+             , d_free (filter (/= pdefname) psynthNames) ])
+
+        -- tsMessages'
+        --     | psynthChanged = newMessage `snoc` tsMessages st
+        --     | otherwise     = tsMessages st
+
+        -- mfunc
+        --     | psynthChanged =
+        --         (withCM
+        --          (d_recv $ synthdef pdefname sdef)
+        --          (bundle immediately
+        --           [s_new pdefname (-1) AddBefore nid
+        --            [("out",fromIntegral obus),("count",fromIntegral cnt')]
+        --           , n_map (-1) [("tr",metroOut)]
+        --           , n_map nid [(pname, obus)]
+        --           , d_free (filter (/= pdefname) psynthNames) ]) :)
+        --     | otherwise     = id
 
     when psynthChanged $ do
         liftIO $ dumpParamChange node pname pdefname
 
     modify $ \st ->
         st { tsControlBusNum = if reusing then currentObus else currentObus+1
-           , tsMessages = tsMessages st . mfunc
+           -- , tsMessages = tsMessages st . mfunc
+           , tsMessages = if psynthChanged
+                          then newMessage `snoc` tsMessages st
+                          else tsMessages st
            }
-{-# INLINEABLE sendParamUGen #-}
 
 -- | Get next count for let trigger signal to path.
 nextOffset ::
@@ -594,11 +587,11 @@ nextOffset beatOffset currentCount
 
 -- | Condition to filter out parameter node using given output bus number.
 --
--- Condition for synth controlling specified parameter is :
+-- Conditions for synth controlling specified parameter are:
 --
 -- * Parameter is mapped to control rate out bus, and:
 --
--- * The out bus is mapped to pname of snth.
+-- * The out bus is mapped to parameter name of target synth.
 --
 paramCondition :: Int -> Condition SCNode
 paramCondition bus = params $ \p -> case p of
