@@ -77,7 +77,7 @@ t103 = withSC3 $ runTrack 103 $ do
         "wet" ==> curveTo EnvLin 8 1
     router $ do
         amp $ curveTo EnvCub 16 1
-        -- amp $ curveTo EnvCub 1e-9 0
+        -- -- amp $ curveTo EnvCub 1e-9 0
         -- amp $ curveTo EnvCub 16 0
 
 ng01 :: IO ()
@@ -107,8 +107,8 @@ t106 = withSC3 $ runTrack 106 $ do
             let fq = linExp (lfdNoise1 'A' KR (1/32) + 2) 1 3 (1/3) 3
             in  lfTri KR fq 0 * 0.5 + 0.5
     router $ do
-        -- "amp" ==> curveTo EnvCub 1e-9 0
-        "amp" ==> curveTo EnvCub 12 1
+        "amp" ==> curveTo EnvCub 1e-9 0
+        -- "amp" ==> curveTo EnvCub 32 1
 
 
 -- | Using same synthdef multiple times in one track.
@@ -147,24 +147,24 @@ t107 = withSC3 $ runTrack 107 $ do
         tin = input 107 ncond (paramName ==? "tr")
         vib rate amount = lfTri KR rate 0 * amount
     source' 1 "sin04" $ do
-        "freq" ==> fin (\sig -> (sig*1.5) + vib 3 1.5)
-        "tr"   ==> tin id
+        "freq" ==> fin (\_ sig -> (sig*1.5) + vib 3 1.5)
+        "tr"   ==> tin seq
         "pan"  ==> sustain (sval (-0.3))
     source' 2 "sin04" $ do
-        "freq" ==> fin (\sig -> (sig*1.003) + vib 0.3 8)
-        "tr"   ==> tin id
+        "freq" ==> fin (\_ sig -> (sig*1.003) + vib 0.3 8)
+        "tr"   ==> tin seq
         "pan"  ==> sustain (sval 0.3)
     source' 3 "sin04" $ do
-        "freq" ==> fin (\sig -> (sig*3.002) + vib 0.2 11)
-        "tr"   ==> tin id
+        "freq" ==> fin (\_ sig -> (sig*3.002) + vib 0.2 11)
+        "tr"   ==> tin seq
         "pan"  ==> sustain (sval 0.15)
     source' 4 "sin04" $ do
-        "freq" ==> fin (\sig -> (sig*4.008) + vib 8 0.2)
-        "tr"   ==> tin id
+        "freq" ==> fin (\_ sig -> (sig*4.008) + vib 8 0.2)
+        "tr"   ==> tin seq
         "pan"  ==> sustain (sval (-0.15))
     source' 5 "sin04" $ do
-        "freq" ==> fin (\sig -> (sig*0.508) + vib 7 9.32)
-        "tr"   ==> tin (\tr -> pulseDivider tr 0 3)
+        "freq" ==> fin (\_ sig -> (sig*0.508) + vib 7 9.32)
+        "tr"   ==> tin (\_ tr -> pulseDivider tr 0 3)
         "pan"  ==> sustain (sval (-0.15))
     effect "ap02" $ do
         "wet"  ==> (1 - squared (lfdNoise3 'D' KR (1/5)))
@@ -217,8 +217,8 @@ t108 = withSC3 $ runTrack 108 $ do
         "dcy" ==> linLin (lfdNoise3 'D' KR 2 + 2) 1 3 0 1
 
     router $ do
-        "amp" ==> curveTo EnvCub 24 0.28
-        -- "amp" ==> curveTo EnvCub 12 0
+        -- "amp" ==> curveTo EnvCub 24 0.28
+        "amp" ==> curveTo EnvCub 12 0
 
 testCurve01 :: IO ()
 testCurve01 = withSC3 $ runTrack 101 $ do

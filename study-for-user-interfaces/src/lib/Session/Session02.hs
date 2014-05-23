@@ -122,14 +122,14 @@ param_sin01_02 = withSC3 $ do
     sendSupply02 (synthName ==? "sin01") "freq" 4 False $
         (sstutter (4*4) $ sseq sinf [220,660,220,440])
 
-param_sin01_03 :: IO ()
-param_sin01_03 = withSC3 $ do
-    sendSupplys (synthName ==? "sin01") 8
-        [ supply "t_tr" True $
-          (sseq sinf [1,0,0,0])
-        , supply "freq" False $
-          sstutter 8 $ sseq sinf [220,440,880,1760]
-        ]
+-- param_sin01_03 :: IO ()
+-- param_sin01_03 = withSC3 $ do
+--     sendSupplys (synthName ==? "sin01") 8
+--         [ supply "t_tr" True $
+--           (sseq sinf [1,0,0,0])
+--         , supply "freq" False $
+--           sstutter 8 $ sseq sinf [220,440,880,1760]
+--         ]
 
 param_nz01 :: IO ()
 param_nz01 = withSC3 $ do

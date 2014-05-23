@@ -33,19 +33,19 @@ t99 = withSC3 $ runTrack 99 $ do
     -- effect "cmb03" $ do
     --     "wet" ==> -- curveTo EnvLin 32 1
     --         sustain
-    --         (sstutter 2
-    --          (sseq sinf
-    --           (li
-    --            -- XXX: context reduction size has limitation.
-    --            -- Use quosi-quote?
-    --            0 0 1 0  0 0 1 0  0 0 1 0  0 0 1 0
-    --            0 0 1 0  0 0 1 0  0 1 0 1  0 1 0 1
-    --            0 1 0 1  0 1 0 1  0 0 1 0  1 0 1 0
-    --            1 0 0 0  1 0 0 0  1 0 0 1  0 1 0 1
-    --           )))
-    --         -- (sstutter
-    --         --  (siwhite sinf 1 3 * 4)
-    --         --  (srand sinf (li 0 0 0 0 1)))
+    --         -- (sstutter 2
+    --         --  (sseq sinf
+    --         --   (li
+    --         --    -- XXX: context reduction size has limitation.
+    --         --    -- Use quosi-quote?
+    --         --    0 0 1 0  0 0 1 0  0 0 1 0  0 0 1 0
+    --         --    0 0 1 0  0 0 1 0  0 1 0 1  0 1 0 1
+    --         --    0 1 0 1  0 1 0 1  0 0 1 0  1 0 1 0
+    --         --    1 0 0 0  1 0 0 0  1 0 0 1  0 1 0 1
+    --         --   )))
+    --         (sstutter
+    --          (siwhite sinf 1 3 * 4)
+    --          (srand sinf (li 0 1)))
     --     "dcy" ==>
     --         let df = tExpRand 'F' 1.7 5 (dust 'T' KR (1/4))
     --         -- in  (sinOsc KR df 0 + 1) * 0.8
@@ -58,10 +58,10 @@ t99 = withSC3 $ runTrack 99 $ do
     --         in  (60/120) / (tIRand 'a' 2 16 tr')
     --         -- in  tExpRand 'a' 0.1132 0.44 tr'
 
-    -- effect "eq02" $ do
-    --     "wet"   ==> curveTo EnvLin 32 1
-    --     "lfreq" ==> curveTo EnvCub 12 0.98
-    --     "hfreq" ==> curveTo EnvCub 12 0.02
+    effect "eq02" $ do
+        "wet"   ==> curveTo EnvLin 32 1
+        "lfreq" ==> curveTo EnvCub 12 0.98
+        "hfreq" ==> curveTo EnvCub 12 0.02
 
     effect "dc01" $ do
         "wet" ==> curveTo EnvLin 8 1
@@ -189,8 +189,17 @@ t106 = withSC3 $ runTrack 106 $ do
             --   , sseq 1 [sseq 3 [0], sseq 5 [1]]
             --   , sseq 1 [1,0,0,1,0,0,1,0] ]))
             -- (trigger $ sseq sinf [1,1,0,1])
-            (trigger $
-             sseq sinf [1, sseq (2 * srand sinf [1,2] - 1) [0]])
+
+            (trigger
+             (let p x = swhite 1 0 1 <=* x
+                  val = sseq sinf
+                        [ p 0.5
+                        , sseq ((2 * siwhite sinf 1 2) - 1) [0]
+                        , p 0.125
+                        , sseq (2 * siwhite sinf 1 2 - 1) [0] ]
+              in  val))
+            -- (trigger $
+            --  sseq sinf [1, sseq (2 * srand sinf [1,2] - 1) [0]])
         param "atk" $
             -- (linExp (lfdNoise1 'a' KR (1/7) + 2) 1 3 1e-3 0.99)
             -- (sustain
@@ -202,22 +211,32 @@ t106 = withSC3 $ runTrack 106 $ do
             linLin (lfdNoise1 'D' KR (1/8) + 2) 1 3 2 6
             -- (linExp (lfdNoise3 'a' KR 7 + 2) 1 3 2e-1 8)
 
+    effect "cmb03" $ do
+        param "wet" (curveTo EnvCub 8 0.8)
+        param "dlt" $
+            -- curveTo EnvCos 32 0.100
+            linLin (lfdNoise1 'V' KR 5.192 + 2) 1 3 0.100 0.104
+            -- linLin (lfdNoise3 'Y' KR (1/64)) (-1) 1 0.003 0.8
+        param "dcy" (curveTo EnvCub 32 8)
+
     effect' 1 "cmb03" $ do
         param "wet"
             (sustain
-             -- (sseq sinf
-             --  [ sseq 4 [0,0,srand 1 [1,0],0, 0,1,0,1]
-             --  , sseq 2 [sseq 4 [0], srand 4 [1,0]]
-             --  , srand 16 [0,1] ])
+             (sseq sinf
+              [ sseq 4 [0,0,srand 1 [1,0],0, 0,1,0,1]
+              , sseq 2 [sseq 4 [0], srand 4 [1,0]]
+              , srand 16 [0,1] ])
+
              -- (sval 0)
-             (sstutter 4
-              (sseq sinf
-               (li
-                (sseq 3 (li 0 0 0 1))
-                (srand 2 (li 0 1)) 1 1
-                (sseq 3
-                 (li 0 (srand 1 (li 0 1)) 0 (srand 1 (li 0 1))))
-                (srand 1 (li 1 0)) 1 1 1)))
+
+             -- (sstutter 4
+             --  (sseq sinf
+             --   (li
+             --    (sseq 3 (li 0 0 0 1))
+             --    (srand 2 (li 0 1)) 1 1
+             --    (sseq 3
+             --     (li 0 (srand 1 (li 0 1)) 0 (srand 1 (li 0 1))))
+             --    (srand 1 (li 1 0)) 1 1 1)))
 
              -- (sstutter 4
              --  (sseq sinf
@@ -229,15 +248,7 @@ t106 = withSC3 $ runTrack 106 $ do
         param "dcy"
             (linLin (lfdNoise3 'Y' KR 2 + 2) 1 3 0.1 2)
         param "dlt"
-            (linLin (lfdNoise3 'L' KR 3 + 2) 1 3 (recip 200) (recip 5))
-
-    effect "cmb03" $ do
-        param "wet" (curveTo EnvCub 8 0.3)
-        param "dlt" $
-            -- curveTo EnvCos 32 0.100
-            linLin (lfdNoise1 'V' KR 5.192 + 2) 1 3 0.100 0.104
-            -- linLin (lfdNoise3 'Y' KR (1/64)) (-1) 1 0.003 0.8
-        param "dcy" (curveTo EnvCub 32 8)
+            (linLin (lfdNoise3 'L' KR 3 + 2) 1 3 (recip 50) (recip 5))
 
     effect "dc01" $
         "wet" ==> curveTo EnvSin 4 1

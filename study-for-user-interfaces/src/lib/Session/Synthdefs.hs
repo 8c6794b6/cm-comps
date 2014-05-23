@@ -56,6 +56,21 @@ synth_saw02 = out obus osig
     tr   = tr_control "tr" 0
     k    = control KR
 
+synth_saw03 :: UGen
+synth_saw03 = out (k "out" 0) osig
+  where
+    osig = pan2 (mix $ saw AR freqs * aenv * 0.3) (linLin pan 0 1 (-1) 1) 1
+    aenv = envGen KR tr 1 0 dur DoNothing
+           (Envelope [0,1,0] [atk,1-atk] [EnvNum en] Nothing Nothing)
+    freqs = mce [freq, freq*0.998, freq*1.003]
+    freq = k "freq" 220
+    pan  = k "pan" 0
+    en   = k "en" 0
+    dur  = k "dur" 1
+    atk  = k "atk" 1e-4
+    tr   = tr_control "tr" 0
+    k    = control KR
+
 -- | Percussive synth with 'resonz'ated 'whiteNoise'.
 synth_nz02 :: UGen
 synth_nz02 = out (control KR "out" 0) $ pan2 osig pan 1
@@ -378,6 +393,23 @@ synth_lmt01 = replaceOut (kc "out" 0) osig
     wsig = limiter isig 1 1.0e-2
     wet  = kc "wet" 0
 
+gen_effect :: (UGen -> UGen) -> UGen
+gen_effect f = replaceOut (kc "out" 0) osig
+  where
+    osig = wet * wsig + (1-wet) * isig
+    isig = in' 2 AR (kc "in" 0)
+    wsig = f isig
+    wet  = kc "wet" 0
+
+synth_muladd :: UGen
+synth_muladd = gen_effect $ \isig ->
+    let mul = kc "mul" 1
+        add = kc "add" 0
+    in  mulAdd isig mul add
+
+synth_clip2 :: UGen
+synth_clip2 = gen_effect $ \isig -> clip2 isig (kc "clip" 1)
+
 -- --------------------------------------------------------------------------
 --
 -- * Auxiliary
@@ -401,3 +433,9 @@ pv_with2Inputs sigA sigB fpv = osig
 
 kc :: String -> Double -> UGen
 kc = control KR
+
+synth_bypass :: UGen
+synth_bypass = mrg outs
+  where
+    outs = [control KR [n] 0| n <- ns]
+    ns   = ['0'..'Z']
