@@ -53,6 +53,7 @@ import Sound.SC3.Tree
 
 import Sound.Study.ForUserInterfaces.Orphan ()
 
+
 -- --------------------------------------------------------------------------
 --
 -- * Synthdefs
@@ -149,6 +150,7 @@ instance Transport m => Transport (Track m)
 data TrackState = TrackState
     { tsGroupId       :: !Int
     , tsBeatOffset    :: Int
+    , tsRootNode      :: SCNode
     , tsCurrentNode   :: SCNode
     , tsTargetNodes   :: [SCNode]
     , tsControlBusNum :: Int
@@ -222,10 +224,15 @@ runTrack groupId trck = do
     send (c_get [controlBusCounter,countOut])
     [_,Float currentBusNum,_,Float cnt] <- waitDatum "/c_set"
 
-    node <- getNode groupId
+    -- node <- getNode groupId
+    rootNode <- getRootNode
+    let node = case queryN' (nodeId ==? groupId) rootNode of
+            Nothing -> error ("No group: " ++ show groupId)
+            Just n  -> n
     (val,st) <- runStateT (unTrack trck)
-                TrackState { tsGroupId = groupId
-                           , tsBeatOffset = 0
+                TrackState { tsGroupId     = groupId
+                           , tsBeatOffset  = 0
+                           , tsRootNode    = rootNode
                            , tsCurrentNode = node
                            , tsTargetNodes = []
                            , tsControlBusNum = truncate currentBusNum
@@ -514,13 +521,25 @@ input ::
     -> Input
 input = Input
 
+-- | Get input signal from other node.
+getInput :: Transport m => Int -> Condition SCNode -> String -> Track m UGen
+getInput gid ncond pname = do
+    st <- get
+    let tmpNode = tsRootNode st
+        gnode   = queryN' (nodeId ==? gid) tmpNode
+        snode   = queryN' ncond =<< gnode
+        mbprm   = queryP' (paramName ==? pname) =<< snode
+    case mbprm of
+        Just (_ :<- bus) -> return (in' 1 KR (fromIntegral bus))
+        _                -> return 0
+
 instance Assignable Input where
     assign node pname (Input gid scond pcond fu) = do
         st <- get
         -- Building node from `tsSourceNB st []' will not work since
         -- parameter names and mapped bus numbers are not tracked.
         -- Currently using SCNode built from `/g_queryTree.reply' message.
-        let tmpNode = tsCurrentNode st
+        let tmpNode = tsRootNode st
             gnode   = queryN' (nodeId ==? gid) tmpNode
             snode   = queryN' scond =<< gnode
             mbprm   = queryP' pcond =<< snode

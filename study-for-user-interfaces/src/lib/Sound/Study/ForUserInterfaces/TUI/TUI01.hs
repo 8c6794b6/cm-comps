@@ -80,6 +80,10 @@ countOut = 127
 sourceOut :: Num a => a
 sourceOut = 16
 
+-- | Reserved node id for master output.
+masterNid :: Num a => a
+masterNid = 99
+
 -- | Reserved node id for default target node to add new nodes.
 defaultTargetNid :: Num a => a
 defaultTargetNid = 10
