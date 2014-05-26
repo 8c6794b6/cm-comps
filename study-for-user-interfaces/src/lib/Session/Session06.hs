@@ -1,6 +1,6 @@
 module Session.Session06 where
 
-import Sound.Study.ForUserInterfaces.TUI.TUI01 (masterNid)
+import Control.Applicative ((<$>),(<*>))
 import Sound.Study.ForUserInterfaces.TUI.TUI02
 import Session.Synthdefs (synthdefs, changed)
 
@@ -31,7 +31,7 @@ t99 = withSC3 $ runTrack masterNid $ do
     effect "lmt01" $ do
         "wet" ==> curveTo EnvLin 16 1
     router $ do
-        "amp" ==> curveTo EnvCub 8 0
+        "amp" ==> curveTo EnvCub 8 1
 
 t103 :: IO ()
 t103 = withSC3 $ runTrack 103 $ do
@@ -163,36 +163,41 @@ t103 = withSC3 $ runTrack 103 $ do
         -- "amp" ==> curveTo EnvCub 16 0.38
         "amp" ==> curveTo EnvCub 8 0
 
-t104 :: IO ()
-t104 = withSC3 $ runTrack 104 $ do
+reset_t104 :: IO ()
+reset_t104 = withSC3 $ runTrack 104 $ router $ return ()
+
+t104a :: IO ()
+t104a = withSC3 $ runTrack 104 $ do
     offset 8
     let rep1   = siwhite sinf 1 4
-        in104  = input 104 (synthName ==? "saw03")
-        infreq = in104 (paramName ==? "freq")
         degs   = [0,3,5,7,10]
-    source "saw03" $ do
+    source "bypass" $ do
+        param "0" $ sustain
+            (srand sinf
+             [ sshuf rep1 [1,1,2]
+             , sseq rep1 [2,1,1]
+             , srand rep1 [sseq 1 [3,5], sseq 1 [5,3]]
+             , sseq (2 ** siwhite sinf 1 7) [1]
+             , sseq 1 [ 2, 1, 1, 1, 2, 1
+                      , srand 1
+                        [ srand 1 [4, sseq 1 [2,2]]
+                        , sseq 1 [1,1,1,1]]]
+             , 4, 8])
+    stut01 <- getInput 104 (synthName==?"bypass") "0"
+    let rot n = map (\x -> modE <$> (x+n) <*> 12) degs
+    s03freq <- source "saw03" $ do
         param "freq"
             (sustain
              (sstutter
-              (srand sinf
-               [ sshuf rep1 [1,1,2]
-               , sseq rep1 [2,1,1]
-               , srand rep1 [sseq 1 [3,5], sseq 1 [5,3]]
-               , sseq (2 ** siwhite sinf 1 7) [1]
-               , sseq 1 [ 2,1,1, 1,2,1
-                        , srand 1
-                          [ srand 1 [4, sseq 1 [2,2]]
-                          , sseq 1 [1,1,1,1] ]]
-               , 4, 8
-               ])
+              (sval stut01)
               (midiCPS
                (sseq sinf
                 [ sxrand sinf
                   [ sseq rep1 degs
-                  , sseq rep1 [0,3,5,8,10]
-                  , sseq rep1 [0,2,5,7,10] -- map (\x -> (x+7) `mod` 12) degs
-                  , sseq rep1 [1,3,6,8,10]
-                  , sseq rep1 [1,3,5,8,10]
+                  , sseq rep1 (rot 3)  -- [0,3,5,8,10]
+                  , sseq rep1 (rot 5)  -- [0,2,5,7,10]
+                  , sseq rep1 (rot 7)  -- [1,3,6,8,10]
+                  , sseq rep1 (rot 10) -- [1,3,5,8,10]
                   ] ] +
                 (12 *
                  let lo = srand 1 [3,4]
@@ -203,26 +208,24 @@ t104 = withSC3 $ runTrack 104 $ do
                 (2 ** siwhite sinf 5 9)
                 (srand sinf [-10,-7,-5,-3])
                ))))
+        s03freq <- getInput 104 (synthName ==? "saw03") "freq"
         param "tr"
-            (infreq
-             (\tr isig ->
-               changed isig 0 + coinGate 'd' 0.05 tr))
+            (\tr -> changed s03freq 0 + coinGate 'd' 0.05 tr)
         param "en"
             (linLin (lfdNoise1 'E' KR (1/7) + 2) 1 3 (-5) 5)
         param "pan"
-            (infreq
-             (\_tr isig ->
-               tRand 'P' 0 1 (changed isig 0)))
-        param "dur"
-            (curveTo EnvCub 8 3.3)
+            (tRand 'P' 0.4 0.6 (changed s03freq 0))
+        param "dur" $
+            -- (curveTo EnvCub 8 3.3)
+            -- (\tr -> (60/120) * stut01 * (1/4) * tIRand 'd' 1 4 (coinGate 'D' 0.5 tr))
+            (\tr -> (60/120) * stut01 * (1/4) * tIRand 'd' 1 4 tr)
         param "atk"
-            (infreq
-             (\_tr isig ->
-               tExpRand 'A' 1e-3 0.999 (changed isig 0)))
+            (tExpRand 'A' 1e-3 0.999 (changed s03freq 0))
+        return s03freq
 
     effect "muladd" $ do
         "wet" ==> curveTo EnvLin 8 1
-        "mul" ==> curveTo EnvCub 4 200
+        "mul" ==> curveTo EnvCub 4 50
 
     effect "clip2" $ do
         param "wet" $ curveTo EnvLin 4 1
@@ -230,31 +233,33 @@ t104 = withSC3 $ runTrack 104 $ do
 
     effect' 1 "muladd" $ do
         param "wet" $ curveTo EnvLin 4 1
-        param "mul" $ curveTo EnvCub 4 0.3
+        param "mul" $ curveTo EnvCub 4 0.4
 
     effect "lpf01" $ do
         param "wet" (curveTo EnvLin 8 1)
         param "cf"
-            (infreq
-             (\tr isig ->
-               let tr' = coinGate 'T' 0.01 tr + changed isig 0
-                   dur = tExpRand 'D' 0.4 0.8 tr'
-                   ccf = linExp (squared (lfdNoise1 'L' KR (5/3)) + 1) 1 2
-                         2000 12000
-               in  decay tr' dur * ccf))
+            -- (curveTo EnvCub 8 8000)
+            (\tr ->
+              let tr' = coinGate 'T' 0.01 tr + changed s03freq 0
+                  dur = tExpRand 'D' 0.4 0.8 tr'
+                  ccf = linExp (squared (lfdNoise1 'L' KR (5/3)) + 1) 1 2
+                        2000 12000
+              in  decay tr' dur * ccf)
         param "rq"
             -- (linLin (sinOsc KR (1/3) 0) (-1) 1 0.1 0.8)
             (curveTo EnvLin 8 0.6)
 
     effect "cmb02" $ do
-        param "wet" (curveTo EnvCub 32 0.003)
+        param "wet" (curveTo EnvCub 32 0.08)
         param "dcy" (curveTo EnvCub 1e-9 4)
         param "dlt" (curveTo EnvCub 1e-9 ((120/60) * (0.98/4)))
 
     effect "ap02" $ do
         param "wet"
             -- (curveTo EnvLin 8 1)
-            (squared (squared (lfSaw KR (1/128) 0)) `lag` 0.1)
+            -- (squared (squared (lfSaw KR (1/128) 0)) `lag` 0.1)
+            (let df = linLin (sinOsc KR (1/128) 0 + 2) 1 3 (1/128) 128
+             in  squared (squared (lfSaw KR df 0)) `lag` 0.2)
         param "dcy" (curveTo EnvCub 64 8)
 
     effect' 1 "ap02" $ do
@@ -265,8 +270,83 @@ t104 = withSC3 $ runTrack 104 $ do
         "wet" ==> curveTo EnvCub 8 1
 
     router $ do
-        -- "amp" ==> curveTo EnvCub 8 0.8
-        "amp" ==> curveTo EnvCub 8 0
+        "amp" ==> curveTo EnvCub 8 0.8
+        -- "amp" ==> curveTo EnvCub 8 0
+
+t104b :: IO ()
+t104b = withSC3 $ runTrack 104 $ do
+    offset 8
+    let rep1 = siwhite sinf 1 4
+        degs = [0,3,5,7,10]
+    source "bypass" $ do
+        param "0" $ sustain
+            (srand sinf
+             [ sshuf rep1 [1,1,2]
+             , sseq rep1 [2,1,1]
+             , srand rep1 [sseq 1 [3,5], sseq 1 [5,3]]
+             , sseq (2 ** siwhite sinf 1 7) [1]
+             , sseq 1 [ 2, 1, 1, 1, 2, 1
+                      , srand 1
+                        [ srand 1 [4, sseq 1 [2,2]]
+                        , sseq 1 [1,1,1,1]]]
+             , 4, 8]
+            )
+    stut01 <- getInput 104 (synthName==?"bypass") "0"
+    let rot n = map (\x -> (modE) <$> (x+n) <*> 12) degs
+    source "saw04" $ do
+        param "freq"
+            (sustain
+             (sstutter
+              (sval stut01)
+              (midiCPS
+               (sseq sinf
+                [ sxrand sinf
+                  (map (sseq rep1 . rot) [0,3,5,7,10]) ] +
+                (let lo = srand 1 [3,4]
+                     hi = srand 1 [6,7]
+                 in  12 * sseq sinf [lo,5,5,5, hi,5,5,5]) +
+                sstutter
+                (2 ** siwhite sinf 5 9)
+                (srand sinf [-10,-7,-5,-3])
+               ))))
+        sfreq <- getInput 104 (synthName ==? "saw04") "freq"
+        param "tr"
+            (\tr -> changed sfreq 0 + coinGate 'd' 0.05 tr)
+        tr <- getInput 104 (synthName ==? "saw04") "tr"
+        param "dur"
+            (let pat = siwhite sinf 1 4
+                 tr' = coinGate 'g' 0.25 tr
+             in  (60/120) * (stut01/4) * demand tr' 1 (supply 0x87834 pat))
+        param "atk" (tExpRand 'A' 1e-3 0.999 tr)
+        param "pan" (tRand 'P' 0.4 0.6 tr)
+        param "en" (linLin (lfdNoise1 'E' KR (1/7) + 2) 1 3 (-5) 5)
+        param "gain" (curveTo EnvLin 8 50)
+        param "clp2" (curveTo EnvCub 8 0.6)
+        param "rq" (curveTo EnvCub 8 0.6)
+        param "cf"
+            (linExp (squared (lfdNoise1 'D' KR (5/3)) + 1) 1 2 2000 12000)
+
+    effect "cmb02" $ do
+        param "wet" (curveTo EnvCub 32 0.08)
+        param "dcy" (curveTo EnvCub 1e-9 4)
+        param "dlt" (curveTo EnvCub 1e-9 ((120/60) * (0.98/4)))
+
+    effect "ap02" $ do
+        param "wet"
+            (let df = linLin (sinOsc KR (1/128) 0 + 2) 1 3 (1/128) 128
+             in  squared (squared (lfSaw KR df 0)) `lag` 0.2)
+        param "dcy" (curveTo EnvCub 64 8)
+
+    effect' 1 "ap02" $ do
+        param "wet" (mulAdd (sinOsc KR (1/126) 0) 0.5 0.5)
+        param "dcy" (squared (squared (lfSaw KR 2 0)) `lag` 0.1)
+
+    effect "dc01" $ do
+        "wet" ==> curveTo EnvCub 8 1
+
+    router $ do
+        "amp" ==> curveTo EnvCub 8 0.8
+        -- "amp" ==> curveTo EnvCub 8 0
 
 t108_freqbuf :: Num a => a
 t108_freqbuf = 13
@@ -326,7 +406,7 @@ t108 = withSC3 $ runTrack 108 $ do
     effect "lmt01" $ do
         "wet" ==> curveTo EnvLin 8 1
     router $ do
-        "amp" ==> curveTo EnvCub 8 0
+        "amp" ==> curveTo EnvCub 8 0.4
 
 main :: IO ()
 main = t99 >> t103

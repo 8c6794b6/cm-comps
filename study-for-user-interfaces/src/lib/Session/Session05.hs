@@ -173,7 +173,7 @@ t107 = withSC3 $ runTrack 107 $ do
     effect "dc01" $ do
         sus "wet" (sval 1)
     router $ do
-        "amp"  ==> curveTo EnvCub 16 0
+        "amp"  ==> curveTo EnvCub 16 1
 
 -- | Using same source synth multiple times.
 t108 :: IO ()

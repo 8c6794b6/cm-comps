@@ -59,17 +59,56 @@ synth_saw02 = out obus osig
 synth_saw03 :: UGen
 synth_saw03 = out (k "out" 0) osig
   where
-    osig = pan2 (mix $ saw AR freqs * aenv * 0.3) (linLin pan 0 1 (-1) 1) 1
-    aenv = envGen KR tr 1 0 dur DoNothing
-           (Envelope [0,1,0] [atk,1-atk] [EnvNum en] Nothing Nothing)
+    osig  = pan2 saws (linLin pan 0 1 (-1) 1) 1
+    saws  = mix $ saw AR freqs * aenv * 0.3
+    aenv  = envGen KR tr 1 0 dur DoNothing
+            (Envelope [0,1,0] [atk,1-atk] [EnvNum en] Nothing Nothing)
     freqs = mce [freq, freq*0.998, freq*1.003]
+    freq  = k "freq" 220
+    pan   = k "pan" 0
+    en    = k "en" 0
+    dur   = k "dur" 1
+    atk   = k "atk" 1e-4
+    tr    = tr_control "tr" 0
+    k     = control KR
+
+-- | Polyphony sum of 'saw' oscillators with 'rlpf'.
+synth_saw04 :: UGen
+synth_saw04 = out (k "out" 0) osig
+  where
+    osig = sum (map fsig [0..npoly-1])
+    npoly :: Int
+    npoly = 8
+    fsig i = pan2 saws (linLin pani 0 1 (-1) 1) 1
+      where
+        saws  = mix (rlpf sig0 cfi rqi * 0.3 * aenv)
+        sig0  = clip2 (saw AR freqs * preg) clp2
+        aenv  = envGen KR tri 1 0 duri DoNothing
+                (Envelope [0,1,0] [atki,reli] [EnvNum eni] Nothing Nothing)
+        freqs = mce [freqi, freqi*0.998, freqi*1.003]
+        tri   = pulseDivider tr (c npoly) (c i)
+        duri  = gate dur tri
+        atki  = gate atk tri
+        reli  = 1 - atki
+        -- eni   = gate en tri
+        eni   = en
+        freqi = gate freq tri
+        pani  = gate pan tri
+        cfi   = gate cf tri * decay tri cdu
+        cdu   = tExpRand i 0.4 0.8 tri
+        rqi   = gate rq tri
+    cf   = k "cf" 8000
     freq = k "freq" 220
     pan  = k "pan" 0
     en   = k "en" 0
     dur  = k "dur" 1
     atk  = k "atk" 1e-4
+    rq   = k "rq" 0.6
+    clp2 = k "clp2" 0.6
+    preg = k "gain" 1
     tr   = tr_control "tr" 0
     k    = control KR
+    c    = constant
 
 -- | Percussive synth with 'resonz'ated 'whiteNoise'.
 synth_nz02 :: UGen
@@ -258,6 +297,22 @@ synth_fm01 = out obus osig
     tr   = tr_control "tr" 0
     k    = control KR
 
+synth_pls01 :: UGen
+synth_pls01 = out (kc "out" 0) (pan2 osig (linLin pan 0 1 (-1) 1) 1)
+  where
+    osig = pulse AR freq wdth * aenv * 0.3
+    freq = kc "freq" 440
+    wdth = linLin (sinOsc KR wf 0) (-1) 1 0 0.5
+    aenv = envGen KR tr 1 0 dur DoNothing
+           (Envelope [0,1,1,0] [atk,sus,1-atk-sus] [EnvCub] Nothing Nothing)
+    dur = kc "dur" 0.8
+    atk = kc "atk" 1e-3
+    sus = kc "sus" 1e-1
+    wf  = kc "wf" 0.5
+    pan = kc "pan" 0
+    tr  = tr_control "tr" 0
+
+
 -- --------------------------------------------------------------------------
 --
 -- * Effect synthdefs
@@ -438,7 +493,7 @@ synth_bypass :: UGen
 synth_bypass = mrg outs
   where
     outs = [control KR [n] 0| n <- ns]
-    ns   = ['0'..'Z']
+    ns   = ['0'..'z']
 
 -- | Triggers when input signal has changed.
 --
