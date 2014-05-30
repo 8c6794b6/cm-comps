@@ -13,7 +13,9 @@ module Sound.Study.ForUserInterfaces.Misc.Demand where
 
 import Control.Concurrent (threadDelay)
 import Control.Monad (forM_)
+import Data.List (unfoldr)
 import System.Random
+import System.Random.Shuffle
 
 import Sound.OSC
 import Sound.SC3
@@ -1055,6 +1057,365 @@ poly_01 = audition $ out 0 osig
         midx    = linLin (control KR "midx" 0.25) 0 1 0 16
         cfm     = linLin (control KR "cfm" 0.2) 0 1 1 8
 
+
+-- --------------------------------------------------------------------------
+--
+-- * Dfsm
+--
+-- --------------------------------------------------------------------------
+
+-- | /Dfsm/ from sc3-plugins.
+dfsm' ::
+    ID i
+    => i
+    -> UGen -- ^ Number of items to embed.
+    -> UGen -- ^ Random generator.
+    -> UGen -- ^ Initial state.
+    -> UGen -- ^ End state, 0 for infinite loop.
+    -> [(UGen,[UGen])] -- ^ Pair of value, next state index.
+    -> UGen
+dfsm' i n rgn initialState endState val_x_nexts =
+    let len   = length val_x_nexts + 1
+        l     = constant len
+        sizes = 1 : map (\(_,ns) -> constant (length ns)) val_x_nexts
+        vals  = endState : map fst val_x_nexts
+        nexts = initialState : concatMap snd val_x_nexts
+        array = mce (sizes ++ vals ++ nexts)
+    in  mkOscMCEId i DR "Dfsm" [n,rgn,l] array 1
+
+-- | /Dfsm/ from sc3-plugins.
+dfsm ::
+    ID i
+    => i
+    -> UGen -- ^ Number of items to embed.
+    -> UGen -- ^ Random generator.
+    -> UGen
+    -- ^ Pair of state and values. Format is:
+    --
+    -- > [
+    -- >   entry state,
+    -- >   value 1, [ next states 1 ],
+    -- >   value 2, [ next states 2 ],
+    -- >   ....
+    -- > , end idtem
+    -- > ]
+    --
+    -- If no \"end item\" is given, 0.0 is used as default.
+    --
+    -> UGen
+dfsm i n rgn val_x_nexts =
+    let len = mceDegree val_x_nexts
+        c = constant
+        (l,vns)
+            | odd len   = (c ((len+1) `div` 2), 0 : mceChannels val_x_nexts)
+            | otherwise = (c (len `div` 2), rot (mceChannels val_x_nexts))
+        rot xs = last xs : init xs
+        (_,vals',nexts') =
+            let f x (isVal,vs,ns)
+                    | isVal     = (not isVal, x:vs, ns)
+                    | otherwise = (not isVal, vs, x:ns)
+            in  foldr f (False,[],[]) vns
+        sizes = map (c . mceDegree') nexts'
+        array = mce (sizes ++ vals' ++ concatMap mceChannels nexts')
+    in  mkOscMCEId i DR "Dfsm" [n,rgn,l] array 1
+
+{-
+b parameters:
+  ugen specs:
+    0: MouseX kr (4.0) (100.0) (1.0) (0.1) (out:kr)
+    1: Impulse kr (ugen 0:0) (0.0) (out:kr)
+    2: Dwhite dr (9.0e8) (0.0) (1.0) (out:dr)
+    3: Dfsm dr (1.0) (ugen 2:0)
+       (3.0)
+       (1.0) (2.0) (2.0)
+       (0.0) (1.5) (2.5)
+       (1.0)
+       (0.0) (1.0)
+       (0.0) (1.0)
+       (out:dr)
+    4: Demand kr (ugen 1:0) (1.0) (ugen 3:0) (out:kr)
+    5: (*) kr (ugen 4:0) (200.0) (out:kr)
+    6: (+) kr (ugen 5:0) (300.0) (out:kr)
+    7: SinOsc ar (ugen 6:0) (0.0) (out:ar)
+    8: (*) ar (ugen 7:0) (0.1) (out:ar)
+    9: (*) kr (ugen 6:0) (1.01) (out:kr)
+    10: SinOsc ar (ugen 9:0) (0.0) (out:ar)
+    11: (*) ar (ugen 10:0) (0.1) (out:ar)
+    12: Out ar (0.0) (ugen 8:0) (ugen 11:0)
+
+a parameters:
+  ugen specs:
+    0: MouseX kr (4.0) (100.0) (1.0) (0.1) (out:kr)
+    1: Impulse kr (ugen 0:0) (0.0) (out:kr)
+    2: Dwhite dr (9.0e8) (0.0) (1.0) (out:dr)
+    3: Dfsm dr (1.0) (ugen 2:0)
+      (3.0)
+      (2.0) (2.0) (1.0)
+      (0.0) (1.5) (2.5)
+      (1.0)
+      (0.0) (1.0)
+      (0.0) (1.0) (out:dr)
+    4: Demand kr (ugen 1:0) (1.0) (ugen 3:0) (out:kr)
+    5: (*) kr (ugen 4:0) (200.0) (out:kr)
+    6: (+) kr (ugen 5:0) (300.0) (out:kr)
+    7: SinOsc ar (ugen 6:0) (0.0) (out:ar)
+    8: (*) ar (ugen 7:0) (0.1) (out:ar)
+    9: (*) kr (ugen 6:0) (1.01) (out:kr)
+    10: SinOsc ar (ugen 9:0) (0.0) (out:ar)
+    11: (*) ar (ugen 10:0) (0.1) (out:ar)
+    12: Out ar (0.0) (ugen 8:0) (ugen 11:0)
+
+-}
+
+mceDegree' :: UGen -> Int
+mceDegree' u =
+    case u of
+        MCE_U m         -> length (mceProxies m)
+        MRG_U (MRG x _) -> mceDegree x
+        _               -> 1
+
+{-
+dfsm-ex01
+  parameters:
+  ugen specs:
+    0: Impulse kr (4.0) (0.0) (out:kr)
+    1: Dwhite dr (Infinity) (0.0) (1.0) (out:dr)
+    2: Dfsm dr (1.0) (ugen 1:0)
+       (4.0)                   -- length of state sizes
+       (1.0) (3.0) (2.0) (1.0) -- state sizes
+       (0.0) (1.5) (2.5) (0.5) -- values
+       (0.0)                   -- next state for state 1 (size = 1)
+       (0.0) (0.0) (1.0)       -- next states for state 2 (size = 3)
+       (1.0) (2.0)             -- next states for state 3 (size = 2)
+       (0.0)                   -- next states for state 4 (size = 1)
+       (out:dr)
+    3: Demand kr (ugen 0:0) (0.0) (ugen 2:0) (out:kr)
+    4: MulAdd kr (ugen 3:0) (200.0) (300.0) (out:kr)
+    5: SinOsc ar (ugen 4:0) (0.0) (out:ar)
+    6: (*) ar (ugen 5:0) (0.1) (out:ar)
+    7: Out ar (0.0) (ugen 6:0)
+-}
+
+dfsm_ex01 :: IO ()
+dfsm_ex01 =
+    let so   = sinOsc AR (mce [freq,freq*1.01]) 0 * 0.1
+        freq = demand tr 1 pat * 200 + 300
+        tr   = impulse KR (mouseX KR 4 100 Exponential 0.1) 0
+        n    = 1
+        r    = dwhite 'b' dinf 0 1
+        ini  = 1
+        pat  = dfsm' 'a' n r ini 0 [(1.5,[0,1]),(2.5,[0,1])]
+    in  synthdefWrite (synthdef "b" (out 0 so)) "/tmp" >> audition (out 0 so)
+
+dfsm_ex012 :: IO ()
+dfsm_ex012 =
+    let so   = sinOsc AR (mce [freq,freq*1.01]) 0 * 0.1
+        freq = demand tr 1 pat * 200 + 300
+        tr   = impulse KR (mouseX KR 4 100 Exponential 0.1) 0
+        n    = 1
+        r    = dwhite 'b' dinf 0 1
+        ini  = 1
+        pat  = dfsm 'a' n r (mce [ini, 1.5 ,mce [0,1], 2.5, mce [0,1]])
+        def = synthdef "a" (out 0 so)
+    in  audition (out 0 so)
+
+dfsm_ex02 :: IO ()
+dfsm_ex02 =
+    let o = sinOsc AR (mce [b,b*1.01]) 0 * 0.1
+        a = dfsm' 'α' 1 r 0 0 [(1.5,[0,0,1]), (2.5,[1,2]), (0.5,[0])]
+        b = demand t 0 a * 200 + 300
+        t = impulse KR (mouseX KR 4 100 Exponential 0.1) 0
+        r = dwhite 'δ' dinf 0 1
+    in  audition (out 0 o)
+
+dfsm_ex022 :: IO ()
+dfsm_ex022 =
+    let o = sinOsc AR (mce [b,b*1.01]) 0 * 0.1
+        a = dfsm 'α' 1 r
+            (mce [0, 1.5, mce [0,0,1], 2.5, mce [1,2], 0.5, mce [0]])
+        b = demand t 0 a * 200 + 300
+        t = impulse KR (mouseX KR 4 100 Exponential 0.1) 0
+        r = dwhite 'δ' dinf 0 1
+    in  audition (out 0 o)
+
+dfsm_ex03 :: IO ()
+dfsm_ex03 =
+    let o = sinOsc AR (b * 200 + 700) 0 * 0.1
+        b = demand t 0 a
+        t = impulse KR (mouseX KR 4 100 Exponential 0.1) 0
+        r = dwhite 'ω' inf 0 1
+        e = dseq 'δ' inf (mce [4,5,3])
+        a = dfsm' 'α' 2 r 0 e
+            [ (dseq 'β' inf (mce [-2,-3]), [1])
+            , (dseq 'γ' inf (mce [1,2,1.5]), [0,0,0,1,2])
+            ]
+        inf = constant (1/0 :: Float)
+    in  audition (out 0 o)
+
+dfsm_ex032 :: IO ()
+dfsm_ex032 =
+    let o = sinOsc AR (b * 200 + 700) 0 * 0.1
+        b = demand t 0 a
+        t = impulse KR (mouseX KR 4 100 Exponential 0.1) 0
+        r = dwhite 'ω' inf 0 1
+        a = dfsm 'α' 2 r
+            (mce [ 0
+                 , dseq 'β' inf (mce [-2,-3]), 1
+                 , dseq 'γ' inf (mce [1,2,1.5]), mce [0,0,0,1,2]
+                 , dseq 'δ' inf (mce [4,5,3])
+                 ])
+        inf = constant (1/0 :: Float)
+    in  audition (out 0 o)
+
+dfsm_ex04 :: IO ()
+dfsm_ex04 = do
+    g <- newStdGen
+    let n = mouseX KR 1 13 Exponential 0.1
+        fsig g0 =
+            let nexts = flip unfoldr g0 $ \g1 ->
+                    let xs     = randomRs (0,3) g1
+                        (l,g2) = randomR (2,5) g1
+                    in  Just (take l xs, g2)
+                (i,g1) = next g0
+                inf = constant (1/0 :: Double)
+                rs = shuffle' [0..10] 11 g0
+                -- pr = dswitch1 'ε' (mce rs / 10)
+                --      (dwhite 'a' inf 0 1 * mouseY KR 1 10 Exponential 0.1)
+                pr = dwhite 'a' inf 0 1
+                d  = dfsm' 'ζ' n pr 0 0
+                     [ (dseq 'η' inf (mce [0,0,1]),
+                        head nexts)
+                     , (dseq 'θ' inf
+                        (mce ((-1):replicate (fst (randomR (3,13) g0)) 0)),
+                        nexts !! 1)
+                     , (dseq 'ι' inf
+                        (mce (1:0:(-1):0:replicate (fst (randomR (5,15) g0)) 0)),
+                        nexts !! 2)
+                     , (dwhite 'κ' inf 0 1,
+                        nexts !! 3)
+                     ]
+                o = pan2 (duty AR sampleDur 0 DoNothing d) (lfNoise1 i KR 1) 1
+            in  (g1,o)
+        sig = go 5 0 g
+          where
+            go 0 acc _  = acc
+            go i acc g0 = let (g',x) = fsig g0 in go (i-1) (x+acc) g'
+    audition (out 0 (sig * 0.1))
+
+dfsm_ex042 :: IO ()
+dfsm_ex042 = do
+    g <- newStdGen
+    let n = mouseX KR 1 13 Exponential 0.1
+        fsig g0 =
+            let nexts = flip unfoldr g0 $ \g1 ->
+                    let xs     = randomRs (0,3) g1
+                        (l,g2) = randomR (2,5) g1
+                    in  Just (take l xs, g2)
+                (i,g1) = next g0
+                inf = constant (1/0 :: Double)
+                rs = shuffle' [0..10] 11 g0
+                pr = dwhite 'a' inf 0 1
+                d  = dfsm 'ζ' n pr
+                     (mce
+                      [ 0
+                      , dseq 'η' inf (mce [0,0,1])
+                      , mce (head nexts)
+                      , dseq 'θ' inf
+                        (mce ((-1):replicate (fst (randomR (3,13) g0)) 0))
+                      , mce (nexts !! 1)
+                      , dseq 'ι' inf
+                        (mce (1:0:(-1):0:replicate (fst (randomR (5,15) g0)) 0))
+                      , mce (nexts !! 2)
+                      , dwhite 'κ' inf 0 1
+                      , mce (nexts !! 3) ])
+                o = pan2 (duty AR sampleDur 0 DoNothing d) (lfNoise1 i KR 1) 1
+            in  (g1,o)
+        sig = go 5 0 g
+          where
+            go 0 acc _  = acc
+            go i acc g0 = let (g',x) = fsig g0 in go (i-1) (x+acc) g'
+    audition (out 0 (sig * 0.1))
+
+dseq_inf :: IO ()
+dseq_inf =
+    let o = sinOsc AR (mce [b,b*1.01]) 0 * 0.1
+        b = demand t 0 a * 200 + 700
+        t = impulse KR (mouseX KR 4 100 Exponential 0.1) 0
+        a = dseq 'a' i (dshuf 'b' r (mce [-2,1,2,1.5,-3,4]))
+        r = 2 ** diwhite 'c' i 1 3
+        i = constant (1/0 :: Float)
+    in  audition (out 0 o)
+
+{-
+dfsm-ex03
+  parameters:
+  ugen specs:
+    0: MouseX kr (4.0) (100.0) (1.0) (0.2) (out:kr)
+    1: Impulse kr (ugen 0:0) (0.0) (out:kr)
+    2: Dseq dr (Infinity) (-2.0) (-3.0) (out:dr)
+    3: Dseq dr (Infinity) (1.0) (2.0) (1.5) (out:dr)
+    4: Dseq dr (Infinity) (4.0) (5.0) (3.0) (out:dr)
+    5: Dwhite dr (Infinity) (0.0) (1.0) (out:dr)
+    6: Dfsm dr (2.0) (ugen 5:0)
+      (3.0)                            -- length of state size
+      (1.0) (1.0) (5.0)                -- state sizes
+      (ugen 4:0) (ugen 2:0) (ugen 3:0) -- values
+      (0.0)                            -- next state for value 1
+      (1.0)                            -- next state for value 2
+      (0.0) (0.0) (0.0) (1.0) (2.0)    -- next state for value 3
+      (out:dr)
+    7: Demand kr (ugen 1:0) (0.0) (ugen 6:0) (out:kr)
+    8: MulAdd kr (ugen 7:0) (200.0) (700.0) (out:kr)
+    9: SinOsc ar (ugen 8:0) (0.0) (out:ar)
+    10: (*) ar (ugen 9:0) (0.1) (out:ar)
+    11: Out ar (0.0) (ugen 10:0)
+
+synthdef spec ver.0
+dfsm-ex03-hsc3
+  parameters:
+  ugen specs:
+    0: MouseX kr (4.0) (100.0) (1.0) (0.1) (out:kr)
+    1: Impulse kr (ugen 0:0) (0.0) (out:kr)
+    2: Dwhite dr (Infinity) (0.0) (1.0) (out:dr)
+    3: Dseq dr (Infinity) (4.0) (5.0) (3.0) (out:dr)
+    4: Dseq dr (Infinity) (-2.0) (-3.0) (out:dr)
+    5: Dseq dr (Infinity) (1.0) (2.0) (1.5) (out:dr)
+    6: Dfsm dr (2.0) (ugen 2:0)
+       (3.0)
+       (1.0) (1.0) (5.0)
+       (ugen 3:0) (ugen 4:0) (ugen 5:0)
+       (0.0)
+       (1.0)
+       (0.0) (0.0) (0.0) (1.0) (2.0)
+       (out:dr)
+    7: Demand kr (ugen 1:0) (0.0) (ugen 6:0) (out:kr)
+    8: (*) kr (ugen 7:0) (200.0) (out:kr)
+    9: (+) kr (ugen 8:0) (700.0) (out:kr)
+    10: SinOsc ar (ugen 9:0) (0.0) (out:ar)
+    11: (*) ar (ugen 10:0) (0.1) (out:ar)
+    12: Out ar (0.0) (ugen 11:0)
+
+synthdef spec ver.0
+dfsm-ex03-hsc3
+  parameters:
+  ugen specs:
+    0: MouseX kr (4.0) (100.0) (1.0) (0.1) (out:kr)
+    1: Impulse kr (ugen 0:0) (0.0) (out:kr)
+    2: Dwhite dr (9.0e8) (0.0) (1.0) (out:dr)
+    3: Dseq dr (9.0e8) (-2.0) (-3.0) (out:dr)
+    4: Dseq dr (9.0e8) (1.0) (2.0) (1.5) (out:dr)
+    5: Dseq dr (9.0e8) (4.0) (5.0) (3.0) (out:dr)
+    6: Dfsm dr (2.0) (ugen 2:0)
+       (4.0)
+       (1.0) (1.0) (5.0) (0.0) (2.0) (ugen 3:0) (ugen 4:0) (ugen 5:0) (0.0) (1.0) (0.0) (0.0) (0.0) (1.0) (2.0) (out:dr)
+    7: Demand kr (ugen 1:0) (0.0) (ugen 6:0) (out:kr)
+    8: (*) kr (ugen 7:0) (200.0) (out:kr)
+    9: (+) kr (ugen 8:0) (700.0) (out:kr)
+    10: SinOsc ar (ugen 9:0) (0.0) (out:ar)
+    11: (*) ar (ugen 10:0) (0.1) (out:ar)
+    12: Out ar (0.0) (ugen 11:0)
+
+-}
 
 -- --------------------------------------------------------------------------
 --
