@@ -31,6 +31,7 @@ library
                      Sound.Study.ForUserInterfaces.TUI.TUI01
                      Sound.Study.ForUserInterfaces.TUI.TUI02
                      Sound.Study.ForUserInterfaces.Orphan
+                     Sound.Study.ForUserInterfaces.Misc.Demand
                      Paths_study_for_user_interfaces
   other-modules:     Session.Session01
                      Session.Session02
@@ -38,6 +39,7 @@ library
                      Session.Session04
                      Session.Session05
   build-depends:     base >=4.6
+                   , bytestring
                    , containers
                    , filepath
                    , hashable
@@ -45,12 +47,14 @@ library
                    , hsc3 >= 0.14
                    , hsc3-db
                    , hsc3-lang
+                   , hsc3-parser
                    , hsc3-supply
                    , hsc3-th
                    , hsc3-tree
                    , mtl
                    , murmur-hash
                    , random
+                   , random-shuffle
                    , threepenny-gui
                    , transformers
 

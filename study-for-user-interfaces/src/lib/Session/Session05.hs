@@ -76,9 +76,8 @@ t103 = withSC3 $ runTrack 103 $ do
     effect "dc01" $
         "wet" ==> curveTo EnvLin 8 1
     router $ do
-        amp $ curveTo EnvCub 16 1
-        -- -- amp $ curveTo EnvCub 1e-9 0
-        -- amp $ curveTo EnvCub 16 0
+        -- amp $ curveTo EnvCub 16 1
+        amp $ curveTo EnvCub 1e-9 0
 
 ng01 :: IO ()
 ng01 = withSC3 $ runTrack 103 $ do
@@ -107,8 +106,8 @@ t106 = withSC3 $ runTrack 106 $ do
             let fq = linExp (lfdNoise1 'A' KR (1/32) + 2) 1 3 (1/3) 3
             in  lfTri KR fq 0 * 0.5 + 0.5
     router $ do
-        "amp" ==> curveTo EnvCub 1e-9 0
-        -- "amp" ==> curveTo EnvCub 32 1
+        -- "amp" ==> curveTo EnvCub 1e-9 0
+        "amp" ==> curveTo EnvCub 32 0
 
 
 -- | Using same synthdef multiple times in one track.

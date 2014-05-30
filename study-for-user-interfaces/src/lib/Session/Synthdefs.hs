@@ -139,6 +139,76 @@ synth_bd03 = out (control KR "out" 0) $ pan2 osig pan 1
     pan   = linLin (control KR "pan" 0.5) 0 1 (-1) 1
     t_tr0 = tr_control "t_tr0" 1
 
+synth_snr01 :: UGen
+synth_snr01 = out (control KR "out" 0) (pan2 osig pan 1)
+  where
+    osig   = (nz + oscs) * amp
+    nz     = rhpf (whiteNoise 'Γ' AR) (cf * fenv + 100) rq * aenv0
+    aenv0  = envGen KR tr 1 0 durn DoNothing
+             (Envelope [0,1,1,0] [atkn,susn,reln] [EnvNum enn] Nothing Nothing)
+    oscs   = resonz (mix (fosc (mce frqs * fenv)) * aenv1) cf rq
+    fosc x = pulse AR x wdth
+    aenv1  = envGen KR tr 1 0 duro DoNothing
+             (Envelope [0,1,1,0] [atko,suso,relo] [EnvNum eno] Nothing Nothing)
+    fenv   = envGen KR tr 1 0 duro DoNothing
+             (Envelope [1,1,0.5] [atko,1-atko] [EnvCub] Nothing Nothing)
+    frqs   = [108.32, 150.32, 202.321, 257.83, 301.23]
+    tr     = tr_control "tr" 0
+    reln   = 1 - atkn - susn
+    relo   = 1 - atko - suso
+    wdth   = kc "wdth" 0.25
+    amp    = kc "amp" 0.3
+    durn   = kc "durn" 0.3
+    duro   = kc "duro" 0.1
+    eno    = kc "eno" 3
+    enn    = kc "enn" (-3)
+    atkn   = kc "atkn" 0.01
+    atko   = kc "atko" 0.02
+    susn   = kc "susn" 0.3
+    suso   = kc "suso" 0.3
+    cf     = kc "cf" 800
+    rq     = kc "rq" 0.8
+    pan    = kc "pan" 0
+
+synth_snr02 :: UGen
+synth_snr02 = out (kc "out" 0) (pan2 osig pan 1)
+  where
+    osig  = (sig0 + sig1) * (kc "mamp" 0.4)
+    sig0  = mceSum (sinOsc AR freqs 0 * amp0)
+    freqs = mce [283,331] * fenv
+    fenv  = envGen KR tr 1 0 (dur*1.3) DoNothing
+            (Envelope [1,1,0] [1e-4,1] [EnvSqr] Nothing Nothing)
+    amp0  = envGen KR tr 0.3 0 dur DoNothing (envPerc 1e-4 1)
+    dur   = 0.1
+    tr    = tr_control "tr" 0
+    sig1  = rhpf nz cf 0.8 * amp1
+    nz    = whiteNoise 'A' AR
+    amp1  = envGen KR tr 0.5 0 dur DoNothing (envPerc 1e-3 1)
+    cf    = (5000 * fenv) + 100
+    pan   = linLin (kc "pan" 0.5) 0 1 (-1) 1
+
+synth_snr03 :: UGen
+synth_snr03 = out (kc "out" 0) (pan2 sig (kc "pan" 0) 1)
+  where
+    sig    = ((sig0*ampp) + (sig1*(1-ampp))) * (kc "ampm" 1)
+    sig0   = rlpf (rhpf (sig00 + sig01) 180 0.8) 800 0.9
+    sig00  = (f00 175 + f00 224) * amp00
+    f00 x  = freqShift (lfTri AR 111 0) x 0
+    amp00  = envGen KR tr0 1 0 (dur*0.5) DoNothing $ envPerc 1e-4 1
+    sig01  = (f01 330 + f01 180) * amp01
+    f01 x  = sinOsc AR x 0
+    amp01  = envGen KR tr0 1 0 (dur*0.5) DoNothing $ envPerc 1e-4 1
+    dur    = 0.25
+    sig1   = foldr f1 (rlpf nz cf rq) [653,1329,2823] * amp1
+    f1 x y = bBandStop y x 0.1
+    nz     = whiteNoise 'a' AR
+    amp1   = decay2 tr0 0.001 dur
+    cf     = 7850 * mamp
+    mamp   = tExpRand 'A' 0.3 0.6 tr0
+    rq     = 0.8
+    ampp   = 0.2
+    tr0    = tr_control "tr" 0
+
 synth_poly01 :: UGen
 synth_poly01 = out obus (pan2 osig pan 1)
   where
@@ -199,7 +269,6 @@ synth_nz01 = out obus (pan2 osig pan 1)
     obus = k "out" 0
     pan  = linControl "pan" (-1) 1 0
     k    = control KR
-
 
 synth_pv03 :: UGen
 synth_pv03 = out obus (pan2 osig pan 1)
@@ -369,12 +438,11 @@ synth_lp01 = replaceOut obus osig
     osig = wet * wsig + (1-wet) * isig
     wsig = rlpf isig cf rq
     isig = in' 2 AR ibus
-    obus = k "out" 0
-    ibus = k "in" 0
-    wet  = k "wet" 0
-    cf   = k "cf" 2000
-    rq   = k "rq" 0.3
-    k    = control KR
+    obus = kc "out" 0
+    ibus = kc "in" 0
+    wet  = kc "wet" 0
+    cf   = kc "cf" 2000
+    rq   = kc "rq" 0.3
 
 synth_lpf01 :: UGen
 synth_lpf01 = replaceOut (kc "out" 0) osig
@@ -476,7 +544,6 @@ linControl name minv maxv iniv =
     let iniv' = (iniv - minv) / (maxv - minv)
         c     = constant
     in  linLin (control KR name iniv') 0 1 (c minv) (c maxv)
-
 
 pv_with2Inputs :: UGen -> UGen -> (UGen -> UGen -> UGen) -> UGen
 pv_with2Inputs sigA sigB fpv = osig
