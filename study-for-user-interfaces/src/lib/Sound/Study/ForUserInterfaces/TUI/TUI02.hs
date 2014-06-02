@@ -209,6 +209,13 @@ initializeTUI02 = do
               ["in"*=Dval (fromIntegral (audioBus (routerNid masterNid))) ]]]
         , grp 2 [] ]
 
+-- | Reset values in control buses 'controlBusCounter' and 'countOut', then
+-- calls 'Sound.SC3.reset'.
+resetTUI02Settings :: Transport m => m ()
+resetTUI02Settings =
+ do send (c_set [(controlBusCounter,256),(countOut,0)])
+    reset
+
 -- | Add and setup new group used by 'Track'.
 addTrack :: Transport m => m Message
 addTrack = do
@@ -362,6 +369,8 @@ runSettings trck = do
         ds = foldr
              (\m acc -> case m of
                    Message pat dtm
+                       | pat == "/g_new" &&
+                         dtm == [Int32 0,Int32 0,Int32 0] -> acc
                        | pat == "/n_set"  -> acc
                        | pat == "/n_free" -> case dtm of
                            [] -> m : acc
@@ -415,6 +424,12 @@ track gid act = do
     st0 <- get
     let currentNode = fromMaybe (Group gid [])
                         (queryN' (nodeId ==? gid) (tsRootNode st0))
+    -- liftIO
+    --  (do putStrLn ("In the beginning of track " ++
+    --                show gid ++
+    --                ", currentNode is:")
+    --      putStrLn (drawSCNode currentNode))
+
     (val,st1) <- lift (runStateT (unTrack act)
                         (st0 { tsSourceNB = id
                              , tsGroupId = gid
@@ -495,7 +510,11 @@ router act = do
             obus = sourceOut gid
             nid  = routerNid gid
             node = Synth nid "router" ["out":=obus,"in":=ibus]
-        in  st { tsTargetNodes = queryN (synthName ==? "router") (tsCurrentNode st)
+        in  st { -- tsTargetNodes = queryN (synthName ==? "router") (tsCurrentNode st)
+                 tsTargetNodes =
+                    case queryN' (nodeId ==? nid) (tsCurrentNode st) of
+                      Nothing -> [node]
+                      Just n  -> [n]
                , tsSourceNB = node `snoc` tsSourceNB st
                }
     act
@@ -698,6 +717,15 @@ sendParamUGen ::
     -> Track m ()
 sendParamUGen node pname fp = do
     ts <- get
+
+    -- XXX:
+    -- liftIO
+    --   (do putStrLn ("Beginning of sendParamUGen for nodeId=" ++
+    --                 show (nodeId node) ++
+    --                ", pname=" ++
+    --                 pname)
+    --       putStrLn (showTrackState ts))
+
     -- Freeing existing synths with new synthdef, by 'free' ugen.
     -- Node IDs of the old synthdefs is known at this point.
     let beatOffset  = tsBeatOffset ts

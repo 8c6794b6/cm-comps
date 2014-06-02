@@ -31,6 +31,9 @@ initSession06 = withSC3 initializeTUI02
 main :: IO ()
 main = sequence_ [t99, t101, t102, t104, t105, t106]
 
+foo :: IO ()
+foo = putStrLn "foo"
+
 t99 :: IO ()
 t99 = withSC3 $ runTrack masterNid $ do
     offset 8
@@ -170,8 +173,8 @@ t103 = withSC3 $ runTrack 103 $ do
     effect "lmt01" $ "wet" ==> curveTo EnvLin 8 1
 
     router $
-        "amp" ==> curveTo EnvCub 16 0.38
-        -- "amp" ==> curveTo EnvCub 32 0
+        -- "amp" ==> curveTo EnvCub 16 0.38
+        "amp" ==> curveTo EnvCub 32 0
 
 reset_t104 :: IO ()
 reset_t104 = withSC3 (resetTrack 104)

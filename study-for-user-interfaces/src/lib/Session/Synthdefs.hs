@@ -244,19 +244,6 @@ synth_tuis05 = out obus (pan2 osig pan 1)
     dur  = linExp (control KR "dur" 0 + 0.001) 0.001 1.001 0.1 8
     obus = control KR "out" 0
 
-
-synth_sin01 :: UGen
-synth_sin01 = out obus (pan2 osig pan 1)
-  where
-    osig = sinOsc AR freq 0 * aenv * 0.3
-    aenv = envGen KR tr 1 0 dur DoNothing (envPerc 0.01 1)
-    obus = k "out" 0
-    freq = k "freq" 440
-    dur  = k "dur" 0.2
-    pan  = linControl "pan" (-1) 1 0
-    tr   = tr_control "t_tr" 0
-    k    = control KR
-
 synth_nz01 :: UGen
 synth_nz01 = out obus (pan2 osig pan 1)
   where
@@ -288,6 +275,18 @@ synth_pv03 = out obus (pan2 osig pan 1)
       bufn = control KR "bufn" 12
       obus = control KR "out" 0
       pan  = linLin (control KR "pan" 0) 0 1 (-1) 1
+
+synth_sin01 :: UGen
+synth_sin01 = out obus (pan2 osig pan 1)
+  where
+    osig = sinOsc AR freq 0 * aenv * 0.3
+    aenv = envGen KR tr 1 0 dur DoNothing (envPerc 0.01 1)
+    obus = k "out" 0
+    freq = k "freq" 440
+    dur  = k "dur" 0.2
+    pan  = linControl "pan" (-1) 1 0
+    tr   = tr_control "t_tr" 0
+    k    = control KR
 
 synth_sin02 :: UGen
 synth_sin02 = out obus (pan2 osig pan 1)
