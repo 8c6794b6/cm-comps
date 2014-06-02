@@ -46,7 +46,6 @@ import           Data.Hashable                        (hash)
 import           Data.Int                             (Int32)
 import           Data.List                            (isPrefixOf)
 import           Data.Maybe                           (fromMaybe)
-import           Data.Monoid                          ((<>))
 
 import           Sound.OSC
 import           Sound.SC3                            hiding (withSC3)
@@ -56,7 +55,6 @@ import           Sound.SC3.TH.Synthdef                (synthdefGenerator)
 import           Sound.SC3.Tree
 
 import           Sound.Study.ForUserInterfaces.Orphan ()
-
 
 -- --------------------------------------------------------------------------
 --
@@ -162,6 +160,20 @@ data TrackState = TrackState
     , tsSourceNB      :: DList SCNode
     , tsMessages      :: DList Message
     }
+
+showTrackState :: TrackState -> String
+showTrackState ts =
+  unlines
+    [ "----------- TrackState ------------"
+    , unwords ["tsGroupId:", show (tsGroupId ts)]
+    , unwords ["tsBeatOffset:", show (tsBeatOffset ts)]
+    , unlines ["tsCurrentNode:", drawSCNode (tsCurrentNode ts)]
+    , unlines ["tsTargetNodes:", unlines (map drawSCNode (tsTargetNodes ts))]
+    , unwords ["tsControlBusNum:", show (tsControlBusNum ts)]
+    , unwords ["tsBeatCount:", show (tsBeatCount ts)]
+    , unlines ["tsSourceNB:", unlines (map drawSCNode (tsSourceNB ts []))]
+    , unwords ["tsMessages:", unlines (map messagePP (tsMessages ts []))]
+    ]
 
 -- | Synonym for simple difference list.
 type DList a = [a] -> [a]
@@ -323,6 +335,7 @@ offset count = modify $ \st -> st {tsBeatOffset = count}
 --
 -- --------------------------------------------------------------------------
 
+-- | 'TrackState' taking root node, currentBusNum, and beatCount.
 initialTrackState :: SCNode -> Float -> Float -> TrackState
 initialTrackState rootNode currentBusNum beatCount = TrackState
      { tsGroupId = 0
@@ -336,16 +349,16 @@ initialTrackState rootNode currentBusNum beatCount = TrackState
      , tsMessages = id
      }
 
--- XXX: TODO.
+-- XXX: TODO. Has duplicates in parameter nodes.
 runSettings :: Transport m => Track m a -> m a
-runSettings settings = do
+runSettings trck = do
     send (c_get [controlBusCounter,countOut])
-    [_,Float currentBusNum,_,Float cnt] <- waitDatum "/c_set"
+    [_,Float currentBusNum,_,Float beatCount] <- waitDatum "/c_set"
     rootNode <- getRootNode
-    (val,st) <- runStateT (unTrack settings)
-                (initialTrackState rootNode currentBusNum cnt)
+    (val,st) <- runStateT (unTrack trck)
+                (initialTrackState rootNode currentBusNum beatCount)
     let n0 = tidyUpParameters rootNode
-        n1 = Group 0 $ tsSourceNB st []
+        n1 = Group 0 (tsSourceNB st [])
         ds = foldr
              (\m acc -> case m of
                    Message pat dtm
@@ -371,7 +384,6 @@ runSettings settings = do
     liftIO $ case ds of
         [] -> return ()
         _  -> putStrLn $ unlines $ map messagePP ds
-    liftIO $ putStrLn $ drawSCNode n1
     unless (null ms) $
         sendOSC $ bundle immediately ms
     return val
@@ -388,32 +400,44 @@ defaultSettings body =
             track defaultTargetNid $ do
                 track (masterNid+1) $
                     source "metro" $ do
-                        param "out" (constant metroOut)
-                        param "count" (constant countOut)
+                        param "out" (Dval metroOut)
+                        param "count" (Dval countOut)
                 body
                 track masterNid $
-                    source "router" $
+                    -- source "router" $
+                    router $
                         param "in" (constant (audioBus (routerNid masterNid)))
         track 2 $ return ()
 
--- XXX: TODO. Add a track with given node id.
+-- XXX: TODO.
 track :: Transport m => Int -> Track m a -> Track m a
 track gid act = do
     st0 <- get
     let currentNode = fromMaybe (Group gid [])
-           (queryN' (nodeId ==? gid) (tsRootNode st0))
-    (val,st1) <- lift (runStateT (unTrack act) (st0 { tsSourceNB = id
-                                                    , tsGroupId = gid
-                                                    , tsTargetNodes = []
-                                                    , tsCurrentNode = currentNode
-                                                    }))
-    modify (\st2 -> st2 { tsGroupId = gid
-                        , tsCurrentNode = currentNode
-                        , tsSourceNB =
-                           Group gid (tsSourceNB st1 []) `snoc` tsSourceNB st2
-                        , tsMessages = tsMessages st2 <> tsMessages st1
-                        , tsTargetNodes = []
-                        })
+                        (queryN' (nodeId ==? gid) (tsRootNode st0))
+    (val,st1) <- lift (runStateT (unTrack act)
+                        (st0 { tsSourceNB = id
+                             , tsGroupId = gid
+                             , tsTargetNodes = []
+                             , tsCurrentNode = currentNode
+                             }))
+    -- modify (\st2 -> st2 { tsGroupId = gid
+    --                     , tsCurrentNode = currentNode
+    --                     , tsSourceNB =
+    --                        Group gid (tsSourceNB st1 []) `snoc` tsSourceNB st2
+    --                     -- , tsMessages = tsMessages st2 <> tsMessages st1
+    --                     , tsMessages = tsMessages st1
+    --                     , tsTargetNodes = []
+    --                     , tsControlBusNum = tsControlBusNum st1
+    --                     })
+    -- modify (\st2 -> st1 { tsSourceNB =
+    --                         Group gid (tsSourceNB st1 []) `snoc` tsSourceNB st2
+    --                     , tsTargetNodes = []
+    --                     })
+    put (st1 { tsSourceNB =
+                 Group gid (tsSourceNB st1 []) `snoc` tsSourceNB st0
+             , tsTargetNodes = []
+             })
     return val
 
 -- | Apply parameter actions to nodes specified by query string.
@@ -528,6 +552,15 @@ infixr 1 ==>
 instance Assignable Double where
     assign nd name val = sendControl nd name (const (constant val))
 
+instance Assignable PrmVal where
+    assign nd name val = modify (\st -> st {tsMessages = msg (tsMessages st)})
+      where
+        msg = case val of
+                Dval v        -> snoc ((n_set (nodeId nd) [(name,v)]))
+                Cbus (Ival v) -> snoc ((n_map (nodeId nd) [(name,v)]))
+                Abus (Ival v) -> snoc ((n_mapa (nodeId nd) [(name,v)]))
+                _      -> id
+
 instance Assignable UGen where
     assign nd name val = sendControl nd name (const val)
 
@@ -592,9 +625,9 @@ sendCurve node0 pname ct = sendParamUGen node0 pname $ \node _tr ->
         toVal   = ctValue ct
         dur     = ctDur ct
         matched = in' 1 KR countOut ==* (control KR "count" 0 + 1)
-        osig      = envGen KR matched 1 0 (constant dur) DoNothing
-                    (Envelope
-                     [fromVal,constant toVal] [1] [crv] Nothing Nothing)
+        osig    = envGen KR matched 1 0 (constant dur) DoNothing
+                  (Envelope
+                   [fromVal,constant toVal] [1] [crv] Nothing Nothing)
         fromVal = case node of
             Synth _ _ ps -> case [p | p <- ps, paramName p == pname] of
                 (_ :=  val):_ -> constant val
@@ -656,6 +689,7 @@ sendControl ::
     -> Track m ()
 sendControl node pname fu = sendParamUGen node pname $ \_ tr -> fu tr
 
+-- | Send UGen used for controlling parameter.
 sendParamUGen ::
     Transport m
     => SCNode
@@ -666,11 +700,10 @@ sendParamUGen node pname fp = do
     ts <- get
     -- Freeing existing synths with new synthdef, by 'free' ugen.
     -- Node IDs of the old synthdefs is known at this point.
-    let cnt         = tsBeatCount ts
-        beatOffset  = tsBeatOffset ts
+    let beatOffset  = tsBeatOffset ts
         currentObus = tsControlBusNum ts
         nid    = nodeId node
-        cnt'   = nextOffset beatOffset cnt
+        cnt'   = nextOffset beatOffset (tsBeatCount ts)
         tr     = gate (control KR "tr" 0) exceed
         exceed = in' 1 KR countOut >* control KR "count" 0
         fr     = free exceed $ mce $ map (constant . nodeId) psynths
@@ -704,7 +737,6 @@ sendParamUGen node pname fp = do
 
     modify $ \st ->
         st { tsControlBusNum = if reusing then currentObus else currentObus+1
-           -- , tsMessages = tsMessages st . mfunc
            , tsMessages = if psynthChanged
                           then newMessage `snoc` tsMessages st
                           else tsMessages st
