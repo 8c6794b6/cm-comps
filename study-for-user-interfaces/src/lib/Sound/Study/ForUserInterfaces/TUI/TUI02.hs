@@ -38,7 +38,7 @@ module Sound.Study.ForUserInterfaces.TUI.TUI02
     ) where
 
 import           Control.Applicative                  (Applicative (..))
-import           Control.Monad                        (liftM, unless, when)
+import           Control.Monad                        (unless, when)
 import           Control.Monad.State.Strict           (MonadState (..),
                                                        MonadTrans (..),
                                                        StateT (..), modify)
@@ -161,6 +161,7 @@ data TrackState = TrackState
     , tsMessages      :: DList Message
     }
 
+-- | Show information in 'TrackState'.
 showTrackState :: TrackState -> String
 showTrackState ts =
   unlines
@@ -188,8 +189,6 @@ initializeTUI02 :: Transport m => m ()
 initializeTUI02 = do
     sendOSC $ bundle immediately
         (c_set [(controlBusCounter,256)] : map d_recv ($(synthdefGenerator)))
-        -- foldr withCM (c_set [(controlBusCounter,256)])
-        -- (map d_recv ($(synthdefGenerator) ++ tui01Synthdefs))
     play $
         grp 0
         [ grp 1
@@ -245,12 +244,7 @@ runTrack groupId trck = do
     -- offset for UGens defined in 'sendCurve' etc?
     send (c_get [controlBusCounter,countOut])
     [_,Float currentBusNum,_,Float cnt] <- waitDatum "/c_set"
-
-    -- node <- getNode groupId
     rootNode <- getRootNode
-    -- let node = case queryN' (nodeId ==? groupId) rootNode of
-    --         Nothing -> error ("No group: " ++ show groupId)
-    --         Just n  -> n
     let node = fromMaybe (error ("No group: " ++ show groupId))
                (queryN' (nodeId ==? groupId) rootNode)
     (val,st) <- runStateT (unTrack trck)
@@ -278,10 +272,6 @@ runTrack groupId trck = do
                                    in  n_frees : d_frees : acc')
                                  (m:acc) dtm
                    _                      -> m : acc)
-             -- (if currentBusNum /= fromIntegral (tsControlBusNum st)
-             --    then [c_set
-             --          [(controlBusCounter,fromIntegral (tsControlBusNum st))]]
-             --    else [])
              [ c_set [(controlBusCounter, fromIntegral (tsControlBusNum st))]
              | currentBusNum /= fromIntegral (tsControlBusNum st)]
              (diffMessage n0 n1)
@@ -293,13 +283,11 @@ runTrack groupId trck = do
 
         ps = tsMessages st []
         ms = ds ++ ps
-
     liftIO $ case ds of
         [] -> return ()
         _  -> putStrLn $ unlines $ map messagePP ds
     unless (null ms) $
         sendOSC $ bundle immediately ms
-
     return val
 
 -- | Filters out parameter nodes and mapped control parameter in source and
@@ -397,7 +385,6 @@ runSettings trck = do
         sendOSC $ bundle immediately ms
     return val
 
--- XXX: TODO.
 runSourceBuilder :: Track m a -> m (a, TrackState)
 runSourceBuilder t = runStateT (unTrack t) (initialTrackState (Group 0 []) 0 0)
 
@@ -418,37 +405,18 @@ defaultSettings body =
                         param "in" (constant (audioBus (routerNid masterNid)))
         track 2 $ return ()
 
--- XXX: TODO.
+-- | Add track with given group id and child nodes.
 track :: Transport m => Int -> Track m a -> Track m a
 track gid act = do
     st0 <- get
     let currentNode = fromMaybe (Group gid [])
                         (queryN' (nodeId ==? gid) (tsRootNode st0))
-    -- liftIO
-    --  (do putStrLn ("In the beginning of track " ++
-    --                show gid ++
-    --                ", currentNode is:")
-    --      putStrLn (drawSCNode currentNode))
-
     (val,st1) <- lift (runStateT (unTrack act)
                         (st0 { tsSourceNB = id
                              , tsGroupId = gid
                              , tsTargetNodes = []
                              , tsCurrentNode = currentNode
                              }))
-    -- modify (\st2 -> st2 { tsGroupId = gid
-    --                     , tsCurrentNode = currentNode
-    --                     , tsSourceNB =
-    --                        Group gid (tsSourceNB st1 []) `snoc` tsSourceNB st2
-    --                     -- , tsMessages = tsMessages st2 <> tsMessages st1
-    --                     , tsMessages = tsMessages st1
-    --                     , tsTargetNodes = []
-    --                     , tsControlBusNum = tsControlBusNum st1
-    --                     })
-    -- modify (\st2 -> st1 { tsSourceNB =
-    --                         Group gid (tsSourceNB st1 []) `snoc` tsSourceNB st2
-    --                     , tsTargetNodes = []
-    --                     })
     put (st1 { tsSourceNB =
                  Group gid (tsSourceNB st1 []) `snoc` tsSourceNB st0
              , tsTargetNodes = []
@@ -717,16 +685,7 @@ sendParamUGen ::
     -> Track m ()
 sendParamUGen node pname fp = do
     ts <- get
-
-    -- XXX:
-    -- liftIO
-    --   (do putStrLn ("Beginning of sendParamUGen for nodeId=" ++
-    --                 show (nodeId node) ++
-    --                ", pname=" ++
-    --                 pname)
-    --       putStrLn (showTrackState ts))
-
-    -- Freeing existing synths with new synthdef, by 'free' ugen.
+    -- Freeing existing synths with new synthdef via 'free' ugen.
     -- Node IDs of the old synthdefs is known at this point.
     let beatOffset  = tsBeatOffset ts
         currentObus = tsControlBusNum ts
@@ -804,32 +763,3 @@ dumpParamChange node pname pdefName =
     putStrLn $ unwords
         [ synthName node ++ " (" ++ show (nodeId node) ++ "):"
         , "\"" ++ pname ++ "\"", " -- ", pdefName ]
-
-
--- --------------------------------------------------------------------------
---
--- * Deprecated
---
--- --------------------------------------------------------------------------
-
--- | Add new source synth to head of specified group.
-addSource ::
-    (Transport m)
-    => String    -- ^ Synthdef name.
-    -> Track m ()
-addSource name = do
-    targetNid <- liftM tsGroupId get
-    let obus = fromIntegral $ audioBus targetNid
-    sendOSC $ bundle immediately
-        [ s_new name (-1) AddToHead targetNid [("out",obus)]]
-
--- | Add new effect synth to specified group before 'synth_router'.
-addFx ::
-    Transport m
-    => String -- ^ Synthdef name.
-    -> Track m ()
-addFx name = do
-    targetNid <- liftM tsGroupId get
-    let obus = fromIntegral $ audioBus targetNid
-    sendOSC $ s_new name (-1) AddBefore (routerNid targetNid)
-        [("out",obus),("in",obus)]
