@@ -283,9 +283,8 @@ runTrack groupId trck = do
 
         ps = tsMessages st []
         ms = ds ++ ps
-    liftIO $ case ds of
-        [] -> return ()
-        _  -> putStrLn $ unlines $ map messagePP ds
+    unless (null ds)
+        (liftIO $ putStrLn $ unlines $ map messagePP ds)
     unless (null ms) $
         sendOSC $ bundle immediately ms
     return val
@@ -353,7 +352,8 @@ runSettings trck = do
     (val,st) <- runStateT (unTrack trck)
                 (initialTrackState rootNode currentBusNum beatCount)
     let n0 = tidyUpParameters rootNode
-        n1 = Group 0 (tsSourceNB st [])
+        -- n1 = Group 0 (tsSourceNB st [])
+        n1 = head (tsSourceNB st [])
         ds = foldr
              (\m acc -> case m of
                    Message pat dtm
@@ -378,9 +378,13 @@ runSettings trck = do
                  d_free $ map synthName paramNodes)
         ps = tsMessages st []
         ms = ds ++ ps
-    liftIO $ case ds of
-        [] -> return ()
-        _  -> putStrLn $ unlines $ map messagePP ds
+    liftIO
+      (putStr
+        (unlines
+           [ "size of n0: " ++ show (sizeSCNode n0)
+           , "size of n1: " ++ show (sizeSCNode n1) ]))
+    unless (null ds)
+        (liftIO $ putStrLn $ unlines $ map messagePP ds)
     unless (null ms) $
         sendOSC $ bundle immediately ms
     return val
