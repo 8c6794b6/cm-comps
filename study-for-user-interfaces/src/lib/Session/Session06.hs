@@ -298,7 +298,7 @@ t105 = withSC3 $ runTrack 105 $ do
         param "tr" tr
         param "dur" (recip (sfreq/660) * stut01)
         param "atk" (tExpRand 'A' 1e-3 0.999 tr)
-        param "pan" (tRand 'P' 0.4 0.6 tr)
+        param "pan" (tRand 'ρ' 0.2 0.8 tr)
         param "en" (linLin (lfdNoise1 'E' KR (1/7) + 2) 1 3 (-5) 5)
         param "gain" (curveTo EnvLin 8 50)
         param "clp2" (curveTo EnvCub 8 0.6)
