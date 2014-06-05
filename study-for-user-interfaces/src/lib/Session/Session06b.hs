@@ -3,44 +3,54 @@ Rewrite of Session06 with using 'runSettings'.
 -}
 module Session.Session06b where
 
+import Control.Monad.State (get)
+import Data.Hashable (hash)
+import Data.Int (Int32)
+
 import Session.Synthdefs
 import Sound.Study.ForUserInterfaces.TUI.TUI02 hiding (metro)
 
 main :: IO ()
 main = withSC3 (runSettings g06b)
 
+-- metro :: Transport m => Track m ()
+-- metro =
+--   source "metro" (do param "out" (Dval metroOut)
+--                      param "count" (Dval countOut))
 metro :: Transport m => Track m ()
 metro =
-  source "metro" (do param "out" (Dval metroOut)
-                     param "count" (Dval countOut))
+  do st <- get
+     let nid = fromIntegral
+                 (abs
+                    (fromIntegral
+                      (joinID (tsGroupId st) (hash name)) :: Int32))
+         name = "metro"
+     rawNode (Synth nid name ["out":=metroOut
+                             ,"count":=countOut
+                             ,"bpm":=120
+                             ,"beat":=4])
 
 g06b :: Transport m => Track m ()
 g06b =
   track 0
     (do offset 8
-        track 1
+        track
+          1
           (track
              10
              (do track 100 t100
-                 track 101
-                       (do t101
-                           rAmp (curveTo EnvCub 8 1))
-                 track 102
-                       (do t102
-                           rAmp (curveTo EnvCub 8 1.8))
-                 track 103
-                       (do t103
-                           rAmp (curveTo EnvCub 8 0.6))
-                 track 104
-                       (do t104
-                           rAmp (curveTo EnvCub 8 0.6))
-                 track 105
-                       (do t105
-                           rAmp (curveTo EnvCub 8 0.8))
-                 track 99
-                       (do t99
-                           rAmp (curveTo EnvCub 8 0.6))))
-        track 2 nil)
+                 track 101 (do t101
+                               rAmp (curveTo EnvCub 8 1))
+                 track 102 (do t102
+                               rAmp (curveTo EnvCub 8 1.8))
+                 track 103 (do t103
+                               rAmp (curveTo EnvCub 8 0.6))
+                 track 104 (do t104
+                               rAmp (curveTo EnvCub 8 0.6))
+                 track 105 (do t105
+                               rAmp (curveTo EnvCub 8 0.8))
+                 track 99 (do t99
+                              rAmp (curveTo EnvCub 8 1)))))
 
 rAmp :: (Transport m, Assignable val) => val -> Track m ()
 rAmp val = router (param "amp" val)
@@ -55,27 +65,27 @@ t99 =
 t100 :: Transport m => Track m ()
 t100 =
   do metro
-     source "bypass"
+     bypass "bypass"
        (do let rep1 = siwhite sinf 1 4
                p x = swhite 1 0 1 <=* (x/100)
                siw2 lo hi = 2 ** siwhite sinf lo hi
            param "i"
              (sustain
                (sseq sinf
-                 [sseq (2 ** siwhite sinf 4 8) [0]
-                 ,sseq (2 ** siwhite sinf 4 8) [1]
-                 ,sseq (2 ** siwhite sinf 4 8) [2]]))
-           bi <- getInput 100 (synthName ==? "bypass") "i"
+                 [sseq (2 ** siwhite sinf 2 8) [0]
+                 ,sseq (2 ** siwhite sinf 2 8) [1]
+                 ,sseq (2 ** siwhite sinf 2 8) [2]]))
+           idx <- getInput 100 (synthName ==? "bypass") "i"
            param "0"
              (sustain
-               (sswitch1 (sval bi)
+               (sswitch1 (sval idx)
                 [srand sinf
                  [sshuf rep1 [1,1,2]
                  ,sshuf rep1 [2,1,1]
                  ,sshuf rep1 [sseq 1 [3,5], sseq 1 [5,3]]]
-                ,sseq 1
+                ,srand sinf
                  [2, 1, 1, 1, 2, 1
-                 ,srand 1
+                 ,srand (siwhite sinf 1 3)
                   [srand 1 [4, sseq 1 [2, 2]]
                   ,sseq 1 [1,1,1,1]]
                  ,4, 8]
@@ -105,7 +115,7 @@ t101 =
                  [sseq 8 [0]
                  ,srand (srand sinf [1,2,4])
                   [sseq 1 [1,0,1,1]]]
-                ,sseq sinf [0,0,1,0]
+                ,sseq sinf [0,0,srand 1 [0,1,1],0]
                 ,srand sinf [sseq 1 [1,0], sseq 1 [1,1]]]))
            param "cf"
              (sustain
@@ -142,19 +152,19 @@ t101 =
 t102 :: Transport m => Track m ()
 t102 =
  do idx <- getInput 100 (synthName ==? "bypass") "i"
+    let r x = swhite 1 0 1 <=* x
     source "bd03"
      (do param "t_tr0"
           (trigger
-           (let r x = swhite 1 0 1 <=* x
-            in  sswitch1 (sval idx)
-                [sseq sinf
-                 [1,     r 0.05, r 0.15, r 0.25
-                 ,r 0.08,r 0.12, r 0.22, r 0.23]
-                ,sseq sinf
-                 [1,     r 0.05, r 0.15, r 0.25
-                 ,r 0.2, r 0.12, r 0.12, r 0.12]
-                ,sseq sinf
-                 [1, r 0.08, r 0.08, r 0.15]]))
+           (sswitch1 (sval idx)
+            [sseq sinf
+             [1,     r 0.05, r 0.15, r 0.25
+             ,r 0.08,r 0.12, r 0.22, r 0.23]
+            ,sseq sinf
+             [1,     r 0.05, r 0.15, r 0.25
+             ,r 0.2, r 0.12, r 0.12, r 0.12]
+            ,sseq sinf
+             [1, r 0.08, r 0.08, r 0.15]]))
          param "amp"
           (sustain
             (sseq sinf
@@ -276,7 +286,7 @@ t105 =
   do let ld3 i lf = linLin (lfdNoise3 i KR lf + 2) 1 3
      tr <- getInput 100 (synthName ==? "bypass") "1"
      source "snr01"
-       (do param "tr" (coinGate 'κ' ((lfdNoise1 'P' KR 1 + 2)/2) tr)
+       (do param "tr" (coinGate 'κ' ((lfdNoise3 'P' KR 1 + 2)/2) tr)
            param "duro" (curveTo EnvLin 9 0.23)
            param "durn" (curveTo EnvLin 8 0.28)
            param "cf"

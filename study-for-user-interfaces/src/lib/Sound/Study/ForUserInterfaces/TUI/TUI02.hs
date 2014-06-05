@@ -64,8 +64,8 @@ import           Sound.Study.ForUserInterfaces.Orphan ()
 
 -- | Synth to synchronize other synths, mainly demand UGens.
 synth_metro :: UGen
-synth_metro = mrg [ out (control KR "out" 0) osig
-                  , out (control KR "count" 0) pcnt ]
+synth_metro = mrg [out (control KR "count" 0) pcnt
+                  ,out (control KR "out" 0) osig]
   where
     osig = impulse KR (beat*bpm/60) 0
     bpm  = control KR "bpm" 120
@@ -297,6 +297,7 @@ tidyUpParameters n0 =
             Group i ns -> Group i (foldr f [] ns) : acc
             Synth i name ps
                 | "p:" `isPrefixOf` name -> acc
+                | name == "metro"        -> Synth i name ps : acc
                 | otherwise              ->
                     let ps' = [p | p <- ps
                                  , paramName p == "out" || paramName p == "in"]
@@ -378,11 +379,13 @@ runSettings trck = do
                  d_free $ map synthName paramNodes)
         ps = tsMessages st []
         ms = ds ++ ps
-    liftIO
-      (putStr
-        (unlines
-           [ "size of n0: " ++ show (sizeSCNode n0)
-           , "size of n1: " ++ show (sizeSCNode n1) ]))
+    -- liftIO
+    --   (putStr
+    --     (unlines
+    --        ["size of n0: " ++ show (sizeSCNode n0)
+    --        ,prettyDump n0
+    --        ,"size of n1: " ++ show (sizeSCNode n1)
+    --        ,prettyDump n1]))
     unless (null ds)
         (liftIO $ putStrLn $ unlines $ map messagePP ds)
     unless (null ms) $
@@ -435,8 +438,18 @@ source ::
     -> Track m a
 source = genControlledNode (\obus -> ["out":=obus]) Nothing
 
+bypass :: Monad m => String -> Track m a -> Track m a
+bypass = genControlledNode (\_ -> []) Nothing
+
 source' :: Monad m => Int -> String -> Track m a -> Track m a
 source' i = genControlledNode (\obus -> ["out":=obus]) (Just i)
+
+rawNode :: Monad m => SCNode -> Track m ()
+rawNode node =
+  modify (\st -> st {tsSourceNB = node `snoc` tsSourceNB st})
+
+rawMessage :: Monad m => Message -> Track m ()
+rawMessage msg = modify (\st -> st {tsMessages = msg `snoc` tsMessages st})
 
 -- | Run effect synth, apply paremater actions to nodes.
 effect :: Monad m => String -> Track m a -> Track m a

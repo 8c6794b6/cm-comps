@@ -385,8 +385,8 @@ b013_pchs =
         octs = iterate (+12) 24
     in  pchs
 
-b013 :: IO ()
-b013 = withSC3 $ send $ b_alloc_setn1 t108_freqbuf 0 b013_pchs
+b013 :: IO Message
+b013 = withSC3 $ async $ b_alloc_setn1 t108_freqbuf 0 b013_pchs
 
 t108 :: IO ()
 t108 = withSC3 $ runTrack 108 $ do
@@ -433,8 +433,8 @@ t108 = withSC3 $ runTrack 108 $ do
     effect "lmt01" $
         "wet" ==> curveTo EnvLin 8 1
     router $
-        -- "amp" ==> curveTo EnvCub 8 0.4
-        "amp" ==> curveTo EnvCub 8 0
+        "amp" ==> curveTo EnvCub 8 0.4
+
 
 resetTrack :: Transport m => Int -> m ()
 resetTrack n = runTrack n $ router $ return ()
