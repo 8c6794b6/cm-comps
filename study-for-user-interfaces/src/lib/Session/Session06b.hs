@@ -13,22 +13,17 @@ import Sound.Study.ForUserInterfaces.TUI.TUI02 hiding (metro)
 main :: IO ()
 main = withSC3 (runSettings g06b)
 
--- metro :: Transport m => Track m ()
--- metro =
---   source "metro" (do param "out" (Dval metroOut)
---                      param "count" (Dval countOut))
 metro :: Transport m => Track m ()
 metro =
   do st <- get
      let nid = fromIntegral
-                 (abs
-                    (fromIntegral
-                      (joinID (tsGroupId st) (hash name)) :: Int32))
+                 (abs (fromIntegral
+                         (joinID (tsGroupId st) (hash name)) :: Int32))
          name = "metro"
-     rawNode (Synth nid name ["out":=metroOut
-                             ,"count":=countOut
-                             ,"bpm":=120
-                             ,"beat":=4])
+     rawNode (Synth nid name ["out" := metroOut
+                             ,"count" := countOut
+                             ,"bpm" := 120
+                             ,"beat" := 4])
 
 g06b :: Transport m => Track m ()
 g06b =
@@ -57,10 +52,8 @@ rAmp val = router (param "amp" val)
 
 t99 :: Transport m => Track m ()
 t99 =
-  do effect "dc01"
-       (param "wet" (sustain (sval 1)))
-     effect "lmt01"
-       (param "wet" (curveTo EnvLin 16 1))
+  do effect "dc01" (param "wet" (sustain (sval 1)))
+     effect "lmt01" (param "wet" (curveTo EnvLin 16 1))
 
 t100 :: Transport m => Track m ()
 t100 =
@@ -72,9 +65,9 @@ t100 =
            param "i"
              (sustain
                (sseq sinf
-                 [sseq (2 ** siwhite sinf 2 8) [0]
-                 ,sseq (2 ** siwhite sinf 2 8) [1]
-                 ,sseq (2 ** siwhite sinf 2 8) [2]]))
+                 [sseq (siw2 3 8) [0]
+                 ,sseq (siw2 3 8) [1]
+                 ,sseq (siw2 3 8) [2]]))
            idx <- getInput 100 (synthName ==? "bypass") "i"
            param "0"
              (sustain
@@ -94,9 +87,9 @@ t100 =
            param "1"
              (trigger
                (srand sinf
-                 [sseq (siw2 1 6) (map p [5,7,4,6, 95,7,4,8])
-                 ,sseq (siw2 0 3) (replicate 8 0)
-                 ,sseq (siw2 0 2) (replicate 8 (p 35))])))
+                 [sseq (4 * siw2 0 3) (map p [5,7,4,6, 95,7,4,8])
+                 ,sseq (4 * siw2 0 2) (replicate 8 0)
+                 ,sseq (4 * siw2 0 1) (replicate 8 (p 35))])))
 
 t101 :: Transport m => Track m ()
 t101 =
@@ -164,7 +157,8 @@ t102 =
              [1,     r 0.05, r 0.15, r 0.25
              ,r 0.2, r 0.12, r 0.12, r 0.12]
             ,sseq sinf
-             [1, r 0.08, r 0.08, r 0.15]]))
+             [1, r 0.08, r 0.08, r 0.15
+             ,1, r 0.08, r 0.12, r 0.08]]))
          param "amp"
           (sustain
             (sseq sinf
@@ -195,10 +189,9 @@ t103 =
               (midiCPS
                (sseq sinf
                 (map (sseq rep1 . rot) [0, 3, 5, 7, 10]) +
-               (12 *
-                let lo = srand 1 [3,4]
+               (let lo = srand 1 [3,4]
                     hi = srand 1 [6,7]
-                in  sseq sinf [lo,5,5,5, hi,5,5,5]) +
+                in  12 * sseq sinf [lo,5,5,5, hi,5,5,5]) +
                 sstutter
                 (2 ** siwhite sinf 5 9)
                 (srand sinf [-10, -7, -5, -3])))))
@@ -329,3 +322,12 @@ resetSession06b = withSC3 resetTUI02Settings
 
 nil :: Monad m => m ()
 nil = return ()
+
+
+-- LocalWords: bpm lmt nz ap dcy cmb dcy dlt bd dur atk clp rq duro durn enn eno
+-- LocalWords: wdth ampm snr haskell lpf
+
+-- Local Variables:
+-- mode: haskell-mode
+-- indent-tabs-mode: nil
+-- End:

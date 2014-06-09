@@ -16,6 +16,8 @@ synths with parameter controlling adhoc UGens. Source and effect synth setup is
 idemopotent, initialization and update of track could be done with invoking same
 code block in Haskell code.
 
+See "Session.Session06" and "Session.Session06b" for example.
+
 /Known limitations/:
 
 * Ordering nodes may not work properly, need to remove the node once, then send
@@ -344,7 +346,10 @@ initialTrackState rootNode currentBusNum beatCount = TrackState
      , tsMessages = id
      }
 
--- XXX: TODO. Has duplicates in parameter nodes.
+-- | Run settings of entire nodes from root node.
+--
+-- This function performs diff of given 'Track' with current root node.
+--
 runSettings :: Transport m => Track m a -> m a
 runSettings trck = do
     send (c_get [controlBusCounter,countOut])
