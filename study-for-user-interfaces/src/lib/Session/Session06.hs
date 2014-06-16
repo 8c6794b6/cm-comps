@@ -1,3 +1,13 @@
+{-|
+Copyright   : 8c6794b6, 2014
+License     : BSD3
+
+Maintainer  : 8c6794b6@gmail.com
+Stability   : experimental
+Portability : unknown
+
+Session with couple percussive sounds and saw oscillators.
+-}
 module Session.Session06 where
 
 import           Control.Applicative ((<$>),(<*>))

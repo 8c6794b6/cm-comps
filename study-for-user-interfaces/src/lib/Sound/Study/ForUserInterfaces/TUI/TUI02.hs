@@ -167,15 +167,15 @@ data TrackState = TrackState
 showTrackState :: TrackState -> String
 showTrackState ts =
   unlines
-    [ "----------- TrackState ------------"
-    , unwords ["tsGroupId:", show (tsGroupId ts)]
-    , unwords ["tsBeatOffset:", show (tsBeatOffset ts)]
-    , unlines ["tsCurrentNode:", drawSCNode (tsCurrentNode ts)]
-    , unlines ["tsTargetNodes:", unlines (map drawSCNode (tsTargetNodes ts))]
-    , unwords ["tsControlBusNum:", show (tsControlBusNum ts)]
-    , unwords ["tsBeatCount:", show (tsBeatCount ts)]
-    , unlines ["tsSourceNB:", unlines (map drawSCNode (tsSourceNB ts []))]
-    , unwords ["tsMessages:", unlines (map messagePP (tsMessages ts []))]
+    ["----------- TrackState ------------"
+    ,unwords ["tsGroupId:", show (tsGroupId ts)]
+    ,unwords ["tsBeatOffset:", show (tsBeatOffset ts)]
+    ,unlines ["tsCurrentNode:", drawSCNode (tsCurrentNode ts)]
+    ,unlines ["tsTargetNodes:", unlines (map drawSCNode (tsTargetNodes ts))]
+    ,unwords ["tsControlBusNum:", show (tsControlBusNum ts)]
+    ,unwords ["tsBeatCount:", show (tsBeatCount ts)]
+    ,unlines ["tsSourceNB:", unlines (map drawSCNode (tsSourceNB ts []))]
+    ,unwords ["tsMessages:", unlines (map messagePP (tsMessages ts []))]
     ]
 
 -- | Synonym for simple difference list.
@@ -443,18 +443,20 @@ source ::
     -> Track m a
 source = genControlledNode (\obus -> ["out":=obus]) Nothing
 
-bypass :: Monad m => String -> Track m a -> Track m a
-bypass = genControlledNode (\_ -> []) Nothing
-
 source' :: Monad m => Int -> String -> Track m a -> Track m a
 source' i = genControlledNode (\obus -> ["out":=obus]) (Just i)
 
+-- | Add given 'SCNode' to track.
 rawNode :: Monad m => SCNode -> Track m ()
 rawNode node =
   modify (\st -> st {tsSourceNB = node `snoc` tsSourceNB st})
 
+-- | Add given 'Message' to track.
 rawMessage :: Monad m => Message -> Track m ()
 rawMessage msg = modify (\st -> st {tsMessages = msg `snoc` tsMessages st})
+
+bypass :: Monad m => String -> Track m a -> Track m a
+bypass = genControlledNode (\_ -> []) Nothing
 
 -- | Run effect synth, apply paremater actions to nodes.
 effect :: Monad m => String -> Track m a -> Track m a
