@@ -79,9 +79,9 @@ t100 =
                    (sswitch1
                      (sval idx)
                      [srand sinf
-                      [sshuf rep1 [1,1,2]
-                      ,sshuf rep1 [2,1,1]
-                      ,sshuf rep1 [sseq 1 [3,5], sseq 1 [5,3]]]
+                            [sshuf rep1 [1,1,2]
+                            ,sshuf rep1 [2,1,1]
+                            ,sshuf rep1 [sseq 1 [3,5], sseq 1 [5,3]]]
                      ,srand sinf
                             [2, 1, 1, 1, 2, 1
                             ,srand (siwhite sinf 1 3)
@@ -110,10 +110,10 @@ t101 =
                       (trigger
                        (sswitch1
                          (sval idx)
-                         [srand sinf
-                          [sseq 8 [0]
-                          ,srand (srand sinf [1,2,4])
-                           [sseq 1 [1,0,1,1]]]
+                         [srand sinf [sseq (srand sinf [4,8]) [0]
+                                     ,srand
+                                        (srand sinf [1,2,4])
+                                        [sseq 1 [1,0,1,srand 1 [0,1]]]]
                          ,sseq sinf [0,0,srand 1 [0,1,1],0]
                          ,srand sinf [sseq 1 [1,0], sseq 1 [1,1]]]))
                 param "cf"
@@ -159,7 +159,7 @@ t102 =
                 (sswitch1 (sval idx)
                           [sseq sinf
                            [1,     r 0.05, r 0.15, r 0.25
-                           ,r 0.08,r 0.12, r 0.22, r 0.23]
+                           ,r 0.08,r 0.12, r 0.22, r 0.3]
                           ,sseq sinf
                            [1,     r 0.05, r 0.15, r 0.25
                            ,r 0.2, r 0.12, r 0.12, r 0.12]
@@ -183,9 +183,7 @@ t102 =
 
 t103 :: Transport m => Track m ()
 t103 =
- do let rep1 = siwhite sinf 1 4
-        degs = [0,3,5,7,10]
-    stut01 <- getInput 100 (synthName ==? "bypass") "0"
+ do stut01 <- getInput 100 (synthName ==? "bypass") "0"
     let rot n = map (\x -> modE (x+n) 12) degs
     s03freq <- source "saw03"
       (do param "freq"
@@ -247,6 +245,9 @@ t103 =
               (do param "wet" (mulAdd (sinOsc KR (1/126) 0) 0.5 0.5)
                   param "dcy" (squared (squared (lfSaw KR 2 0)) `lag` 0.1))
     effect "dc01" (param "wet" (curveTo EnvCub 8 1))
+  where
+    rep1 = siwhite sinf 1 4
+    degs = [0,3,5,7,10]
 
 t104 :: Transport m => Track m ()
 t104 =
@@ -264,8 +265,9 @@ t104 =
                param "clp2" (curveTo EnvLin 8 0.6)
                param "rq" (curveTo EnvCub 8 0.6)
                param "cf"
-                 (linExp
-                   (squared (lfdNoise1 'D' KR (5 / 3)) + 1) 1 2 2000 12000))
+                     (linExp
+                       (squared
+                          (lfdNoise1 'D' KR (5 / 3)) + 1) 1 2 2000 12000))
     effect "cmb02"
            (do param "wet" (curveTo EnvCub 32 0.08)
                param "dcy" (curveTo EnvCub 1e-9 4)
@@ -283,32 +285,32 @@ t104 =
 
 t105 :: Transport m => Track m ()
 t105 =
-  do let ld3 i lf = linLin (lfdNoise3 i KR lf + 2) 1 3
-     tr <- getInput 100 (synthName ==? "bypass") "1"
+  do tr <- getInput 100 (synthName ==? "bypass") "1"
      source "snr01"
-            (do param "tr" (coinGate 'κ' ((lfdNoise3 'P' KR 1 + 2)/2) tr)
+            (do param "tr" (coinGate 'κ' prb1 tr)
                 param "duro" (curveTo EnvLin 9 0.23)
                 param "durn" (curveTo EnvLin 8 0.28)
-                param "cf"
-                  (linExp
-                    (squared (lfdNoise1 'C' KR (2/31)) + 1) 1 2 1400 2800)
+                param "cf" (linExp cf 1 2 1400 2800)
                 param "pan" (curveTo EnvLin 32 0.15)
                 param "enn" (ld3 'n' (1/19) (-10) 12)
                 param "eno" (ld3 'o' (1/19) (-10) 12)
-                param "wdth" (ld3 'w' 3 0.2 0.3)
-                param "rq"
-                 (envGen KR tr 1 0 0.4 DoNothing
-                  (Envelope
-                    [0.01, 1, 0.3] [1e-4, 1] [EnvCub] Nothing Nothing)))
+                param "wdth" (ld3 'w' 3 0.2 0.8)
+                param "rq" (rq tr))
      source "snr03"
-       (do param "tr" (coinGate 'ι' ((lfdNoise1 'ρ' KR 1 + 2)/2) tr)
-           param "ampm" (tExpRand 'α' 0.8 1 tr)
-           param "pan" (curveTo EnvLin 32 (-0.15)))
+            (do param "tr" (coinGate 'ι' prb2 tr)
+                param "ampm" (tExpRand 'α' 0.8 1 tr)
+                param "pan" (curveTo EnvLin 32 (-0.15)))
      effect "ap02"
-       (do param "wet" (curveTo EnvLin 4 0.1)
-           param "dcy" (curveTo EnvLin 3 0.5))
-     effect "dc01"
-       (param "wet" (curveTo EnvLin 2 1))
+            (do param "wet" (curveTo EnvLin 4 0.1)
+                param "dcy" (curveTo EnvLin 3 0.5))
+     effect "dc01" (param "wet" (curveTo EnvLin 2 1))
+  where
+    cf    = squared (lfdNoise1 'C' KR (2/31)) + 1
+    prb1  = (lfdNoise3 'P' KR 1 + 2) * 0.5
+    prb2  = (lfdNoise1 'ρ' KR 1 + 2) / 2
+    rq tr = envGen KR tr 1 0 0.3 DoNothing
+            (Envelope [0.01, 1, 0.03] [1e-4, 1] [EnvCub] Nothing Nothing)
+    ld3 i lf = linLin (lfdNoise3 i KR lf + 2) 1 3
 
 
 -- --------------------------------------------------------------------------
