@@ -19,7 +19,7 @@ Considering the ideal set of functions to write before writing the
 implementation of functions.
 
 -}
-module Sound.Study.ForUserInterfaces.Misc.PreSession where
+module Sound.Study.ForUserInterfaces.Scratch.PreSession where
 
 import Data.Monoid
 import Data.Tree

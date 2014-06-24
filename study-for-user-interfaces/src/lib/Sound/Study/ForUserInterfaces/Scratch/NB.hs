@@ -6,7 +6,7 @@
 Scratch module to play with building scnode and OSC messages.
 
 -}
-module Sound.Study.ForUserInterfaces.Misc.NB where
+module Sound.Study.ForUserInterfaces.Scratch.NB where
 
 import Control.Applicative
 import Control.Monad

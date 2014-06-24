@@ -85,8 +85,8 @@ t100 =
                      ,srand sinf
                             [2, 1, 1, 1, 2, 1
                             ,srand (siwhite sinf 1 3)
-                             [srand 1 [4, sseq 1 [2, 2]]
-                             ,sseq 1 [1,1,1,1]]
+                                   [srand 1 [4, sseq 1 [2, 2]]
+                                   ,sseq 1 [1,1,1,1]]
                             ,4, 8]
                      ,srand sinf
                             [sseq (2 ** siwhite sinf 1 7) [1]]]))
@@ -153,26 +153,23 @@ t102 :: Transport m => Track m ()
 t102 =
  do idx <- getInput 100 (synthName ==? "bypass") "i"
     let r x = swhite 1 0 1 <=* x
+        fa x y = swhite 1 x y
     source "bd03"
      (do param "t_tr0"
                (trigger
                 (sswitch1 (sval idx)
-                          [sseq sinf
-                           [1,     r 0.05, r 0.15, r 0.25
-                           ,r 0.08,r 0.12, r 0.22, r 0.3]
-                          ,sseq sinf
-                           [1,     r 0.05, r 0.15, r 0.25
-                           ,r 0.2, r 0.12, r 0.12, r 0.12]
-                          ,sseq sinf
-                           [1, r 0.08, r 0.08, r 0.15
-                           ,1, r 0.08, r 0.12, r 0.08]]))
+                          [sseq sinf [1,     r 0.05, r 0.15, r 0.25
+                                     ,r 0.08,r 0.12, r 0.22, r 0.3]
+                          ,sseq sinf [1,     r 0.05, r 0.15, r 0.25
+                                     ,r 0.2, r 0.12, r 0.12, r 0.12]
+                          ,sseq sinf [1, r 0.08, r 0.08, r 0.15
+                                     ,1, r 0.08, r 0.12, r 0.08]]))
          param "amp"
                (sustain
-                 (sseq sinf
-                       [swhite 1 0.9 1.5
-                       ,swhite 1 0.3 0.5
-                       ,swhite 1 0.5 0.8
-                       ,swhite 1 0.5 0.9])))
+                 (sseq sinf [fa 0.9 1.5
+                            ,fa 0.3 0.5
+                            ,fa 0.5 0.8
+                            ,fa 0.5 0.9])))
     effect "ap01"
            (do param "wet" (sustain (sval 0.34))
                param "dcy" (lfCub KR (1/4) 0 * 0.5 + 0.5))

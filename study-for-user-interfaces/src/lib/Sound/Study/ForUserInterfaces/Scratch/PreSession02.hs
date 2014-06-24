@@ -4,7 +4,7 @@
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE TypeFamilies #-}
 {-# LANGUAGE UndecidableInstances #-}
-module Sound.Study.ForUserInterfaces.Misc.PreSession02 where
+module Sound.Study.ForUserInterfaces.Scratch.PreSession02 where
 
 import Control.Monad
 import Data.Monoid

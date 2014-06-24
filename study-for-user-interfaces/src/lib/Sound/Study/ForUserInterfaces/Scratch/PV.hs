@@ -9,7 +9,7 @@ Portability : unknown
 Scratch written while reading FFT related sc3 help files.
 
 -}
-module Sound.Study.ForUserInterface.Misc.PV where
+module Sound.Study.ForUserInterface.Scratch.PV where
 
 import Control.Applicative ((<$>))
 import System.Random

@@ -9,13 +9,12 @@ Portability : unknown
 Scratch written while reading demand related sc3 help files.
 
 -}
-module Sound.Study.ForUserInterfaces.Misc.Demand where
+module Sound.Study.ForUserInterfaces.Scratch.Demand where
 
 import Control.Concurrent (threadDelay)
 import Control.Monad (forM_)
 import Data.List (unfoldr)
 import System.Random
-import System.Random.Shuffle
 
 import Sound.OSC
 import Sound.SC3
@@ -1216,7 +1215,6 @@ dfsm_ex012 =
         r    = dwhite 'b' dinf 0 1
         ini  = 1
         pat  = dfsm 'a' n r (mce [ini, 1.5 ,mce [0,1], 2.5, mce [0,1]])
-        def = synthdef "a" (out 0 so)
     in  audition (out 0 so)
 
 dfsm_ex02 :: IO ()
@@ -1276,9 +1274,9 @@ dfsm_ex04 = do
                     let xs     = randomRs (0,3) g1
                         (l,g2) = randomR (2,5) g1
                     in  Just (take l xs, g2)
-                (i,g1) = next g0
+                (i,g3) = next g0
                 inf = constant (1/0 :: Double)
-                rs = shuffle' [0..10] 11 g0
+                -- rs = shuffle' [0..10] 11 g0
                 -- pr = dswitch1 'ε' (mce rs / 10)
                 --      (dwhite 'a' inf 0 1 * mouseY KR 1 10 Exponential 0.1)
                 pr = dwhite 'a' inf 0 1
@@ -1295,9 +1293,10 @@ dfsm_ex04 = do
                         nexts !! 3)
                      ]
                 o = pan2 (duty AR sampleDur 0 DoNothing d) (lfNoise1 i KR 1) 1
-            in  (g1,o)
+            in  (g3,o)
         sig = go 5 0 g
           where
+            go :: Int -> UGen -> StdGen -> UGen
             go 0 acc _  = acc
             go i acc g0 = let (g',x) = fsig g0 in go (i-1) (x+acc) g'
     audition (out 0 (sig * 0.1))
@@ -1311,9 +1310,8 @@ dfsm_ex042 = do
                     let xs     = randomRs (0,3) g1
                         (l,g2) = randomR (2,5) g1
                     in  Just (take l xs, g2)
-                (i,g1) = next g0
+                (i,g3) = next g0
                 inf = constant (1/0 :: Double)
-                rs = shuffle' [0..10] 11 g0
                 pr = dwhite 'a' inf 0 1
                 d  = dfsm 'ζ' n pr
                      (mce
@@ -1329,9 +1327,10 @@ dfsm_ex042 = do
                       , dwhite 'κ' inf 0 1
                       , mce (nexts !! 3) ])
                 o = pan2 (duty AR sampleDur 0 DoNothing d) (lfNoise1 i KR 1) 1
-            in  (g1,o)
+            in  (g3,o)
         sig = go 5 0 g
           where
+            go :: Int -> UGen -> StdGen -> UGen
             go 0 acc _  = acc
             go i acc g0 = let (g',x) = fsig g0 in go (i-1) (x+acc) g'
     audition (out 0 (sig * 0.1))

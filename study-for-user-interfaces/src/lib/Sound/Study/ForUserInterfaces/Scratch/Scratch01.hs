@@ -9,7 +9,7 @@ Portability : unknown
 Scratches, take 1
 
 -}
-module Sound.Study.ForUserInterfaces.Misc.Scratch01 where
+module Sound.Study.ForUserInterfaces.Scratch.Scratch01 where
 
 import Control.Arrow (first)
 import Control.Concurrent (forkIO, killThread, threadDelay)
