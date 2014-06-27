@@ -60,6 +60,7 @@ library
                    , hsc3-tree
                    , mtl
                    , murmur-hash
+                   , plugins
                    , random
                    , random-shuffle
                    , template-haskell

@@ -15,7 +15,6 @@ import qualified Config.Dyre as Dyre
 import           Config.Dyre.Relaunch
 import           Control.Concurrent
 import           Control.Monad (void, when)
-import           DynFlags
 import           System.IO
 import           System.Random
 
