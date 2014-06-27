@@ -48,6 +48,7 @@ library
                    , dyre
                    , filepath
                    , ghc
+                   , ghc-mtl
                    , ghc-paths
                    , hashable
                    , hosc >= 0.14
