@@ -59,6 +59,7 @@ library
                    , hsc3-supply
                    , hsc3-th
                    , hsc3-tree
+                   , MonadRandom
                    , mtl
                    , murmur-hash
                    , plugins
