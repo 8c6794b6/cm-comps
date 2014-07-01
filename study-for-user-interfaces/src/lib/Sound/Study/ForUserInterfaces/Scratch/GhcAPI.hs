@@ -1,5 +1,6 @@
-{-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE TemplateHaskell            #-}
+{-# LANGUAGE MagicHash #-}
 {-|
 Copyright   : 8c6794b6, 2014
 License     : BSD3
@@ -8,64 +9,94 @@ Maintainer  : 8c6794b6@gmail.com
 Stability   : experimental
 Portability : unknown
 
-Module to play with ghc package and temporal recursion.
+Module to periodically reload haskell Module with GHC APIs.
 -}
 module Sound.Study.ForUserInterfaces.Scratch.GhcAPI where
 
+-- From "base"
 import           Control.Applicative
-import           Control.Monad (ap, liftM)
-import           Control.Monad.IO.Class (MonadIO(..))
-import           Control.Monad.Random (MonadRandom(..))
-import           Data.Dynamic (fromDyn)
-import           Data.List (intersperse)
+import           Control.Monad              (ap, liftM)
+import           Control.Monad.IO.Class     (MonadIO (..))
+import           Control.Monad.Random       (MonadRandom (..))
+import           Data.Dynamic               (fromDyn)
 import           Data.IORef
+import           Data.List                  (intersperse)
 import           Language.Haskell.TH.Syntax (Name)
-import           Unsafe.Coerce (unsafeCoerce)
+import           Unsafe.Coerce              (unsafeCoerce)
 
-import           Sound.OSC (Time, pauseThreadUntil)
+-- From "hosc" package
+import           Sound.OSC                  (DuplexOSC, RecvOSC (..),
+                                             SendOSC (..), Time, Transport,
+                                             pauseThreadUntil)
+import qualified Sound.OSC.Transport.FD     as FD
 
 -- From "ghc" package
-import           GHC hiding (Name)
-import           DynFlags
-                  ( HasDynFlags(..), PkgConfRef(..), PackageFlag(..)
-                  , defaultFatalMessager, defaultFlushOut)
-import           Exception (ExceptionMonad(..))
+import           DynFlags                   (HasDynFlags (..), PackageFlag (..),
+                                             PkgConfRef (..),
+                                             defaultFatalMessager,
+                                             defaultFlushOut)
+import           Exception                  (ExceptionMonad (..))
+import           GHC                        hiding (Name)
+import           GHC.Paths                  (libdir)
 
--- From "ghc-paths" package
-import           GHC.Paths (libdir)
+-- From "ghc-prim" package
+import GHC.Prim (unsafeCoerce#)
+
+
+-- Inspired from GhciMonad.Ghci, see how it's holding Ghc inside.
+-- It is reader Monad using IORef.
+newtype Rec t a = Rec {unRec :: RecEnv t -> Ghc a}
 
 data RecEnv t =
   RecEnv {reHValueRef :: {-# UNPACK  #-} !(IORef HValue)
          ,reTransport :: {-# UNPACK  #-} !t}
 
--- Inspired from GhciMonad.Ghci, see how it's holding Ghc inside.
--- It is reader Monad using IORef.
-newtype Rec a = Rec {unRec :: IORef HValue -> Ghc a}
-
-instance MonadRandom Rec where
+instance MonadRandom (Rec t) where
+  {-# INLINE getRandom #-}
   getRandom = liftIO getRandom
+  {-# INLINE getRandoms #-}
   getRandoms = liftIO getRandoms
+  {-# INLINE getRandomR #-}
   getRandomR = liftIO . getRandomR
+  {-# INLINE getRandomRs #-}
   getRandomRs = liftIO . getRandomRs
+
+instance FD.Transport t => SendOSC (Rec t) where
+  {-# INLINE sendOSC #-}
+  sendOSC o = Rec (\e -> liftIO (FD.sendOSC (reTransport e) o))
+
+instance FD.Transport t => RecvOSC (Rec t) where
+  {-# INLINE recvPacket #-}
+  recvPacket = Rec (liftIO . FD.recvPacket . reTransport)
+
+instance FD.Transport t => DuplexOSC (Rec t)
+
+instance FD.Transport t => Transport (Rec t)
 
 -- | Getter and setter fallback value for module reload.
 class HasFallback h where
   setFallback :: HValue -> h ()
   getFallback :: h HValue
 
-instance HasFallback Rec where
-  setFallback hvalue = Rec (\ref -> liftIO (writeIORef ref hvalue))
-  getFallback = Rec (liftIO . readIORef)
+instance HasFallback (Rec t) where
+  {-# INLINE setFallback #-}
+  setFallback hvalue = Rec (\e -> liftIO (writeIORef (reHValueRef e) hvalue))
+  {-# INLINE getFallback #-}
+  getFallback = Rec (\e -> liftIO (readIORef (reHValueRef e)))
 
--- | Setup GHC session and run 'Rec' with initial argument.
+-- | Setup GHC session and run 'Rec' with given arguments.
 runRecWith ::
-  FilePath        -- ^ Path to package db.
-  -> String       -- ^ Name of target source.
-  -> IO a         -- ^ 'IO' action returning initial argument.
-  -> (a -> Rec b) -- ^ Function taking argument and returns 'Rec' to run.
+  FilePath          -- ^ Path to package db.
+  -> String         -- ^ Name of target source.
+  -> IO t           -- ^ Transport to send OSC messages.
+  -> IO a           -- ^ 'IO' action returning initial argument.
+  -> (a -> Rec t b) -- ^ Function taking argument and returns 'Rec' to run.
   -> IO b
-runRecWith pkgConf targetSource arg frec =
+runRecWith pkgConf targetSource transport arg frec =
   do ref <- newIORef (error "runRecWith: fallback not initialized.")
+     transport' <- transport
+     let env = RecEnv {reHValueRef = ref
+                      ,reTransport = transport'}
      defaultErrorHandler
        defaultFatalMessager
        defaultFlushOut
@@ -77,39 +108,39 @@ runRecWith pkgConf targetSource arg frec =
                 Failed    -> error "setupSession: failed loading module."
                 Succeeded -> return ()
               arg' <- liftIO arg
-              unRec (frec arg') ref))
+              unRec (frec arg') env))
 
 -- | Like 'runRecWith', but without initial argument.
-runRec :: FilePath -> String -> Rec a -> IO a
-runRec pkgConf targetSource body =
-  runRecWith pkgConf targetSource (return ()) (\_ -> body)
+runRec :: FilePath -> String -> IO t -> Rec t a -> IO a
+runRec pkgConf targetSource transport body =
+  runRecWith pkgConf targetSource transport (return ()) (\_ -> body)
 
-liftGhc :: Ghc a -> Rec a
+liftGhc :: Ghc a -> Rec t a
 liftGhc m = Rec (\_ -> m)
 
-instance Monad Rec where
+instance Monad (Rec t) where
   Rec m >>= k = Rec (\r -> m r >>= \a -> unRec (k a) r)
   return = liftGhc . return
 
-instance Functor Rec where
+instance Functor (Rec t) where
   fmap = liftM
 
-instance Applicative Rec where
+instance Applicative (Rec t) where
   pure = return
   (<*>) = ap
 
-instance MonadIO Rec where
+instance MonadIO (Rec t) where
   liftIO = liftGhc . liftIO
 
-instance ExceptionMonad Rec where
+instance ExceptionMonad (Rec t) where
   gcatch m h = Rec (\r -> unRec m r `gcatch` (\e -> unRec (h e) r))
   gmask f = Rec (\r -> gmask (\g -> let f' (Rec m) = Rec (\r' -> g (m r'))
                                     in  unRec (f f' ) r))
 
-instance HasDynFlags Rec where
+instance HasDynFlags (Rec t) where
   getDynFlags = liftGhc getDynFlags
 
-instance GhcMonad Rec where
+instance GhcMonad (Rec t) where
   getSession = liftGhc getSession
   setSession = liftGhc . setSession
 
@@ -194,7 +225,7 @@ setupSession pkgConf targetSource =
                       ,extraPkgConfs = (PkgConfFile pkgConf :)
                       ,packageFlags = [ExposePackage "ghc"]
                       ,hscTarget = HscInterpreted
-                      -- ,hscTarget = HscLlvm
+                      -- ,hscTarget = HscAsm
                       ,ghcLink = LinkInMemory
                       -- ,ghcLink = LinkBinary
                       ,ghcMode = CompManager
@@ -244,48 +275,21 @@ apply' n arg = apply n arg (\_ -> liftIO (putStrLn "Compilation failed."))
 
 applyAt :: (HasFallback m, GhcMonad m) => Time -> Name -> t -> m b
 applyAt scheduledTime func arg =
-  do --
-     -- Cannot compile expression, try looking up the value of given Name from
-     -- current HscEnv to get last result. Use 'ByteCodeLink.lookupName'? Where
-     -- to get ClosureEnv and Name? There is a function named
-     -- 'Linker.getHValue', which takes HscEnv and Name.
-     --
-     -- Use lookupOrigNameCache? Not working, showing error message for /home
-     -- module not loaded/ (homeModError). Alternate idea are:
-     --
-     -- + Pass extra argument, use that function as fallback (easiest).
-     --
-     -- * Use StateMonad, hold last compiled result. (might work, make newtype
-     -- and wrap Ghc in with State Monad, store HValue in the state).
-     --
-     -- * Don't interpret, load object code only. Use does compilation manually
-     -- which leads to reloading by looped process (don't understand ghc this
-     -- much yet).
-     --
+  do -- Using IORef to hold last compiled result, getting and setting the result
+     -- with methods defined in HasFallback type class.
      let thisModuleName = mkModuleName (moduleOfFunctionName func)
-     --     ocache = nsNames hsc_nc
-     --     mdls = [mdl | ms <- hsc_mod_graph hsc_env
-     --                 , let mdl = ms_mod ms
-     --                 , moduleName mdl == thisModuleName]
-     --     myModule = head mdls
-     --     baseName = tail (takeExtension (show func))
-     --     mbName = lookupOrigNameCache ocache myModule (mkVarOcc baseName)
-     --     name = case mbName of
-     --              Just n  -> n
-     --              Nothing -> error ("applyAt: Lookup failed.")
-     -- fallback <- liftIO (getHValue hsc_env name)
      result <- load (LoadUpTo thisModuleName)
      case result of
        Failed    ->
          do fallback <- getFallback
             pauseThreadUntil scheduledTime
-            unsafeCoerce fallback arg
+            unsafeCoerce# fallback arg
        Succeeded ->
          do setContext [IIModule thisModuleName]
             hvalue <- compileExpr (show func)
             setFallback hvalue
             pauseThreadUntil scheduledTime
-            unsafeCoerce hvalue arg
+            unsafeCoerce# hvalue arg
 
 moduleOfFunctionName :: Name -> String
 moduleOfFunctionName name = concat (intersperse "." (init (ns (show name))))
@@ -295,6 +299,7 @@ moduleOfFunctionName name = concat (intersperse "." (init (ns (show name))))
             in  pre : if null post
                          then []
                          else ns (tail post)
+
 
 -- Local Variables:
 -- flycheck-haskell-ghc-executable: "ghc-with-ghc"
