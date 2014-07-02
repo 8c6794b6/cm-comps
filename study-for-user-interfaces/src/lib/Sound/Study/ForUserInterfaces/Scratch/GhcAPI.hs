@@ -13,29 +13,41 @@ Module to periodically reload haskell Module with GHC APIs.
 -}
 module Sound.Study.ForUserInterfaces.Scratch.GhcAPI where
 
-import           Control.Applicative
-import           Control.Monad              (ap, liftM)
-import           Control.Monad.IO.Class     (MonadIO (..))
-import           Control.Monad.Random       (MonadRandom (..))
-import           Data.Dynamic               (fromDyn)
+import           Control.Applicative    (Applicative (..))
+import           Control.Concurrent     (forkIO)
+import           Control.Monad          (ap, liftM, void)
+import           Control.Monad.IO.Class (MonadIO (..))
+import           Control.Monad.Random   (MonadRandom (..))
+import           Data.ByteString.Char8  (unpack)
+import           Data.Dynamic           (fromDyn)
 import           Data.IORef
-import           Data.List                  (intersperse)
-import           Language.Haskell.TH.Syntax (Name)
+import           Data.List              (intersperse)
+import           Language.Haskell.TH    (Name)
+import           System.Environment     (getArgs)
+import           System.Exit            (exitSuccess)
+import           System.Process         (rawSystem)
 
-import           Sound.OSC                  (DuplexOSC, RecvOSC (..),
-                                             SendOSC (..), Time, Transport,
-                                             pauseThreadUntil)
-import qualified Sound.OSC.Transport.FD     as FD
+import           DynFlags               (HasDynFlags (..), PackageFlag (..),
+                                         PkgConfRef (..), defaultFatalMessager,
+                                         defaultFlushOut)
+import           Exception              (ExceptionMonad (..))
+import           GHC                    hiding (Name)
+import           GHC.Paths              (ghc, libdir)
+import           GHC.Prim               (unsafeCoerce#)
 
-import           DynFlags                   (HasDynFlags (..), PackageFlag (..),
-                                             PkgConfRef (..),
-                                             defaultFatalMessager,
-                                             defaultFlushOut)
-import           Exception                  (ExceptionMonad (..))
-import           GHC                        hiding (Name)
-import           GHC.Paths                  (libdir)
-import           GHC.Prim                   (unsafeCoerce#)
+import           Sound.OSC              (Datum (..), DuplexOSC, Message (..),
+                                         RecvOSC (..), SendOSC (..), Time,
+                                         Transport, message, openUDP,
+                                         pauseThreadUntil, sendOSC, string,
+                                         udpServer, waitMessage, withTransport)
+import qualified Sound.OSC.Transport.FD as FD
 
+
+-- --------------------------------------------------------------------------
+--
+-- * Newtype wrapper for reload-aware recursion
+--
+-- --------------------------------------------------------------------------
 
 -- Inspired from GhciMonad.Ghci, see how it's holding Ghc inside.
 -- It is reader Monad using IORef.
@@ -78,37 +90,6 @@ instance HasFallback (Rec t) where
   {-# INLINE getFallback #-}
   getFallback = Rec (\e -> liftIO (readIORef (reHValueRef e)))
 
--- | Setup GHC session and run 'Rec' with given arguments.
-runRecWith ::
-  FilePath          -- ^ Path to package db.
-  -> String         -- ^ Name of target source.
-  -> IO t           -- ^ Transport to send OSC messages.
-  -> IO a           -- ^ 'IO' action returning initial argument.
-  -> (a -> Rec t b) -- ^ Function taking argument and returns 'Rec' to run.
-  -> IO b
-runRecWith pkgConf targetSource transport arg frec =
-  do ref <- newIORef (error "runRecWith: fallback not initialized.")
-     transport' <- transport
-     let env = RecEnv {reHValueRef = ref
-                      ,reTransport = transport'}
-     defaultErrorHandler
-       defaultFatalMessager
-       defaultFlushOut
-       (runGhc
-          (Just libdir)
-          (do setupSession pkgConf targetSource
-              rflag <- load LoadAllTargets
-              case rflag of
-                Failed    -> error "setupSession: failed loading module."
-                Succeeded -> return ()
-              arg' <- liftIO arg
-              unRec (frec arg') env))
-
--- | Like 'runRecWith', but without initial argument.
-runRec :: FilePath -> String -> IO t -> Rec t a -> IO a
-runRec pkgConf targetSource transport body =
-  runRecWith pkgConf targetSource transport (return ()) (\_ -> body)
-
 liftGhc :: Ghc a -> Rec t a
 liftGhc m = Rec (\_ -> m)
 
@@ -149,87 +130,141 @@ instance GhcMonad (Rec t) where
   {-# INLINE setSession #-}
   setSession = liftGhc . setSession
 
--- | Evaluate given expression having type @a :: IO ()@.
-eval :: Show a => FilePath -> String -> a -> IO ()
-eval pkgConf callerModule expr =
-  defaultErrorHandler
-   defaultFatalMessager
-   defaultFlushOut
-   (runGhc
-    (Just libdir)
-    (do let thisModule = callerModule
-        dflags <- getSessionDynFlags
-        _ <- setSessionDynFlags
-               dflags {verbosity = 0
-                      ,extraPkgConfs = (PkgConfFile pkgConf :)
-                      ,packageFlags = [ExposePackage "ghc"]
-                      ,hscTarget = HscInterpreted
-                      ,ghcLink = LinkInMemory
-                      ,importPaths = ["dist/build"
-                                     ,"src/lib"
-                                     ,"dist/build/autogen"]}
-        target <- guessTarget thisModule Nothing
-        setTargets [target]
-        _ <- load LoadAllTargets
-        setContext [IIDecl (simpleImportDecl (mkModuleName thisModule))]
-        result <- dynCompileExpr (show expr)
-        liftIO (fromDyn result (putStrLn "Failed"))))
+
+-- --------------------------------------------------------------------------
+--
+-- * Forking GHC
+--
+-- --------------------------------------------------------------------------
+
+data RecConfig t =
+  RecConfig {packageDbFiles   :: IO [FilePath]
+            ,sourcePaths      :: IO [FilePath]
+            ,recTarget        :: String
+            ,recTransportFunc :: String -> Int -> IO t
+            ,recTransportHost :: String
+            ,recTransportPort :: Int}
+
+defaultRecConfig :: RecConfig t
+defaultRecConfig =
+  RecConfig {packageDbFiles = return []
+            ,sourcePaths = return []
+            ,recTarget = "Main"
+            ,recTransportFunc = errTransportFunc
+            ,recTransportHost = "127.0.0.1"
+            ,recTransportPort = 57110}
+  where
+    errTransportFunc =
+      error "defaultRecConfig: recTransportFunc not specified."
+
+forkGhcProcess :: RecConfig t -> String -> IO ()
+forkGhcProcess config str =
+  do packageDbFiles' <- packageDbFiles config
+     sourcePaths' <- sourcePaths config
+     let args = [unwords (map ("-package-db=" ++) packageDbFiles')
+                ,unwords (map ("-i" ++) sourcePaths')
+                ,"-package", "ghc"
+                ,"-e", str
+                ,recTarget config]
+     putStrLn ("forking: " ++ str)
+     _ <- forkIO (void (rawSystem ghc args))
+     return ()
+
+newtype RawString = RawString String
+
+instance Show RawString where
+  show (RawString str) = str
+
+forkExpr :: Show a => RecConfig t -> a -> IO ()
+forkExpr config expr = forkGhcProcess config (show expr)
+
+-- Might not necessary to start Server, why not fork GHC with rawSystem with
+-- arguments used in current ghci? ... how to get current arguments in ghci?
+--
+-- Use per-directory .ghci file? Is package-db path available in .ghci?
+--
+--   <https://www.haskell.org/ghc/docs/latest/html/users_guide/ghci-dot-files.html>
+--
+
+data RecServerConfig = RecServerConfig {rscPort :: Int}
+
+recServerConfig :: Int -> RecServerConfig
+recServerConfig = RecServerConfig
+
+startServer :: RecConfig t -> RecServerConfig -> IO a
+startServer config serverConfig =
+  do args <- getArgs
+     putStrLn ("Args: " ++ show args)
+     withTransport
+       (udpServer "127.0.0.1" (rscPort serverConfig))
+       (serverLoop config)
+
+serverLoop :: (RecvOSC m, MonadIO m) => RecConfig t -> m b
+serverLoop config =
+  do let loop = serverLoop config
+     msg@(Message addr dtm) <- waitMessage
+     case addr of
+       "/h_quit"    -> liftIO (putStrLn "quit.") >> liftIO exitSuccess
+       -- XXX: Append thread id to state and kill the forked thread when receiving
+       -- quit message?
+       "/h_forkGhc" -> case dtm of
+                         [ASCII_String str] ->
+                           do liftIO (forkGhcProcess config (unpack str))
+                              loop
+                         _                  -> loop
+       _            -> liftIO (print msg) >> loop
+
+sendRec ::  RecServerConfig -> Message -> IO ()
+sendRec config msg =
+  withTransport (openUDP "127.0.0.1" (rscPort config))
+                (sendOSC msg)
+
+h_forkGhc :: Name -> Message
+h_forkGhc func = message "/h_forkGhc" [string (show func)]
+
+h_quit :: Message
+h_quit = message "/h_quit" []
 
 
--- | Recursively load and evaluate given function name.
-recurse ::
-  FilePath  -- ^ Path to package conf file.
-  -> Name   -- ^ Name of function to recurse.
-            --
-            -- Expecting an IO action having type @(a -> IO a)@, an IO action
-            -- which returns next state for itself to update the state
-            -- recursively.
-            --
-  -> a      -- ^ Initial argument.
+-- --------------------------------------------------------------------------
+--
+-- * Running recursion
+--
+-- --------------------------------------------------------------------------
+
+-- | Setup GHC session and run 'Rec' with given arguments.
+runRecWith ::
+  RecConfig t       -- ^ Configuration for GHC to run recursion.
+  -> IO a           -- ^ 'IO' action returning initial argument.
+  -> (a -> Rec t b) -- ^ Function taking argument and returns 'Rec' to run.
   -> IO b
-recurse pkgConf expr arg =
-  defaultErrorHandler
-   defaultFatalMessager
-   defaultFlushOut
-   (runGhc
-    (Just libdir)
-    (do let sourceModule = moduleOfFunctionName expr
-            myModuleName = mkModuleName sourceModule
-            go x fallback =
-               do rflag <- load LoadAllTargets
-                  case rflag of
-                    Failed ->
-                      do x' <- liftIO ((unsafeCoerce# fallback :: a -> IO a) x)
-                         go x' fallback
-                    Succeeded ->
-                      do setContext [IIDecl (simpleImportDecl myModuleName)]
-                         result <- compileExpr (show expr)
-                         x' <- liftIO ((unsafeCoerce# result :: a -> IO a) x)
-                         go x' result
-        setupSession pkgConf sourceModule
-        go arg (error "recurse: Failed the initial load.")))
-
--- | Pause thread until given time, then return given value.
-returnAt :: MonadIO m => Time -> a -> m a
-returnAt t a = pauseThreadUntil t >> return a
-
-withGhc :: FilePath -> String -> Ghc () -> IO ()
-withGhc pkgConf targetSource body =
-  defaultErrorHandler
-    defaultFatalMessager
-    defaultFlushOut
-    (runGhc (Just libdir)
-            (do setupSession pkgConf targetSource
-                body))
+runRecWith config arg frec =
+  do pkgDbs <- packageDbFiles config
+     ref <- newIORef (error "runRecWith: fallback not initialized.")
+     transport <- recTransportFunc config (recTransportHost config) (recTransportPort config)
+     let env = RecEnv {reHValueRef = ref
+                      ,reTransport = transport}
+     defaultErrorHandler
+       defaultFatalMessager
+       defaultFlushOut
+       (runGhc
+          (Just libdir)
+          (do setupSession pkgDbs (recTarget config)
+              rflag <- load LoadAllTargets
+              case rflag of
+                Failed    -> error "runRecWith: failed loading module."
+                Succeeded -> return ()
+              arg' <- liftIO arg
+              unRec (frec arg') env))
 
 -- | Setup GHC session with given package conf file and target.
-setupSession :: GhcMonad m => FilePath -> String -> m ()
-setupSession pkgConf targetSource =
+setupSession :: GhcMonad m => [FilePath] -> String -> m ()
+setupSession pkgDbs targetSource =
   do dflags <- getSessionDynFlags
      _pkgs <- setSessionDynFlags
                dflags {verbosity = 0
-                      ,extraPkgConfs = const [GlobalPkgConf
-                                             ,PkgConfFile pkgConf]
+                      ,extraPkgConfs =
+                         const (GlobalPkgConf : map PkgConfFile pkgDbs)
                       -- ,extraPkgConfs = (PkgConfFile pkgConf :)
                       -- ,extraPkgConfs = const [PkgConfFile pkgConf]
                       ,packageFlags = [ExposePackage "ghc"]
@@ -293,7 +328,6 @@ applyAt scheduledTime func arg =
             pauseThreadUntil scheduledTime
             unsafeCoerce# hvalue arg
 
-
 moduleOfFunctionName :: Name -> String
 moduleOfFunctionName name = concat (intersperse "." (init (ns (show name))))
   where
@@ -302,6 +336,77 @@ moduleOfFunctionName name = concat (intersperse "." (init (ns (show name))))
             in  pre : if null post
                          then []
                          else ns (tail post)
+
+
+-- --------------------------------------------------------------------------
+--
+-- * Legacy experiments
+--
+-- --------------------------------------------------------------------------
+
+-- | Evaluate given expression having type @a :: IO ()@.
+eval :: Show a => FilePath -> String -> a -> IO ()
+eval pkgConf callerModule expr =
+  defaultErrorHandler
+   defaultFatalMessager
+   defaultFlushOut
+   (runGhc
+    (Just libdir)
+    (do let thisModule = callerModule
+        dflags <- getSessionDynFlags
+        _ <- setSessionDynFlags
+               dflags {verbosity = 0
+                      ,extraPkgConfs = (PkgConfFile pkgConf :)
+                      ,packageFlags = [ExposePackage "ghc"]
+                      ,hscTarget = HscInterpreted
+                      ,ghcLink = LinkInMemory
+                      ,importPaths = ["dist/build"
+                                     ,"src/lib"
+                                     ,"dist/build/autogen"]}
+        target <- guessTarget thisModule Nothing
+        setTargets [target]
+        _ <- load LoadAllTargets
+        setContext [IIDecl (simpleImportDecl (mkModuleName thisModule))]
+        result <- dynCompileExpr (show expr)
+        liftIO (fromDyn result (putStrLn "Failed"))))
+
+
+-- | Recursively load and evaluate given function name.
+recurse ::
+  FilePath  -- ^ Path to package conf file.
+  -> Name   -- ^ Name of function to recurse.
+            --
+            -- Expecting an IO action having type @(a -> IO a)@, an IO action
+            -- which returns next state for itself to update the state
+            -- recursively.
+            --
+  -> a      -- ^ Initial argument.
+  -> IO b
+recurse pkgConf expr arg =
+  defaultErrorHandler
+   defaultFatalMessager
+   defaultFlushOut
+   (runGhc
+    (Just libdir)
+    (do let sourceModule = moduleOfFunctionName expr
+            myModuleName = mkModuleName sourceModule
+            go x fallback =
+               do rflag <- load LoadAllTargets
+                  case rflag of
+                    Failed ->
+                      do x' <- liftIO ((unsafeCoerce# fallback :: a -> IO a) x)
+                         go x' fallback
+                    Succeeded ->
+                      do setContext [IIDecl (simpleImportDecl myModuleName)]
+                         result <- compileExpr (show expr)
+                         x' <- liftIO ((unsafeCoerce# result :: a -> IO a) x)
+                         go x' result
+        setupSession [pkgConf] sourceModule
+        go arg (error "recurse: Failed the initial load.")))
+
+-- | Pause thread until given time, then return given value.
+returnAt :: MonadIO m => Time -> a -> m a
+returnAt t a = pauseThreadUntil t >> return a
 
 
 -- Local Variables:
