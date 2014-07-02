@@ -157,6 +157,16 @@ defaultRecConfig =
     errTransportFunc =
       error "defaultRecConfig: recTransportFunc not specified."
 
+-- | Fork expression.
+forkExpr ::
+  Show a
+   => RecConfig t -- ^ Configuration passed to @ghc@ command.
+   -> a           -- ^ Expression ran by @ghc -e@.
+   -> IO ()
+-- Forking ghc command because as of ghc-7.8.2, forkIO and runGhc is not working
+-- nicely: <http://www.haskell.org/pipermail/ghc-devs/2014-January/003774.html>
+forkExpr config expr = forkGhcProcess config (show expr)
+
 forkGhcProcess :: RecConfig t -> String -> IO ()
 forkGhcProcess config str =
   do packageDbFiles' <- packageDbFiles config
@@ -170,14 +180,7 @@ forkGhcProcess config str =
      _ <- forkIO (void (rawSystem ghc args))
      return ()
 
-newtype RawString = RawString String
-
-instance Show RawString where
-  show (RawString str) = str
-
-forkExpr :: Show a => RecConfig t -> a -> IO ()
-forkExpr config expr = forkGhcProcess config (show expr)
-
+--
 -- Might not necessary to start Server, why not fork GHC with rawSystem with
 -- arguments used in current ghci? ... how to get current arguments in ghci?
 --
@@ -241,7 +244,9 @@ runRecWith ::
 runRecWith config arg frec =
   do pkgDbs <- packageDbFiles config
      ref <- newIORef (error "runRecWith: fallback not initialized.")
-     transport <- recTransportFunc config (recTransportHost config) (recTransportPort config)
+     transport <- recTransportFunc config
+                                   (recTransportHost config)
+                                   (recTransportPort config)
      let env = RecEnv {reHValueRef = ref
                       ,reTransport = transport}
      defaultErrorHandler
