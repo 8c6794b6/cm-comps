@@ -1,6 +1,6 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE MagicHash                  #-}
 {-# LANGUAGE TemplateHaskell            #-}
-{-# LANGUAGE MagicHash #-}
 {-|
 Copyright   : 8c6794b6, 2014
 License     : BSD3
@@ -13,7 +13,6 @@ Module to periodically reload haskell Module with GHC APIs.
 -}
 module Sound.Study.ForUserInterfaces.Scratch.GhcAPI where
 
--- From "base"
 import           Control.Applicative
 import           Control.Monad              (ap, liftM)
 import           Control.Monad.IO.Class     (MonadIO (..))
@@ -22,15 +21,12 @@ import           Data.Dynamic               (fromDyn)
 import           Data.IORef
 import           Data.List                  (intersperse)
 import           Language.Haskell.TH.Syntax (Name)
-import           Unsafe.Coerce              (unsafeCoerce)
 
--- From "hosc" package
 import           Sound.OSC                  (DuplexOSC, RecvOSC (..),
                                              SendOSC (..), Time, Transport,
                                              pauseThreadUntil)
 import qualified Sound.OSC.Transport.FD     as FD
 
--- From "ghc" package
 import           DynFlags                   (HasDynFlags (..), PackageFlag (..),
                                              PkgConfRef (..),
                                              defaultFatalMessager,
@@ -38,9 +34,7 @@ import           DynFlags                   (HasDynFlags (..), PackageFlag (..),
 import           Exception                  (ExceptionMonad (..))
 import           GHC                        hiding (Name)
 import           GHC.Paths                  (libdir)
-
--- From "ghc-prim" package
-import GHC.Prim (unsafeCoerce#)
+import           GHC.Prim                   (unsafeCoerce#)
 
 
 -- Inspired from GhciMonad.Ghci, see how it's holding Ghc inside.
@@ -48,8 +42,8 @@ import GHC.Prim (unsafeCoerce#)
 newtype Rec t a = Rec {unRec :: RecEnv t -> Ghc a}
 
 data RecEnv t =
-  RecEnv {reHValueRef :: {-# UNPACK  #-} !(IORef HValue)
-         ,reTransport :: {-# UNPACK  #-} !t}
+  RecEnv {reHValueRef :: {-# UNPACK #-} !(IORef HValue)
+         ,reTransport :: {-# UNPACK #-} !t}
 
 instance MonadRandom (Rec t) where
   {-# INLINE getRandom #-}
@@ -119,29 +113,40 @@ liftGhc :: Ghc a -> Rec t a
 liftGhc m = Rec (\_ -> m)
 
 instance Monad (Rec t) where
+  {-# INLINE (>>=) #-}
   Rec m >>= k = Rec (\r -> m r >>= \a -> unRec (k a) r)
+  {-# INLINE return #-}
   return = liftGhc . return
 
 instance Functor (Rec t) where
+  {-# INLINE fmap #-}
   fmap = liftM
 
 instance Applicative (Rec t) where
+  {-# INLINE pure #-}
   pure = return
+  {-# INLINE (<*>) #-}
   (<*>) = ap
 
 instance MonadIO (Rec t) where
+  {-# INLINE liftIO #-}
   liftIO = liftGhc . liftIO
 
 instance ExceptionMonad (Rec t) where
+  {-# INLINE gcatch #-}
   gcatch m h = Rec (\r -> unRec m r `gcatch` (\e -> unRec (h e) r))
+  {-# INLINE gmask #-}
   gmask f = Rec (\r -> gmask (\g -> let f' (Rec m) = Rec (\r' -> g (m r'))
                                     in  unRec (f f' ) r))
 
 instance HasDynFlags (Rec t) where
+  {-# INLINE getDynFlags #-}
   getDynFlags = liftGhc getDynFlags
 
 instance GhcMonad (Rec t) where
+  {-# INLINE getSession #-}
   getSession = liftGhc getSession
+  {-# INLINE setSession #-}
   setSession = liftGhc . setSession
 
 -- | Evaluate given expression having type @a :: IO ()@.
@@ -170,6 +175,7 @@ eval pkgConf callerModule expr =
         result <- dynCompileExpr (show expr)
         liftIO (fromDyn result (putStrLn "Failed"))))
 
+
 -- | Recursively load and evaluate given function name.
 recurse ::
   FilePath  -- ^ Path to package conf file.
@@ -193,12 +199,12 @@ recurse pkgConf expr arg =
                do rflag <- load LoadAllTargets
                   case rflag of
                     Failed ->
-                      do x' <- liftIO ((unsafeCoerce fallback :: a -> IO a) x)
+                      do x' <- liftIO ((unsafeCoerce# fallback :: a -> IO a) x)
                          go x' fallback
                     Succeeded ->
                       do setContext [IIDecl (simpleImportDecl myModuleName)]
                          result <- compileExpr (show expr)
-                         x' <- liftIO ((unsafeCoerce result :: a -> IO a) x)
+                         x' <- liftIO ((unsafeCoerce# result :: a -> IO a) x)
                          go x' result
         setupSession pkgConf sourceModule
         go arg (error "recurse: Failed the initial load.")))
@@ -222,19 +228,17 @@ setupSession pkgConf targetSource =
   do dflags <- getSessionDynFlags
      _pkgs <- setSessionDynFlags
                dflags {verbosity = 0
-                      ,extraPkgConfs = (PkgConfFile pkgConf :)
+                      ,extraPkgConfs = const [GlobalPkgConf
+                                             ,PkgConfFile pkgConf]
+                      -- ,extraPkgConfs = (PkgConfFile pkgConf :)
+                      -- ,extraPkgConfs = const [PkgConfFile pkgConf]
                       ,packageFlags = [ExposePackage "ghc"]
                       ,hscTarget = HscInterpreted
-                      -- ,hscTarget = HscAsm
                       ,ghcLink = LinkInMemory
-                      -- ,ghcLink = LinkBinary
                       ,ghcMode = CompManager
-                      -- ,ghcMode = OneShot
-                      ,importPaths = ["dist/build"
-                                     ,"src/lib"]}
+                      ,importPaths = ["src/lib"]}
      target <- guessTarget targetSource Nothing
      setTargets [target]
-
 
 -- | This works with GHCs running with separate OS process.
 --
@@ -268,16 +272,14 @@ apply func arg fallback =
        Succeeded ->
          do setContext [IIModule thisModuleName]
             hvalue <- compileExpr (show func)
-            unsafeCoerce hvalue arg
+            unsafeCoerce# hvalue arg
 
 apply' :: GhcMonad m => Name -> t -> m ()
 apply' n arg = apply n arg (\_ -> liftIO (putStrLn "Compilation failed."))
 
 applyAt :: (HasFallback m, GhcMonad m) => Time -> Name -> t -> m b
 applyAt scheduledTime func arg =
-  do -- Using IORef to hold last compiled result, getting and setting the result
-     -- with methods defined in HasFallback type class.
-     let thisModuleName = mkModuleName (moduleOfFunctionName func)
+  do let thisModuleName = mkModuleName (moduleOfFunctionName func)
      result <- load (LoadUpTo thisModuleName)
      case result of
        Failed    ->
@@ -290,6 +292,7 @@ applyAt scheduledTime func arg =
             setFallback hvalue
             pauseThreadUntil scheduledTime
             unsafeCoerce# hvalue arg
+
 
 moduleOfFunctionName :: Name -> String
 moduleOfFunctionName name = concat (intersperse "." (init (ns (show name))))
