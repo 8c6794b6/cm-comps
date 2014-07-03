@@ -23,13 +23,13 @@ import           Data.Dynamic           (fromDyn)
 import           Data.IORef
 import           Data.List              (intersperse)
 import           Language.Haskell.TH    (Name)
-import           System.Environment     (getArgs)
 import           System.Exit            (exitSuccess)
 import           System.Process         (rawSystem)
 
-import           DynFlags               (HasDynFlags (..), PackageFlag (..),
-                                         PkgConfRef (..), defaultFatalMessager,
-                                         defaultFlushOut)
+import           DynFlags               (HasDynFlags (..), LogAction,
+                                         PackageFlag (..), PkgConfRef (..),
+                                         defaultFatalMessager, defaultFlushOut,
+                                         defaultLogAction)
 import           Exception              (ExceptionMonad (..))
 import           GHC                    hiding (Name)
 import           GHC.Paths              (ghc, libdir)
@@ -139,8 +139,8 @@ instance GhcMonad (Rec t) where
 -- --------------------------------------------------------------------------
 
 data RecConfig t =
-  RecConfig {recPackageDbs   :: IO [FilePath]
-            ,recSourcePaths      :: IO [FilePath]
+  RecConfig {recPackageDbs    :: IO [FilePath]
+            ,recSourcePaths   :: IO [FilePath]
             ,recTarget        :: String
             ,recTransportFunc :: String -> Int -> IO t
             ,recTransportHost :: String
@@ -164,11 +164,14 @@ forkExprWith ::
    => RecConfig t -- ^ Configuration passed to @ghc@ command.
    -> a           -- ^ Expression ran by @ghc -e@.
    -> IO ()
--- Forking ghc command because as of ghc-7.8.2, forkIO and runGhc is not working
--- nicely: <http://www.haskell.org/pipermail/ghc-devs/2014-January/003774.html>
 forkExprWith config expr = forkGhcProcess config (show expr)
 
 forkGhcProcess :: RecConfig t -> String -> IO ()
+--
+-- Forking "ghc" command because as of ghc-7.8.2, forkIO and runGhc is not
+-- working nicely. See:
+--   <http://www.haskell.org/pipermail/ghc-devs/2014-January/003774.html>
+--
 forkGhcProcess config str =
   do packageDbs <- recPackageDbs config
      sourcePaths <- recSourcePaths config
@@ -177,9 +180,13 @@ forkGhcProcess config str =
                 ,"-package", "ghc"
                 ,"-e", str
                 ,recTarget config]
-     putStrLn ("forking: " ++ str)
-     _ <- forkIO (void (rawSystem ghc args))
-     return ()
+     void (forkIO (void (rawSystem ghc args)))
+
+-- | Kill forked process with @pkill@ system command.
+pkill :: Show a => a -> IO ()
+pkill str =
+  let args = ["-f", show str]
+  in  void (rawSystem "pkill" args)
 
 --
 -- Might not necessary to start Server, why not fork GHC with rawSystem with
@@ -190,18 +197,17 @@ forkGhcProcess config str =
 --   <https://www.haskell.org/ghc/docs/latest/html/users_guide/ghci-dot-files.html>
 --
 
+-- | Configuration for recursion server.
 data RecServerConfig = RecServerConfig {rscPort :: Int}
 
-recServerConfig :: Int -> RecServerConfig
-recServerConfig = RecServerConfig
+defaultRecServerConfig :: RecServerConfig
+defaultRecServerConfig = RecServerConfig 40703
 
 startServer :: RecConfig t -> RecServerConfig -> IO a
 startServer config serverConfig =
-  do args <- getArgs
-     putStrLn ("Args: " ++ show args)
-     withTransport
-       (udpServer "127.0.0.1" (rscPort serverConfig))
-       (serverLoop config)
+  withTransport
+    (udpServer "127.0.0.1" (rscPort serverConfig))
+    (serverLoop config)
 
 serverLoop :: (RecvOSC m, MonadIO m) => RecConfig t -> m b
 serverLoop config =
@@ -218,8 +224,11 @@ serverLoop config =
                          _                  -> loop
        _            -> liftIO (print msg) >> loop
 
-sendRec ::  RecServerConfig -> Message -> IO ()
-sendRec config msg =
+sendRec :: Message -> IO ()
+sendRec = sendRecWith defaultRecServerConfig
+
+sendRecWith ::  RecServerConfig -> Message -> IO ()
+sendRecWith config msg =
   withTransport (openUDP "127.0.0.1" (rscPort config))
                 (sendOSC msg)
 
@@ -255,21 +264,28 @@ runRecWith config arg frec =
        defaultFatalMessager
        defaultFlushOut
        (runGhc
-          (Just libdir)
-          (do setupSession pkgDbs sourcePaths (recTarget config)
-              rflag <- load LoadAllTargets
-              case rflag of
-                Failed    -> error "runRecWith: failed loading module."
-                Succeeded -> return ()
-              arg' <- liftIO arg
-              unRec (frec arg') env))
+        (Just libdir)
+        (do _target <- setupSession pkgDbs sourcePaths (recTarget config)
+            rflag <- load LoadAllTargets
+            case rflag of
+              Failed    -> error "runRecWith: failed loading module."
+              Succeeded -> return ()
+            arg' <- liftIO arg
+            unRec (frec arg') env))
 
 -- | Setup GHC session with given package conf file and target.
-setupSession :: GhcMonad m => [FilePath] -> [FilePath] -> String -> m ()
+setupSession ::
+  GhcMonad m
+  => [FilePath] -- ^ Package db file paths (i.e; arguments passed to ghc
+                -- @-package-db@ option).
+  -> [FilePath] -- ^ Source paths (i.e; arguments passed to ghc @-i@ option).
+  -> String     -- ^ Target, passed to 'guessTarget'.
+  -> m Target
 setupSession pkgDbs sourcePaths targetSource =
   do dflags <- getSessionDynFlags
      _pkgs <- setSessionDynFlags
                dflags {verbosity = 0
+                      ,log_action = naughtyLogAction
                       ,extraPkgConfs =
                          const (GlobalPkgConf : map PkgConfFile pkgDbs)
                       -- ,extraPkgConfs = (PkgConfFile pkgConf :)
@@ -281,47 +297,30 @@ setupSession pkgDbs sourcePaths targetSource =
                       ,importPaths = sourcePaths}
      target <- guessTarget targetSource Nothing
      setTargets [target]
+     return target
 
--- | This works with GHCs running with separate OS process.
+-- | Log action hiding errors and warnings.
+naughtyLogAction :: LogAction
+naughtyLogAction dflag severity srcSpan style msg =
+  case severity of
+     SevError   -> return ()
+     SevWarning -> return ()
+     _          -> defaultLogAction dflag severity srcSpan style msg
+
+-- | This works with GHC running as separate OS process.
 --
--- Takes TemplateHaskell name of function, possibly updated argument, and an
--- action to take when failed to reload the module. Only single thread could be
--- forked at the same time.
+-- Takes TemplateHaskell name of 'Rec' function and argument passed to the
+-- 'Rec'. Only single thread could be forked at the same time in each GHC
+-- instance.
 --
-apply :: GhcMonad m => Name -> t -> (t -> m a) -> m a
-apply func arg fallback =
-  do --
-     -- Tryed 'DriverPipeline.linkBinary'. When linking binary, there will be no
-     -- success flag since no compilation will happen here.
-     -- 'DriverPipeline.linkBinary' was for static lib and dynamic lib. Need to
-     -- load interface before linking object file. Following did not work:
-     --
-     --   hsc_env <- getSession
-     --   dflags <- getSessionDynFlags
-     --   mg <- depanal [] False
-     --   mapM_ (\mdl -> do pm <- parseModule mdl
-     --                     tm <- typecheckModule pm
-     --                     loadModule tm) mg
-     --   result <- liftIO (link (ghcLink dflags)
-     --                          dflags
-     --                          False
-     --                          (hsc_HPT hsc_env))
-     --
-     let thisModuleName = mkModuleName (moduleOfFunctionName func)
-     result <- load (LoadUpTo thisModuleName)
-     case result of
-       Failed    -> fallback arg
-       Succeeded ->
-         do setContext [IIModule thisModuleName]
-            hvalue <- compileExpr (show func)
-            unsafeCoerce# hvalue arg
-
-apply' :: GhcMonad m => Name -> t -> m ()
-apply' n arg = apply n arg (\_ -> liftIO (putStrLn "Compilation failed."))
-
-applyAt :: (HasFallback m, GhcMonad m) => Time -> Name -> t -> m b
+applyAt ::
+  (HasFallback m, GhcMonad m)
+  => Time -- ^ Scheduled time.
+  -> Name -- ^ Name of function to evaluate.
+  -> t    -- ^ Argument passed to the function.
+  -> m b
 applyAt scheduledTime func arg =
-  do let thisModuleName = mkModuleName (moduleOfFunctionName func)
+  do let thisModuleName = mkModuleName (extractModuleName func)
      result <- load (LoadUpTo thisModuleName)
      case result of
        Failed    ->
@@ -335,14 +334,74 @@ applyAt scheduledTime func arg =
             pauseThreadUntil scheduledTime
             unsafeCoerce# hvalue arg
 
-moduleOfFunctionName :: Name -> String
-moduleOfFunctionName name = concat (intersperse "." (init (ns (show name))))
+extractModuleName :: Name -> String
+extractModuleName name = concat (intersperse "." (init (ns (show name))))
   where
     ns [] = [""]
     ns xs = let (pre, post) = break (== '.') xs
             in  pre : if null post
                          then []
                          else ns (tail post)
+
+-- --------------------------------------------------------------------------
+--
+-- * Client side synchronization
+--
+-- --------------------------------------------------------------------------
+
+-- | Data type to manage of synchronization in client side.
+data Metro =
+  Metro {beatsPerMinute :: {-# UNPACK #-} !Double
+        ,beatDuration   :: {-# UNPACK #-} !Double
+        ,currentBeat    :: !(Time -> Double)
+        ,nextOffset     :: !(Int -> Double -> Double)}
+
+instance Show Metro where
+  show m = "Metro {beatsPerMinute = " ++ show (beatsPerMinute m) ++ "}"
+
+-- | Returns a 'Metro' with given beats per minute.
+mkMetro :: Double -> Metro
+mkMetro bpm =
+  let m = Metro {beatsPerMinute = bpm
+                ,beatDuration = 60 / bpm
+                ,currentBeat = \t -> t / beatDuration m
+                ,nextOffset = \n t ->
+                  let gridDuration = beatDuration m * fromIntegral n
+                      numGrids :: Int
+                      (numGrids, _) =
+                        properFraction (t / (fromIntegral n * beatDuration m))
+                  in  gridDuration * fromIntegral (numGrids + 1) }
+  in  m `seq` m
+
+{-
+--
+-- Seems like, when running as bytecode, data type with function records
+-- performs better than defining each function as top level in this module.
+-- Check it again later.
+--
+
+newtype Metro = Metro {beatsPerMinute :: Double}
+
+mkMetro :: Double -> Metro
+mkMetro = Metro
+
+beatDuration   :: Metro -> Double
+beatDuration (Metro bpm) = 60 / bpm
+{-# INLINE beatDuration #-}
+
+currentBeat :: Metro -> Time -> Int
+currentBeat m t = fst (properFraction (t / beatDuration m))
+{-# INLINE currentBeat #-}
+
+nextOffset :: Metro -> Int -> Double -> Double
+nextOffset m n t =
+  let gridDuration = beatDuration m * fromIntegral n
+      numGrids :: Int
+      numGrids = fst (properFraction (t / (fromIntegral n * beatDuration m)))
+  in  gridDuration * fromIntegral (numGrids + 1)
+{-# INLINE nextOffset #-}
+
+-}
 
 
 -- --------------------------------------------------------------------------
@@ -395,7 +454,7 @@ recurse pkgConf expr arg =
    defaultFlushOut
    (runGhc
     (Just libdir)
-    (do let sourceModule = moduleOfFunctionName expr
+    (do let sourceModule = extractModuleName expr
             myModuleName = mkModuleName sourceModule
             go x fallback =
                do rflag <- load LoadAllTargets
@@ -408,8 +467,37 @@ recurse pkgConf expr arg =
                          result <- compileExpr (show expr)
                          x' <- liftIO ((unsafeCoerce# result :: a -> IO a) x)
                          go x' result
-        setupSession [pkgConf] ["."] sourceModule
+        _ <- setupSession [pkgConf] ["."] sourceModule
         go arg (error "recurse: Failed the initial load.")))
+
+apply :: GhcMonad m => Name -> t -> (t -> m a) -> m a
+apply func arg fallback =
+  do --
+     -- Tryed 'DriverPipeline.linkBinary'. When linking binary, there will be no
+     -- success flag since no compilation will happen here.
+     -- 'DriverPipeline.linkBinary' was for static lib and dynamic lib. Need to
+     -- load interface before linking object file. Following did not work:
+     --
+     --   hsc_env <- getSession
+     --   dflags <- getSessionDynFlags
+     --   mg <- depanal [] False
+     --   mapM_ (\mdl -> do pm <- parseModule mdl
+     --                     tm <- typecheckModule pm
+     --                     loadModule tm) mg
+     --   result <- liftIO (link (ghcLink dflags)
+     --                          dflags
+     --                          False
+     --                          (hsc_HPT hsc_env))
+     --
+     let thisModuleName = mkModuleName (extractModuleName func)
+     result <- load (LoadUpTo thisModuleName)
+     case result of
+       Failed    -> fallback arg
+       Succeeded ->
+         do setContext [IIModule thisModuleName]
+            hvalue <- compileExpr (show func)
+            unsafeCoerce# hvalue arg
+
 
 -- | Pause thread until given time, then return given value.
 returnAt :: MonadIO m => Time -> a -> m a

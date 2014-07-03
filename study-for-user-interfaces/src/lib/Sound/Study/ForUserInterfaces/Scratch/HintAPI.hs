@@ -38,7 +38,7 @@ runCall targetModule body =
 callAt :: Double -> Name -> Double -> Interpreter Double
 callAt scheduled func arg =
   do let expr = show func
-         targetModule = moduleOfFunctionName func
+         targetModule = extractModuleName func
      setImports ["Prelude"
                 ,"System.IO"
                 ,"Language.Haskell.Interpreter"]
@@ -48,8 +48,8 @@ callAt scheduled func arg =
      m <- interpret expr (as :: Double -> Interpreter Double)
      m arg
 
-moduleOfFunctionName :: Name -> String
-moduleOfFunctionName sym = concat (intersperse "." (init (ns (show sym))))
+extractModuleName :: Name -> String
+extractModuleName sym = concat (intersperse "." (init (ns (show sym))))
   where
     ns [] = [""]
     ns xs = let (pre, post) = break (== '.') xs

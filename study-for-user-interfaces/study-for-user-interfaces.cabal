@@ -32,6 +32,7 @@ library
                      Sound.Study.ForUserInterfaces.TUI.TUI02
                      Sound.Study.ForUserInterfaces.Orphan
                      Sound.Study.ForUserInterfaces.Scratch.Demand
+                     Sound.Study.ForUserInterfaces.Scratch.GhcAPI
                      Paths_study_for_user_interfaces
                      -- other-modules:
                      Session.Session01
