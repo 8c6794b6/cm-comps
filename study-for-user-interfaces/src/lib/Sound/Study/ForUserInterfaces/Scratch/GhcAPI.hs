@@ -54,8 +54,8 @@ import qualified Sound.OSC.Transport.FD as FD
 newtype Rec t a = Rec {unRec :: RecEnv t -> Ghc a}
 
 data RecEnv t =
-  RecEnv {reHValueRef :: {-# UNPACK #-} !(IORef HValue)
-         ,reTransport :: {-# UNPACK #-} !t}
+  RecEnv {reHValueRef :: !(IORef HValue)
+         ,reTransport :: !t}
 
 instance MonadRandom (Rec t) where
   {-# INLINE getRandom #-}
@@ -92,6 +92,7 @@ instance HasFallback (Rec t) where
 
 liftGhc :: Ghc a -> Rec t a
 liftGhc m = Rec (\_ -> m)
+{-# INLINE liftGhc #-}
 
 instance Monad (Rec t) where
   {-# INLINE (>>=) #-}
@@ -138,8 +139,8 @@ instance GhcMonad (Rec t) where
 -- --------------------------------------------------------------------------
 
 data RecConfig t =
-  RecConfig {packageDbFiles   :: IO [FilePath]
-            ,sourcePaths      :: IO [FilePath]
+  RecConfig {recPackageDbs   :: IO [FilePath]
+            ,recSourcePaths      :: IO [FilePath]
             ,recTarget        :: String
             ,recTransportFunc :: String -> Int -> IO t
             ,recTransportHost :: String
@@ -147,32 +148,32 @@ data RecConfig t =
 
 defaultRecConfig :: RecConfig t
 defaultRecConfig =
-  RecConfig {packageDbFiles = return []
-            ,sourcePaths = return []
+  RecConfig {recPackageDbs = return []
+            ,recSourcePaths = return []
             ,recTarget = "Main"
             ,recTransportFunc = errTransportFunc
             ,recTransportHost = "127.0.0.1"
-            ,recTransportPort = 57110}
+            ,recTransportPort = 0}
   where
     errTransportFunc =
       error "defaultRecConfig: recTransportFunc not specified."
 
--- | Fork expression.
-forkExpr ::
+-- | Fork expression with given configuration.
+forkExprWith ::
   Show a
    => RecConfig t -- ^ Configuration passed to @ghc@ command.
    -> a           -- ^ Expression ran by @ghc -e@.
    -> IO ()
 -- Forking ghc command because as of ghc-7.8.2, forkIO and runGhc is not working
 -- nicely: <http://www.haskell.org/pipermail/ghc-devs/2014-January/003774.html>
-forkExpr config expr = forkGhcProcess config (show expr)
+forkExprWith config expr = forkGhcProcess config (show expr)
 
 forkGhcProcess :: RecConfig t -> String -> IO ()
 forkGhcProcess config str =
-  do packageDbFiles' <- packageDbFiles config
-     sourcePaths' <- sourcePaths config
-     let args = [unwords (map ("-package-db=" ++) packageDbFiles')
-                ,unwords (map ("-i" ++) sourcePaths')
+  do packageDbs <- recPackageDbs config
+     sourcePaths <- recSourcePaths config
+     let args = [unwords (map ("-package-db=" ++) packageDbs)
+                ,unwords (map ("-i" ++) sourcePaths)
                 ,"-package", "ghc"
                 ,"-e", str
                 ,recTarget config]
@@ -242,7 +243,8 @@ runRecWith ::
   -> (a -> Rec t b) -- ^ Function taking argument and returns 'Rec' to run.
   -> IO b
 runRecWith config arg frec =
-  do pkgDbs <- packageDbFiles config
+  do pkgDbs <- recPackageDbs config
+     sourcePaths <- recSourcePaths config
      ref <- newIORef (error "runRecWith: fallback not initialized.")
      transport <- recTransportFunc config
                                    (recTransportHost config)
@@ -254,7 +256,7 @@ runRecWith config arg frec =
        defaultFlushOut
        (runGhc
           (Just libdir)
-          (do setupSession pkgDbs (recTarget config)
+          (do setupSession pkgDbs sourcePaths (recTarget config)
               rflag <- load LoadAllTargets
               case rflag of
                 Failed    -> error "runRecWith: failed loading module."
@@ -263,8 +265,8 @@ runRecWith config arg frec =
               unRec (frec arg') env))
 
 -- | Setup GHC session with given package conf file and target.
-setupSession :: GhcMonad m => [FilePath] -> String -> m ()
-setupSession pkgDbs targetSource =
+setupSession :: GhcMonad m => [FilePath] -> [FilePath] -> String -> m ()
+setupSession pkgDbs sourcePaths targetSource =
   do dflags <- getSessionDynFlags
      _pkgs <- setSessionDynFlags
                dflags {verbosity = 0
@@ -276,7 +278,7 @@ setupSession pkgDbs targetSource =
                       ,hscTarget = HscInterpreted
                       ,ghcLink = LinkInMemory
                       ,ghcMode = CompManager
-                      ,importPaths = ["src/lib"]}
+                      ,importPaths = sourcePaths}
      target <- guessTarget targetSource Nothing
      setTargets [target]
 
@@ -406,7 +408,7 @@ recurse pkgConf expr arg =
                          result <- compileExpr (show expr)
                          x' <- liftIO ((unsafeCoerce# result :: a -> IO a) x)
                          go x' result
-        setupSession [pkgConf] sourceModule
+        setupSession [pkgConf] ["."] sourceModule
         go arg (error "recurse: Failed the initial load.")))
 
 -- | Pause thread until given time, then return given value.
