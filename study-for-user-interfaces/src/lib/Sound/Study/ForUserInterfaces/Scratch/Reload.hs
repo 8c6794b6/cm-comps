@@ -1,7 +1,10 @@
 {-# LANGUAGE DeriveFunctor              #-}
+{-# LANGUAGE FlexibleInstances          #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE MagicHash                  #-}
+{-# LANGUAGE MultiParamTypeClasses      #-}
 {-# LANGUAGE TemplateHaskell            #-}
+{-# LANGUAGE UndecidableInstances       #-}
 {-|
 Copyright   : 8c6794b6, 2014
 License     : BSD3
@@ -10,61 +13,60 @@ Maintainer  : 8c6794b6@gmail.com
 Stability   : experimental
 Portability : GHC-only
 
-Module to periodically reload haskell Module with GHC APIs.
+Pperiodically reload haskell Module with GHC APIs.
 -}
 module Sound.Study.ForUserInterfaces.Scratch.Reload where
 
-import           Control.Applicative        (Applicative (..))
-import           Control.Concurrent         (forkIO)
-import           Control.Monad              (ap, liftM, void)
+import           Control.Applicative          (Applicative (..))
+import           Control.Concurrent           (forkIO)
+import           Control.Monad                (void)
 import           Control.Monad.Catch
-import           Control.Monad.IO.Class     (MonadIO (..))
-import           Control.Monad.List
-import           Control.Monad.Random       (MonadRandom (..), RandT,
-                                             evalRandT)
-import           Control.Monad.Reader       (ReaderT (..))
-import Control.Monad.Trans.Identity (IdentityT(..))
-import qualified Control.Monad.State.Lazy as Lazy
-import qualified Control.Monad.State.Strict as Strict
-import qualified Control.Monad.Writer.Lazy as Lazy
-import qualified Control.Monad.Writer.Strict as Strict
-import qualified Control.Monad.RWS.Lazy as Lazy
-import qualified Control.Monad.RWS.Strict as Strict
-import           Control.Monad.Trans        (MonadTrans (..))
-import           Data.ByteString.Char8      (unpack)
-import           Data.Dynamic               (fromDyn)
-import           Data.IORef
-import           Data.List                  (intersperse)
-import Data.Monoid
-import           Data.Ratio
-import           Language.Haskell.TH        (Name)
-import           System.Exit                (exitSuccess)
-import           System.Process             (rawSystem)
+import           Control.Monad.IO.Class       (MonadIO (..))
+import           Control.Monad.Random         (MonadRandom (..))
+import           Control.Monad.Reader         (ReaderT (..))
+import qualified Control.Monad.RWS.Lazy       as Lazy
+import qualified Control.Monad.RWS.Strict     as Strict
+import qualified Control.Monad.State.Lazy     as Lazy
+import qualified Control.Monad.State.Strict   as Strict
+import           Control.Monad.Trans          (MonadTrans (..))
+import           Control.Monad.Trans.Identity (IdentityT (..))
+import qualified Control.Monad.Writer.Lazy    as Lazy
+import qualified Control.Monad.Writer.Strict  as Strict
+import           Data.ByteString.Char8        (unpack)
+import           Data.Dynamic                 (fromDyn)
+import           Data.IORef                   (IORef, newIORef, readIORef,
+                                               writeIORef)
+import           Data.List                    (intersperse)
+import           Data.Monoid                  (Monoid)
+import           Data.Ratio                   (approxRational)
+import           Language.Haskell.TH          (Name)
+import           System.Exit                  (exitSuccess)
+import           System.Process               (rawSystem)
 
-import           Control.Monad.Ghc
-import           DynFlags                   (HasDynFlags (..), LogAction,
-                                             PackageFlag (..), PkgConfRef (..),
-                                             defaultFatalMessager,
-                                             defaultFlushOut, defaultLogAction)
-import           Exception                  (ExceptionMonad (..))
-import           GHC                        hiding (Ghc, GhcT, Name, runGhc,
-                                             runGhcT)
-import           GHC.Paths                  (ghc, libdir)
-import           GHC.Prim                   (unsafeCoerce#)
--- import  GhcMonad
-import           HscMain                    (hscParseIdentifier,
-                                             hscTcRnLookupRdrName)
-import           Linker                     (getHValue)
+import           Control.Monad.Ghc            (GhcT, runGhc, runGhcT)
+import           DynFlags                     (HasDynFlags (..),
+                                               PackageFlag (..),
+                                               PkgConfRef (..),
+                                               defaultFatalMessager,
+                                               defaultFlushOut,
+                                               defaultLogAction)
+import           Exception                    (ExceptionMonad (..))
+import           GHC                          hiding (Ghc, GhcT, Name, runGhc,
+                                               runGhcT)
+import           GHC.Paths                    (ghc, libdir)
+import           GHC.Prim                     (unsafeCoerce#)
+import           HscMain                      (hscParseIdentifier,
+                                               hscTcRnLookupRdrName)
+import           Linker                       (getHValue)
 
-import           Sound.OSC                  (Datum (..), DuplexOSC,
-                                             Message (..), RecvOSC (..),
-                                             SendOSC (..), Time, Transport,
-                                             message, openUDP, pauseThreadUntil,
-                                             sendOSC, string, time, udpServer,
-                                             waitMessage, withTransport)
-import qualified Sound.OSC.Transport.FD     as FD
-import qualified Sound.OSC.Transport.FD.UDP as UDP
-import           Sound.OSC.Type             (packet_to_message)
+import           Sound.OSC                    (Datum (..), DuplexOSC,
+                                               Message (..), RecvOSC (..),
+                                               SendOSC (..), Time, Transport,
+                                               message, openUDP,
+                                               pauseThreadUntil, sendOSC,
+                                               string, time, udpServer,
+                                               waitMessage, withTransport)
+import qualified Sound.OSC.Transport.FD.UDP   as UDP
 
 
 -- --------------------------------------------------------------------------
@@ -73,10 +75,12 @@ import           Sound.OSC.Type             (packet_to_message)
 --
 -- --------------------------------------------------------------------------
 
--- | Getter and setter of fallback value to use in case of failure in module
--- reload.
+-- | Type class with getter and setter for fallback value used in case of
+-- failure in module reload.
 class (Monad m, MonadIO m, MonadMask m) => MonadReload m where
+  -- | Set fallback value.
   setFallback :: HValue -> m ()
+  -- | Get fallback value.
   getFallback :: m HValue
 
 instance MonadReload m => MonadReload (IdentityT m) where
@@ -114,109 +118,20 @@ instance (Monoid w, MonadReload m) => MonadReload (Strict.RWST r w s m) where
 
 -- --------------------------------------------------------------------------
 --
--- * Newtype wrapper
---
--- --------------------------------------------------------------------------
-
--- Inspired from GhciMonad.Ghci, see how it's holding Ghc inside.
--- It is reader Monad using IORef.
-newtype Rec t a = Rec {unRec :: RecEnv t -> Ghc a}
-
---- XXX: Remove 'Rec'.
-
-liftRec :: Ghc a -> Rec t a
-liftRec m = Rec (\_ -> m)
-{-# INLINE liftRec #-}
-
-data RecEnv t =
-  RecEnv {reHValueRef :: !(IORef HValue)
-         ,reTransport :: !t}
-
-instance MonadThrow (Rec t) where
-  throwM = liftIO . throwM
-
-instance MonadCatch (Rec t) where
-  catch = undefined
-
-instance MonadMask (Rec t) where
-  mask = undefined
-
-instance MonadReload (Rec t) where
-  {-# INLINE setFallback #-}
-  setFallback hvalue = Rec (\e -> liftIO (writeIORef (reHValueRef e) hvalue))
-  {-# INLINE getFallback #-}
-  getFallback = Rec (\e -> liftIO (readIORef (reHValueRef e)))
-
-instance MonadRandom (Rec t) where
-  {-# INLINE getRandom #-}
-  getRandom = liftIO getRandom
-  {-# INLINE getRandoms #-}
-  getRandoms = liftIO getRandoms
-  {-# INLINE getRandomR #-}
-  getRandomR = liftIO . getRandomR
-  {-# INLINE getRandomRs #-}
-  getRandomRs = liftIO . getRandomRs
-
-instance FD.Transport t => SendOSC (Rec t) where
-  {-# INLINE sendOSC #-}
-  sendOSC o = Rec (\e -> liftIO (FD.sendOSC (reTransport e) o))
-
-instance FD.Transport t => RecvOSC (Rec t) where
-  {-# INLINE recvPacket #-}
-  recvPacket = Rec (liftIO . FD.recvPacket . reTransport)
-
-instance FD.Transport t => DuplexOSC (Rec t)
-
-instance FD.Transport t => Transport (Rec t)
-
-instance Monad (Rec t) where
-  {-# INLINE (>>=) #-}
-  Rec m >>= k = Rec (\r -> m r >>= \a -> unRec (k a) r)
-  {-# INLINE return #-}
-  return = liftRec . return
-
-instance Functor (Rec t) where
-  {-# INLINE fmap #-}
-  fmap = liftM
-
-instance Applicative (Rec t) where
-  {-# INLINE pure #-}
-  pure = return
-  {-# INLINE (<*>) #-}
-  (<*>) = ap
-
-instance MonadIO (Rec t) where
-  {-# INLINE liftIO #-}
-  liftIO = liftRec . liftIO
-
-instance ExceptionMonad (Rec t) where
-  {-# INLINE gcatch #-}
-  gcatch m h = Rec (\r -> unRec m r `gcatch` (\e -> unRec (h e) r))
-  {-# INLINE gmask #-}
-  gmask f = Rec (\r -> gmask (\g -> let f' (Rec m) = Rec (\r' -> g (m r'))
-                                    in  unRec (f f' ) r))
-
-instance HasDynFlags (Rec t) where
-  {-# INLINE getDynFlags #-}
-  getDynFlags = liftRec getDynFlags
-
-instance GhcMonad (Rec t) where
-  {-# INLINE getSession #-}
-  getSession = liftRec getSession
-  {-# INLINE setSession #-}
-  setSession = liftRec . setSession
-
-
--- --------------------------------------------------------------------------
---
 -- * Reload monad transformer
 --
 -- --------------------------------------------------------------------------
 
+-- | MonadReload transformer, which wraps 'GhcT' to make couple instances for
+-- convenience.
+--
+-- This newtype same as 'ReaderT' with 'IORef' 'HValue'. Defining another
+-- newtype wrapper for 'GhcMonad' and 'MonadReload' should be trivial.
 newtype ReloadT m a = ReloadT {unReloadT :: IORef HValue -> GhcT m a}
 
--- If ReloadT did not wrap GhcT, requires couple orphan instances for GhcT to
--- work with RecvOSC, SendOSC, ... etc, e.g.:
+-- ReloadT is wrapping GhcT to avoid some orphan instances. If ReloadT did not
+-- wrap GhcT, requires below instances for GhcT to work with RecvOSC, SendOSC,
+-- ... etc, e.g.:
 --
 --   > instance RecvOSC m => RecvOSC (GhcT m) where
 --   >   recvPacket = lift recvPacket
@@ -225,7 +140,6 @@ newtype ReloadT m a = ReloadT {unReloadT :: IORef HValue -> GhcT m a}
 --   > instance DuplexOSC m => DuplexOSC (GhcT m)
 --   > instance Transport m => Transport (GhcT m)
 --
--- ... and so on.
 
 liftReloadT :: Monad m => m a -> ReloadT m a
 liftReloadT m = ReloadT (\_ -> lift m)
@@ -250,6 +164,10 @@ instance MonadIO m => MonadIO (ReloadT m) where
 
 instance MonadTrans ReloadT where
   lift = liftReloadT
+
+instance Lazy.MonadState s m => Lazy.MonadState s (ReloadT m) where
+  put = liftReloadT . Lazy.put
+  get = liftReloadT Lazy.get
 
 instance MonadThrow m => MonadThrow (ReloadT m) where
   throwM = liftReloadT . throwM
@@ -297,26 +215,40 @@ instance MonadRandom m => MonadRandom (ReloadT m) where
 
 instance (MonadIO m, MonadMask m) => MonadReload (ReloadT m) where
   getFallback = ReloadT (\r -> liftIO (readIORef r))
-  setFallback val = ReloadT (\r -> liftIO (writeIORef r val))
+  setFallback hv = ReloadT (\r -> liftIO (writeIORef r hv))
 
-
+-- | Configuraton for running 'ReloadT'.
 data ReloadConfig =
-  ReloadConfig {rcPackageDbs  :: IO [FilePath]
-               ,rcSourcePaths :: IO [FilePath]
-               ,rcTarget      :: String}
+  ReloadConfig
+    { -- | Package dbs. Passed to 'extraPkgConfs' field in
+      -- 'DynFlags'.
+      rcPackageDbs  :: IO [FilePath]
+      -- | Source paths. Passed to 'importPaths' field in 'DynFlags'.
+     ,rcSourcePaths :: IO [FilePath]
+      -- | Bulild target. Passed to 'guessTarget' function.
+     ,rcTarget      :: String}
 
+-- | Default configuration to run reloads.
 defaultReloadConfig :: ReloadConfig
 defaultReloadConfig = ReloadConfig {rcPackageDbs = return []
                                    ,rcSourcePaths = return ["."]
                                    ,rcTarget = "Main"}
 
-runReloadT
-  :: (MonadIO m, MonadMask m, Functor m) =>
-     ReloadConfig -> ReloadT m b -> m b
+-- | Type fixed variant of 'runReloadT'.
+runReload :: ReloadConfig -> Reload a -> IO a
+runReload = runReloadT
+
+-- | Run 'ReloadT' with given settings.
+runReloadT ::
+  (MonadIO m, MonadMask m, Functor m)
+  => ReloadConfig -- ^ Configuration passed to inner 'runGhcT'.
+  -> ReloadT m b  -- ^ Reload action to run.
+  -> m b
 runReloadT config m =
   do ref <- liftIO (newIORef (error "runReloadT: fallback not initialized."))
      pkgDbs <- liftIO (rcPackageDbs config)
      sourcePaths <- liftIO (rcSourcePaths config)
+     -- XXX: Running without error handler, no FatalMessager, no FlushOut.
      runGhcT
        (Just libdir)
        (do target <- setupSession pkgDbs sourcePaths (rcTarget config)
@@ -329,74 +261,110 @@ runReloadT config m =
                  _                    -> return ()
            unReloadT m ref)
 
-forkReload :: Show a => ReloadConfig -> a -> IO ()
-forkReload config expr =
-  do packageDbs <- rcPackageDbs config
-     sourcePaths <- rcSourcePaths config
-     let args = [unwords (map ("-package-db=" ++) packageDbs)
-                ,unwords (map ("-i" ++) sourcePaths)
-                ,"-package", "ghc"
-                ,"-e", show expr
-                ,rcTarget config]
-     void (forkIO (void (rawSystem ghc args)))
-
-
+-- | To work in /temporal-recursion/ with OSC actions.
 type OSCRec a = ReloadT (ReaderT UDP.UDP IO) a
 
 runOSCRec :: ReloadConfig -> IO UDP.UDP -> OSCRec a -> IO a
 runOSCRec config transportIO m =
   withTransport transportIO (runReloadT config m)
 
-
--- --------------------------------------------------------------------------
---
--- * Forking GHC
---
--- --------------------------------------------------------------------------
-
-data RecConfig t =
-  RecConfig {recPackageDbs    :: IO [FilePath]
-            ,recSourcePaths   :: IO [FilePath]
-            ,recTarget        :: String
-            ,recTransportFunc :: String -> Int -> IO t
-            ,recTransportHost :: String
-            ,recTransportPort :: Int}
-
-defaultRecConfig :: RecConfig t
-defaultRecConfig =
-  RecConfig {recPackageDbs = return []
-            ,recSourcePaths = return []
-            ,recTarget = "Main"
-            ,recTransportFunc = errTransportFunc
-            ,recTransportHost = "127.0.0.1"
-            ,recTransportPort = 0}
+-- | Setup GHC session with given package conf file and target.
+setupSession ::
+  GhcMonad m
+  => [FilePath] -- ^ Package db file paths (i.e.; arguments passed to ghc
+                -- @-package-db@ option).
+  -> [FilePath] -- ^ Source paths (i.e.; arguments passed to ghc @-i@ option).
+  -> String     -- ^ Target, passed to 'guessTarget'.
+  -> m Target
+setupSession pkgDbs sourcePaths targetSource =
+  do dflags <- getSessionDynFlags
+     _pkgs <- setSessionDynFlags
+               dflags {verbosity = 0
+                      ,log_action = silentLogAction
+                      ,extraPkgConfs =
+                         const (GlobalPkgConf : map PkgConfFile pkgDbs)
+                      ,packageFlags = [ExposePackage "ghc"]
+                      ,hscTarget = HscInterpreted
+                      ,ghcLink = LinkInMemory
+                      ,ghcMode = CompManager
+                      ,importPaths = sourcePaths}
+     target <- guessTarget targetSource Nothing
+     setTargets [target]
+     return target
   where
-    errTransportFunc =
-      error "defaultRecConfig: recTransportFunc not specified."
+    silentLogAction dflag severity srcSpan style msg =
+      case severity of
+         SevError   -> return ()
+         SevWarning -> return ()
+         _          -> defaultLogAction dflag severity srcSpan style msg
+
+-- | Apply function with given argument after reloading the module.
+--
+-- This works with GHC running as separate OS process.  Takes TemplateHaskell
+-- name of 'Rec' function and argument passed to the 'Rec'. Only single thread
+-- could be forked at the same time in each GHC instance.
+--
+applyAt ::
+  (MonadReload m, GhcMonad m)
+  => Time -- ^ Scheduled time.
+  -> Name -- ^ Name of function to evaluate.
+  -> t    -- ^ Argument passed to the function.
+  -> m b
+applyAt scheduledTime func arg =
+  do let thisModuleName = mkModuleName (extractModuleName func)
+     result <- load (LoadUpTo thisModuleName)
+     case result of
+       Failed    ->
+         do fallback <- getFallback
+            pauseThreadUntil scheduledTime
+            unsafeCoerce# fallback arg
+       Succeeded ->
+         do setContext [IIModule thisModuleName]
+            hvalue <- compileExpr (show func)
+            setFallback hvalue
+            pauseThreadUntil scheduledTime
+            unsafeCoerce# hvalue arg
+
+-- | Extract module name from template-haskell name.
+extractModuleName :: Name -> String
+extractModuleName name = concat (intersperse "." (init (ns (show name))))
+  where
+    ns [] = [""]
+    ns xs = let (pre, post) = break (== '.') xs
+            in  pre : if null post
+                         then []
+                         else ns (tail post)
+
+
+-- --------------------------------------------------------------------------
+--
+-- * Forking and killing GHC process
+--
+-- --------------------------------------------------------------------------
 
 -- | Fork expression with given configuration.
 forkExprWith ::
   Show a
-   => RecConfig t -- ^ Configuration passed to @ghc@ command.
-   -> a           -- ^ Expression ran by @ghc -e@.
+   => ReloadConfig -- ^ Configuration passed to @ghc@ command.
+   -> a            -- ^ Expression ran by @ghc -e@.
    -> IO ()
 forkExprWith config expr = forkGhcProcess config (show expr)
 
 -- | Fork GHC process by running @ghc@ command.
-forkGhcProcess :: RecConfig t -> String -> IO ()
+forkGhcProcess :: ReloadConfig -> String -> IO ()
 --
--- Forking "ghc" command because, as of ghc-7.8.2, runGhc with forkIOs are not
--- working nicely. See:
+-- Forking "ghc" command.  As of ghc-7.8.2, runGhc with forkIOs are not working
+-- nicely. See:
 -- <http://www.haskell.org/pipermail/ghc-devs/2014-January/003774.html>
 --
 forkGhcProcess config str =
-  do packageDbs <- recPackageDbs config
-     sourcePaths <- recSourcePaths config
+  do packageDbs <- rcPackageDbs config
+     sourcePaths <- rcSourcePaths config
      let args = [unwords (map ("-package-db=" ++) packageDbs)
                 ,unwords (map ("-i" ++) sourcePaths)
                 ,"-package", "ghc"
                 ,"-e", str
-                ,recTarget config]
+                ,rcTarget config]
      void (forkIO (void (rawSystem ghc args)))
 
 -- | Kill forked process with @pkill@ system command.
@@ -404,6 +372,78 @@ pkill :: Show a => a -> IO ()
 pkill str =
   let args = ["-f", show str]
   in  void (rawSystem "pkill" args)
+
+
+-- --------------------------------------------------------------------------
+--
+-- * Client side synchronization
+--
+-- --------------------------------------------------------------------------
+
+-- | Data type to manage of synchronization in client side.
+data Metro =
+  Metro {beatsPerMinute :: {-# UNPACK #-} !Rational
+        ,beatDuration   :: {-# UNPACK #-} !Double
+        ,currentBeat    :: !(Time -> Rational)
+        ,nextOffset     :: !(Int -> Time -> Time)}
+
+instance Show Metro where
+  show m = "Metro {beatsPerMinute = " ++ show (beatsPerMinute m) ++ "}"
+
+-- | Returns a 'Metro' with given beats per minute.
+mkMetro :: Rational -> Metro
+mkMetro bpm =
+  let m = Metro {beatsPerMinute = bpm
+                ,beatDuration = 60 / realToFrac bpm
+                ,currentBeat = \t -> approxRational (t / beatDuration m) 1e-9
+                ,nextOffset = \n t ->
+                  let gridDuration = beatDuration m * fromIntegral n
+                      numGrids :: Int
+                      (numGrids, _) =
+                        properFraction (t / (fromIntegral n * beatDuration m))
+                  in  gridDuration * fromIntegral (numGrids + 1) }
+  in  m `seq` m
+
+-- | Get next offset from current time.
+getOffset :: Metro -> Int -> IO Time
+getOffset m n = nextOffset m n `fmap` time
+
+{-
+
+--
+-- Seems like, when running bytecode, data type with function records
+-- performs better than defining each function as top level in this module.
+-- Check it again later.
+--
+
+newtype Metro = Metro {beatsPerMinute :: Double}
+
+mkMetro :: Double -> Metro
+mkMetro = Metro
+
+beatDuration   :: Metro -> Double
+beatDuration (Metro bpm) = 60 / bpm
+{-# INLINE beatDuration #-}
+
+currentBeat :: Metro -> Time -> Int
+currentBeat m t = fst (properFraction (t / beatDuration m))
+{-# INLINE currentBeat #-}
+
+nextOffset :: Metro -> Int -> Double -> Double
+nextOffset m n t =
+  let gridDuration = beatDuration m * fromIntegral n
+      numGrids :: Int
+      numGrids = fst (properFraction (t / (fromIntegral n * beatDuration m)))
+  in  gridDuration * fromIntegral (numGrids + 1)
+{-# INLINE nextOffset #-}
+
+-}
+
+-- --------------------------------------------------------------------------
+--
+-- * Running as server
+--
+-- --------------------------------------------------------------------------
 
 -- Might not necessary to start Server, why not fork GHC with rawSystem with
 -- arguments used in current ghci? ... how to get current arguments in ghci?
@@ -420,13 +460,13 @@ data RecServerConfig = RecServerConfig {rscPort :: Int}
 defaultRecServerConfig :: RecServerConfig
 defaultRecServerConfig = RecServerConfig 40703
 
-startServer :: RecConfig t -> RecServerConfig -> IO a
+startServer :: ReloadConfig -> RecServerConfig -> IO a
 startServer config serverConfig =
   withTransport
     (udpServer "127.0.0.1" (rscPort serverConfig))
     (serverLoop config)
 
-serverLoop :: (RecvOSC m, MonadIO m) => RecConfig t -> m b
+serverLoop :: (RecvOSC m, MonadIO m) => ReloadConfig -> m b
 serverLoop config =
   do let loop = serverLoop config
      msg@(Message addr dtm) <- waitMessage
@@ -477,188 +517,18 @@ instance Show RawString where
 
 -- --------------------------------------------------------------------------
 --
--- * Running recursion
+-- Attempt to evaluate received message in server
 --
 -- --------------------------------------------------------------------------
-
--- | Setup GHC session and run 'Rec' with given arguments.
-runRecWith ::
-  RecConfig t       -- ^ Configuration for GHC to run recursion.
-  -> IO a           -- ^ 'IO' action returning initial argument.
-  -> (a -> Rec t b) -- ^ Function taking argument and returns 'Rec' to run.
-  -> IO b
-runRecWith config arg frec =
-  do pkgDbs <- recPackageDbs config
-     sourcePaths <- recSourcePaths config
-     ref <- newIORef (error "runRecWith: fallback not initialized.")
-     transport <- recTransportFunc config
-                                   (recTransportHost config)
-                                   (recTransportPort config)
-     let env = RecEnv {reHValueRef = ref
-                      ,reTransport = transport}
-     defaultErrorHandler
-       defaultFatalMessager
-       defaultFlushOut
-       (runGhc
-        (Just libdir)
-        (do target <- setupSession pkgDbs sourcePaths (recTarget config)
-            rflag <- load LoadAllTargets
-            case rflag of
-              Failed    -> error "runRecWith: failed loading module."
-              Succeeded ->
-                case targetId target of
-                  TargetModule mdlName -> setContext [IIModule mdlName]
-                  _                    -> return ()
-            arg' <- liftIO arg
-            unRec (frec arg') env))
-
--- | Setup GHC session with given package conf file and target.
-setupSession ::
-  GhcMonad m
-  => [FilePath] -- ^ Package db file paths (i.e.; arguments passed to ghc
-                -- @-package-db@ option).
-  -> [FilePath] -- ^ Source paths (i.e.; arguments passed to ghc @-i@ option).
-  -> String     -- ^ Target, passed to 'guessTarget'.
-  -> m Target
-setupSession pkgDbs sourcePaths targetSource =
-  do dflags <- getSessionDynFlags
-     _pkgs <- setSessionDynFlags
-               dflags {verbosity = 0
-                      ,log_action = silentLogAction
-                      ,extraPkgConfs =
-                         const (GlobalPkgConf : map PkgConfFile pkgDbs)
-                      ,packageFlags = [ExposePackage "ghc"]
-                      ,hscTarget = HscInterpreted
-                      ,ghcLink = LinkInMemory
-                      ,ghcMode = CompManager
-                      ,importPaths = sourcePaths}
-     target <- guessTarget targetSource Nothing
-     setTargets [target]
-     return target
-
--- | Log action hiding errors and warnings.
-silentLogAction :: LogAction
-silentLogAction dflag severity srcSpan style msg =
-  case severity of
-     SevError   -> return ()
-     SevWarning -> return ()
-     _          -> defaultLogAction dflag severity srcSpan style msg
-
--- | Apply function with given argument after reloading the module.
---
--- This works with GHC running as separate OS process.  Takes TemplateHaskell
--- name of 'Rec' function and argument passed to the 'Rec'. Only single thread
--- could be forked at the same time in each GHC instance.
---
-applyAt ::
-  (MonadReload m, GhcMonad m)
-  => Time -- ^ Scheduled time.
-  -> Name -- ^ Name of function to evaluate.
-  -> t    -- ^ Argument passed to the function.
-  -> m b
-applyAt scheduledTime func arg =
-  do let thisModuleName = mkModuleName (extractModuleName func)
-     result <- load (LoadUpTo thisModuleName)
-     case result of
-       Failed    ->
-         do fallback <- getFallback
-            pauseThreadUntil scheduledTime
-            unsafeCoerce# fallback arg
-       Succeeded ->
-         do setContext [IIModule thisModuleName]
-            hvalue <- compileExpr (show func)
-            setFallback hvalue
-            pauseThreadUntil scheduledTime
-            unsafeCoerce# hvalue arg
-
--- | Extract module name from template-haskell name.
-extractModuleName :: Name -> String
-extractModuleName name = concat (intersperse "." (init (ns (show name))))
-  where
-    ns [] = [""]
-    ns xs = let (pre, post) = break (== '.') xs
-            in  pre : if null post
-                         then []
-                         else ns (tail post)
-
-
--- --------------------------------------------------------------------------
---
--- * Client side synchronization
---
--- --------------------------------------------------------------------------
-
--- | Data type to manage of synchronization in client side.
-data Metro =
-  Metro {beatsPerMinute :: {-# UNPACK #-} !Rational
-        ,beatDuration   :: {-# UNPACK #-} !Double
-        ,currentBeat    :: !(Time -> Rational)
-        ,nextOffset     :: !(Int -> Time -> Time)}
-
-instance Show Metro where
-  show m = "Metro {beatsPerMinute = " ++ show (beatsPerMinute m) ++ "}"
-
--- | Returns a 'Metro' with given beats per minute.
-mkMetro :: Rational -> Metro
-mkMetro bpm =
-  let m = Metro {beatsPerMinute = bpm
-                ,beatDuration = 60 / realToFrac bpm
-                ,currentBeat = \t -> approxRational (t / beatDuration m) 1e-9
-                ,nextOffset = \n t ->
-                  let gridDuration = beatDuration m * fromIntegral n
-                      numGrids :: Int
-                      (numGrids, _) =
-                        properFraction (t / (fromIntegral n * beatDuration m))
-                  in  gridDuration * fromIntegral (numGrids + 1) }
-  in  m `seq` m
-
-getOffset :: Metro -> Int -> IO Time
-getOffset m n = nextOffset m n `fmap` time
 
 {-
-
---
--- Seems like, when running bytecode, data type with function records
--- performs better than defining each function as top level in this module.
--- Check it again later.
---
-
-newtype Metro = Metro {beatsPerMinute :: Double}
-
-mkMetro :: Double -> Metro
-mkMetro = Metro
-
-beatDuration   :: Metro -> Double
-beatDuration (Metro bpm) = 60 / bpm
-{-# INLINE beatDuration #-}
-
-currentBeat :: Metro -> Time -> Int
-currentBeat m t = fst (properFraction (t / beatDuration m))
-{-# INLINE currentBeat #-}
-
-nextOffset :: Metro -> Int -> Double -> Double
-nextOffset m n t =
-  let gridDuration = beatDuration m * fromIntegral n
-      numGrids :: Int
-      numGrids = fst (properFraction (t / (fromIntegral n * beatDuration m)))
-  in  gridDuration * fromIntegral (numGrids + 1)
-{-# INLINE nextOffset #-}
-
--}
-
--- --------------------------------------------------------------------------
---
--- Attempt to run GHC as a server
---
--- --------------------------------------------------------------------------
-
 -- Work stopped in the middle. It was difficult to fork compiled result with
 -- keeping HscEnv.
 
-startGhcServer :: RecConfig t -> RecServerConfig -> IO a
+startGhcServer :: ReloadConfig -> RecServerConfig -> IO a
 startGhcServer config serverConfig =
    do putStrLn "Starting server ...."
-      runRecWith config (udpServer "127.0.0.1" (rscPort serverConfig)) ghcLoop
+      runReloadT config (udpServer "127.0.0.1" (rscPort serverConfig)) ghcLoop
 
 ghcLoop :: GhcMonad m => UDP.UDP -> m a
 ghcLoop udp =
@@ -696,7 +566,7 @@ ghcLoop udp =
                loop
           _ -> loop
       Nothing -> loop
-
+-}
 
 -- --------------------------------------------------------------------------
 --
