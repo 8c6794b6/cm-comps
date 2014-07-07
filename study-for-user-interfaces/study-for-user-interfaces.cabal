@@ -32,7 +32,7 @@ library
                      Sound.Study.ForUserInterfaces.TUI.TUI02
                      Sound.Study.ForUserInterfaces.Orphan
                      Sound.Study.ForUserInterfaces.Scratch.Demand
-                     Sound.Study.ForUserInterfaces.Scratch.GhcAPI
+                     Sound.Study.ForUserInterfaces.Scratch.Reload
                      Paths_study_for_user_interfaces
                      -- other-modules:
                      Session.Session01
@@ -47,10 +47,12 @@ library
                    , bytestring
                    , containers
                    , dyre
+                   , exceptions
                    , filepath
                    , ghc
                    , ghc-paths
                    , ghc-prim
+                   , ghc-mtl
                    , hashable
                    , hint
                    , hosc >= 0.14
@@ -71,6 +73,7 @@ library
                    , template-haskell
                    , threepenny-gui
                    , transformers
+                   -- , monad-reload
 
 executable gui
   main-is:           gui.hs
