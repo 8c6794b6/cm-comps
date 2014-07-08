@@ -23,13 +23,16 @@ import           Control.Monad                (void)
 import           Control.Monad.Catch
 import           Control.Monad.IO.Class       (MonadIO (..))
 import           Control.Monad.Random         (MonadRandom (..))
+import           Control.Monad.Reader.Class   (MonadReader (..))
 import           Control.Monad.Reader         (ReaderT (..))
 import qualified Control.Monad.RWS.Lazy       as Lazy
 import qualified Control.Monad.RWS.Strict     as Strict
+import           Control.Monad.State.Class    (MonadState (..))
 import qualified Control.Monad.State.Lazy     as Lazy
 import qualified Control.Monad.State.Strict   as Strict
 import           Control.Monad.Trans          (MonadTrans (..))
 import           Control.Monad.Trans.Identity (IdentityT (..))
+import           Control.Monad.Writer.Class   (MonadWriter (..))
 import qualified Control.Monad.Writer.Lazy    as Lazy
 import qualified Control.Monad.Writer.Strict  as Strict
 import           Data.ByteString.Char8        (unpack)
@@ -89,31 +92,31 @@ instance MonadReload m => MonadReload (IdentityT m) where
 
 instance MonadReload m => MonadReload (ReaderT r m) where
   getFallback = lift getFallback
-  setFallback hv = lift (setFallback hv)
+  setFallback = lift . setFallback
 
 instance MonadReload m => MonadReload (Lazy.StateT s m) where
   getFallback = lift getFallback
-  setFallback hv = lift (setFallback hv)
+  setFallback = lift . setFallback
 
 instance MonadReload m => MonadReload (Strict.StateT s m) where
   getFallback = lift getFallback
-  setFallback hv = lift (setFallback hv)
+  setFallback = lift . setFallback
 
 instance (Monoid w, MonadReload m) => MonadReload (Lazy.WriterT w m) where
   getFallback = lift getFallback
-  setFallback hv = lift (setFallback hv)
+  setFallback = lift . setFallback
 
 instance (Monoid w, MonadReload m) => MonadReload (Strict.WriterT w m) where
   getFallback = lift getFallback
-  setFallback hv = lift (setFallback hv)
+  setFallback = lift . setFallback
 
 instance (Monoid w, MonadReload m) => MonadReload (Lazy.RWST r w s m) where
   getFallback = lift getFallback
-  setFallback hv = lift (setFallback hv)
+  setFallback  = lift . setFallback
 
 instance (Monoid w, MonadReload m) => MonadReload (Strict.RWST r w s m) where
   getFallback = lift getFallback
-  setFallback hv = lift (setFallback hv)
+  setFallback = lift . setFallback
 
 
 -- --------------------------------------------------------------------------
@@ -125,12 +128,12 @@ instance (Monoid w, MonadReload m) => MonadReload (Strict.RWST r w s m) where
 -- | MonadReload transformer, which wraps 'GhcT' to make couple instances for
 -- convenience.
 --
--- This newtype same as 'ReaderT' with 'IORef' 'HValue'. Defining another
--- newtype wrapper for 'GhcMonad' and 'MonadReload' should be trivial.
+-- This newtype is same as 'ReaderT' with 'IORef' 'HValue'.
+--
 newtype ReloadT m a = ReloadT {unReloadT :: IORef HValue -> GhcT m a}
 
--- ReloadT is wrapping GhcT to avoid some orphan instances. If ReloadT did not
--- wrap GhcT, requires below instances for GhcT to work with RecvOSC, SendOSC,
+-- ReloadT is wrapping GhcT to avoid some orphan instances. Without wrapped
+-- GhcT, requires below instances for GhcT to work with RecvOSC, SendOSC,
 -- ... etc, e.g.:
 --
 --   > instance RecvOSC m => RecvOSC (GhcT m) where
@@ -145,6 +148,12 @@ liftReloadT :: Monad m => m a -> ReloadT m a
 liftReloadT m = ReloadT (\_ -> lift m)
 {-# INLINE liftReloadT #-}
 
+mapReloadT
+  :: (MonadIO m, MonadMask m, Functor m, Monad n) =>
+     (m a -> n b) -> ReloadT m a -> ReloadT n b
+mapReloadT f m = ReloadT (lift . f . runGhcT (Just libdir) . unReloadT m)
+{-# INLINE mapReloadT #-}
+
 type Reload a = ReloadT IO a
 
 instance Functor m => Functor (ReloadT m) where
@@ -155,22 +164,34 @@ instance (Functor m, Monad m, Applicative m) => Applicative (ReloadT m) where
   f <*> v = ReloadT (\r -> unReloadT f r <*> unReloadT v r)
 
 instance Monad m => Monad (ReloadT m) where
-  return = liftReloadT . return
+  return = lift . return
   m >>= k = ReloadT (\r -> do a <- unReloadT m r
                               unReloadT (k a) r)
 
 instance MonadIO m => MonadIO (ReloadT m) where
-  liftIO = liftReloadT . liftIO
+  liftIO = lift . liftIO
 
 instance MonadTrans ReloadT where
   lift = liftReloadT
 
-instance Lazy.MonadState s m => Lazy.MonadState s (ReloadT m) where
-  put = liftReloadT . Lazy.put
-  get = liftReloadT Lazy.get
+instance (Functor m, MonadIO m, MonadMask m, MonadReader r m)
+  => MonadReader r (ReloadT m) where
+  ask = lift ask
+  local f = mapReloadT (local f)
+  reader = lift . reader
+
+instance MonadState s m => MonadState s (ReloadT m) where
+  put = lift . put
+  get = lift get
+
+instance (Functor m, MonadIO m, MonadMask m, MonadWriter w m)
+  => MonadWriter w (ReloadT m) where
+  tell = lift . tell
+  listen = mapReloadT listen
+  pass = mapReloadT pass
 
 instance MonadThrow m => MonadThrow (ReloadT m) where
-  throwM = liftReloadT . throwM
+  throwM = lift . throwM
 
 instance (MonadIO m, MonadMask m) => MonadCatch (ReloadT m) where
   m `catch` f =
@@ -198,20 +219,20 @@ instance (Functor m, MonadIO m, MonadMask m) => GhcMonad (ReloadT m) where
   setSession s = ReloadT (\_ -> setSession s)
 
 instance RecvOSC m => RecvOSC (ReloadT m) where
-  recvPacket = liftReloadT recvPacket
+  recvPacket = lift recvPacket
 
 instance SendOSC m => SendOSC (ReloadT m) where
-  sendOSC = liftReloadT . sendOSC
+  sendOSC = lift . sendOSC
 
 instance DuplexOSC m => DuplexOSC (ReloadT m)
 
 instance Transport m => Transport (ReloadT m)
 
 instance MonadRandom m => MonadRandom (ReloadT m) where
-  getRandom = liftReloadT getRandom
-  getRandoms = liftReloadT getRandoms
-  getRandomR = liftReloadT . getRandomR
-  getRandomRs = liftReloadT . getRandomRs
+  getRandom = lift getRandom
+  getRandoms = lift getRandoms
+  getRandomR = lift . getRandomR
+  getRandomRs = lift . getRandomRs
 
 instance (MonadIO m, MonadMask m) => MonadReload (ReloadT m) where
   getFallback = ReloadT (\r -> liftIO (readIORef r))
