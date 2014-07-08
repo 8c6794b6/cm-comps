@@ -46,7 +46,7 @@ import           Language.Haskell.TH          (Name)
 import           System.Exit                  (exitSuccess)
 import           System.Process               (rawSystem)
 
-import           Control.Monad.Ghc            (GhcT, runGhc, runGhcT)
+import           Control.Monad.Ghc            (GhcT, mapGhcT, runGhc, runGhcT)
 import           DynFlags                     (HasDynFlags (..),
                                                PackageFlag (..),
                                                PkgConfRef (..),
@@ -80,41 +80,41 @@ import qualified Sound.OSC.Transport.FD.UDP   as UDP
 
 -- | Type class with getter and setter for fallback value used in case of
 -- failure in module reload.
-class (Monad m, MonadIO m, MonadMask m) => MonadReload m where
+class Monad m => MonadFallback m where
   -- | Set fallback value.
   setFallback :: HValue -> m ()
   -- | Get fallback value.
   getFallback :: m HValue
 
-instance MonadReload m => MonadReload (IdentityT m) where
+instance MonadFallback m => MonadFallback (IdentityT m) where
   getFallback = lift getFallback
   setFallback hv = lift (setFallback hv)
 
-instance MonadReload m => MonadReload (ReaderT r m) where
+instance MonadFallback m => MonadFallback (ReaderT r m) where
   getFallback = lift getFallback
   setFallback = lift . setFallback
 
-instance MonadReload m => MonadReload (Lazy.StateT s m) where
+instance MonadFallback m => MonadFallback (Lazy.StateT s m) where
   getFallback = lift getFallback
   setFallback = lift . setFallback
 
-instance MonadReload m => MonadReload (Strict.StateT s m) where
+instance MonadFallback m => MonadFallback (Strict.StateT s m) where
   getFallback = lift getFallback
   setFallback = lift . setFallback
 
-instance (Monoid w, MonadReload m) => MonadReload (Lazy.WriterT w m) where
+instance (Monoid w, MonadFallback m) => MonadFallback (Lazy.WriterT w m) where
   getFallback = lift getFallback
   setFallback = lift . setFallback
 
-instance (Monoid w, MonadReload m) => MonadReload (Strict.WriterT w m) where
+instance (Monoid w, MonadFallback m) => MonadFallback (Strict.WriterT w m) where
   getFallback = lift getFallback
   setFallback = lift . setFallback
 
-instance (Monoid w, MonadReload m) => MonadReload (Lazy.RWST r w s m) where
+instance (Monoid w, MonadFallback m) => MonadFallback (Lazy.RWST r w s m) where
   getFallback = lift getFallback
   setFallback  = lift . setFallback
 
-instance (Monoid w, MonadReload m) => MonadReload (Strict.RWST r w s m) where
+instance (Monoid w, MonadFallback m) => MonadFallback (Strict.RWST r w s m) where
   getFallback = lift getFallback
   setFallback = lift . setFallback
 
@@ -125,7 +125,7 @@ instance (Monoid w, MonadReload m) => MonadReload (Strict.RWST r w s m) where
 --
 -- --------------------------------------------------------------------------
 
--- | MonadReload transformer, which wraps 'GhcT' to make couple instances for
+-- | MonadFallback transformer. Wraps 'GhcT' to make couple instances for
 -- convenience.
 --
 -- This newtype is same as 'ReaderT' with 'IORef' 'HValue'.
@@ -148,10 +148,13 @@ liftReloadT :: Monad m => m a -> ReloadT m a
 liftReloadT m = ReloadT (\_ -> lift m)
 {-# INLINE liftReloadT #-}
 
-mapReloadT
-  :: (MonadIO m, MonadMask m, Functor m, Monad n) =>
-     (m a -> n b) -> ReloadT m a -> ReloadT n b
-mapReloadT f m = ReloadT (lift . f . runGhcT (Just libdir) . unReloadT m)
+-- mapReloadT
+--   :: (MonadIO m, MonadMask m, Functor m, Monad n) =>
+--      (m a -> n b) -> ReloadT m a -> ReloadT n b
+-- mapReloadT f m = ReloadT (lift . f . runGhcT (Just libdir) . unReloadT m)
+
+mapReloadT :: (m a -> n b) -> ReloadT m a -> ReloadT n b
+mapReloadT f m = ReloadT (\r -> mapGhcT f (unReloadT m r))
 {-# INLINE mapReloadT #-}
 
 type Reload a = ReloadT IO a
@@ -174,8 +177,7 @@ instance MonadIO m => MonadIO (ReloadT m) where
 instance MonadTrans ReloadT where
   lift = liftReloadT
 
-instance (Functor m, MonadIO m, MonadMask m, MonadReader r m)
-  => MonadReader r (ReloadT m) where
+instance (MonadReader r m) => MonadReader r (ReloadT m) where
   ask = lift ask
   local f = mapReloadT (local f)
   reader = lift . reader
@@ -184,8 +186,7 @@ instance MonadState s m => MonadState s (ReloadT m) where
   put = lift . put
   get = lift get
 
-instance (Functor m, MonadIO m, MonadMask m, MonadWriter w m)
-  => MonadWriter w (ReloadT m) where
+instance (MonadWriter w m) => MonadWriter w (ReloadT m) where
   tell = lift . tell
   listen = mapReloadT listen
   pass = mapReloadT pass
@@ -234,9 +235,10 @@ instance MonadRandom m => MonadRandom (ReloadT m) where
   getRandomR = lift . getRandomR
   getRandomRs = lift . getRandomRs
 
-instance (MonadIO m, MonadMask m) => MonadReload (ReloadT m) where
+instance (MonadIO m, MonadMask m) => MonadFallback (ReloadT m) where
   getFallback = ReloadT (\r -> liftIO (readIORef r))
   setFallback hv = ReloadT (\r -> liftIO (writeIORef r hv))
+
 
 -- | Configuraton for running 'ReloadT'.
 data ReloadConfig =
@@ -326,7 +328,7 @@ setupSession pkgDbs sourcePaths targetSource =
 -- could be forked at the same time in each GHC instance.
 --
 applyAt ::
-  (MonadReload m, GhcMonad m)
+  (MonadFallback m, GhcMonad m)
   => Time -- ^ Scheduled time.
   -> Name -- ^ Name of function to evaluate.
   -> t    -- ^ Argument passed to the function.
