@@ -33,7 +33,6 @@ library
                      Sound.Study.ForUserInterfaces.Orphan
                      Sound.Study.ForUserInterfaces.Scratch.Demand
                      Sound.Study.ForUserInterfaces.Scratch.Reload
-                     Sound.Study.ForUserInterfaces.Scratch.Re
                      Paths_study_for_user_interfaces
                      -- other-modules:
                      Session.Session01
@@ -46,8 +45,10 @@ library
                      Session.Synthdefs
   build-depends:     base >=4.6
                    , bytestring
+                   , Cabal -any
                    , containers
                    , dyre
+                   , directory
                    , exceptions
                    , filepath
                    , ghc
