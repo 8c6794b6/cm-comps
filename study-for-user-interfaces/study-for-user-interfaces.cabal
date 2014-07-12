@@ -69,12 +69,12 @@ library
                    , mtl
                    , murmur-hash
                    , plugins
-                   , process
                    , random
                    , random-shuffle
                    , template-haskell
                    , threepenny-gui
                    , transformers
+                   , unix
                    -- , monad-reload
 
 executable gui

@@ -16,17 +16,17 @@ Reload haskell Module with GHC APIs within monadic action.
 -}
 module Sound.Study.ForUserInterfaces.Scratch.Reload
   ( -- * Type class
-    HasFallback(..)
+    MonadReload(..)
 
     -- * Types
-  , FallbackT(..)
-  , liftFallbackT
-  , mapFallbackT
   , ReloadT(..)
   , mapReloadT
   , Reload
   , runReloadT
   , runReload
+  , FallbackT(..)
+  , liftFallbackT
+  , mapFallbackT
 
     -- * Reload configuration
   , ReloadConfig(..)
@@ -40,28 +40,29 @@ module Sound.Study.ForUserInterfaces.Scratch.Reload
   , extractModuleName
 
     -- * Reloading and running
-  , applyAt
-  , applyWith
+  , reload
   , setupSession
-  , forkExprWith
-  , pkill
 
-    -- * Re-exports from ghc
+    -- * Re-exports
   , PkgConfRef(..)
+  , Name
+  , ProcessID
+  , forkProcess
 
     -- * OSC related stuffs
   , OSCRec(..)
   , runOSCRec
+  , applyAt
+  , applyWith
   , Metro(..)
   , mkMetro
   , beatDuration
   , getOffset
 
+
   ) where
 
 import           Control.Applicative                   (Applicative (..))
-import           Control.Concurrent                    (forkIO)
-import           Control.Monad                         (void)
 import           Control.Monad.Catch                   (MonadCatch (..),
                                                         MonadMask (..),
                                                         MonadThrow (..))
@@ -91,7 +92,7 @@ import           System.Directory                      (doesFileExist,
                                                         getCurrentDirectory)
 import           System.FilePath                       (takeBaseName, (<.>),
                                                         (</>))
-import           System.Process                        (rawSystem)
+import           System.Posix (ProcessID, forkProcess)
 
 import           Distribution.PackageDescription       (BuildInfo (..),
                                                         CondTree (..),
@@ -110,7 +111,7 @@ import           DynFlags                              (HasDynFlags (..),
                                                         defaultLogAction)
 import           Exception                             (ExceptionMonad (..))
 import           GHC                                   hiding (Name)
-import           GHC.Paths                             (ghc, libdir)
+import           GHC.Paths                             (libdir)
 import           GHC.Prim                              (unsafeCoerce#)
 import           GhcMonad                              (GhcT (..), liftGhcT)
 
@@ -132,41 +133,41 @@ import qualified Sound.OSC.Transport.FD.UDP            as UDP
 
 -- | Type class with getter and setter for fallback value used during module
 -- reload.
-class Monad m => HasFallback m where
+class Monad m => MonadReload m where
   -- | Set fallback value.
   setFallback :: HValue -> m ()
   -- | Get fallback value.
   getFallback :: m HValue
 
-instance HasFallback m => HasFallback (IdentityT m) where
+instance MonadReload m => MonadReload (IdentityT m) where
   getFallback = lift getFallback
   setFallback hv = lift (setFallback hv)
 
-instance HasFallback m => HasFallback (ReaderT r m) where
+instance MonadReload m => MonadReload (ReaderT r m) where
   getFallback = lift getFallback
   setFallback = lift . setFallback
 
-instance HasFallback m => HasFallback (Lazy.StateT s m) where
+instance MonadReload m => MonadReload (Lazy.StateT s m) where
   getFallback = lift getFallback
   setFallback = lift . setFallback
 
-instance HasFallback m => HasFallback (Strict.StateT s m) where
+instance MonadReload m => MonadReload (Strict.StateT s m) where
   getFallback = lift getFallback
   setFallback = lift . setFallback
 
-instance (Monoid w, HasFallback m) => HasFallback (Lazy.WriterT w m) where
+instance (Monoid w, MonadReload m) => MonadReload (Lazy.WriterT w m) where
   getFallback = lift getFallback
   setFallback = lift . setFallback
 
-instance (Monoid w, HasFallback m) => HasFallback (Strict.WriterT w m) where
+instance (Monoid w, MonadReload m) => MonadReload (Strict.WriterT w m) where
   getFallback = lift getFallback
   setFallback = lift . setFallback
 
-instance (Monoid w, HasFallback m) => HasFallback (Lazy.RWST r w s m) where
+instance (Monoid w, MonadReload m) => MonadReload (Lazy.RWST r w s m) where
   getFallback = lift getFallback
   setFallback  = lift . setFallback
 
-instance (Monoid w, HasFallback m) => HasFallback (Strict.RWST r w s m) where
+instance (Monoid w, MonadReload m) => MonadReload (Strict.RWST r w s m) where
   getFallback = lift getFallback
   setFallback = lift . setFallback
 
@@ -188,7 +189,7 @@ mapFallbackT :: (m a -> n b) -> FallbackT m a -> FallbackT n b
 mapFallbackT f m = FallbackT (\r -> f (unFallbackT m r))
 {-# INLINE mapFallbackT #-}
 
-instance MonadIO m => HasFallback (FallbackT m) where
+instance MonadIO m => MonadReload (FallbackT m) where
   getFallback = FallbackT (\r -> liftIO (readIORef r))
   setFallback hv = FallbackT (\r -> liftIO (writeIORef r hv))
 
@@ -243,7 +244,7 @@ mapGhcT :: (m a -> n b) -> GhcT m a -> GhcT n b
 mapGhcT f m = GhcT (\s -> f (unGhcT m s))
 {-# INLINE mapGhcT #-}
 
-instance MonadIO m => HasFallback (ReloadT m) where
+instance MonadIO m => MonadReload (ReloadT m) where
   getFallback = ReloadT (liftGhcT getFallback)
   setFallback v = ReloadT (liftGhcT (setFallback v))
 
@@ -292,10 +293,13 @@ instance (MonadIO m, MonadCatch m, MonadMask m)
 
 type Reload a = ReloadT IO a
 
-runReload :: ReloadConfig -> Reload a -> IO a
-runReload = runReloadT
-
 -- | Run 'ReloadT' with given settings.
+--
+-- This works with GHC running as separate OS process.  Takes TemplateHaskell
+-- name of 'GhcMonad' action and argument passed to the action. Only single
+-- thread could be forked at the same time in each GHC process.  When forking
+-- actions with 'runReloadT', use 'forkProcess' instead of 'forkIO' or 'forkOS'.
+--
 runReloadT ::
   (MonadIO m, MonadMask m, Functor m)
   => ReloadConfig -- ^ Configuration passed to inner 'runGhcT'.
@@ -322,6 +326,10 @@ runReloadT config m =
                  unReloadT m)))
        fallback
 
+-- | Type fixed variant of 'runReloadT'.
+runReload :: ReloadConfig -> Reload a -> IO a
+runReload = runReloadT
+
 
 -- --------------------------------------------------------------------------
 --
@@ -346,6 +354,7 @@ defaultReloadConfig =
   ReloadConfig {rcPackageDbs = return [GlobalPkgConf,UserPkgConf]
                ,rcSourcePaths = return ["."]
                ,rcTarget = "Main"}
+
 
 -- | Configuratoin for running ghci process under cabal package directory.
 --
@@ -422,85 +431,27 @@ sandboxPackageDbE =
 myModuleNameE :: ExpQ
 myModuleNameE = stringE . loc_module =<< qLocation
 
-reload :: (HasFallback m, GhcMonad m) => Name -> m a
-reload func = reloadWith func id id
-
-reloadWith ::
-  (HasFallback m, GhcMonad m)
-  => Name
-  -> (m b -> m a)
-  -> (m c -> m a)
+-- | Reload the module containing given function, then run the function.
+reload ::
+  (MonadReload m, GhcMonad m)
+  => Name        -- ^ Name of function to reload, compile, and run.
+  -> m (Maybe t) -- ^ Action to return a value passed to reloaded function, or
+                 -- 'Nothing' if reloaded function does not need argument.
   -> m a
-reloadWith func onSuccess onFailure =
+reload func mbArg =
   do let mdlName = mkModuleName (extractModuleName func)
      result <- load (LoadUpTo mdlName)
      case result of
+       Failed    -> run =<< getFallback
        Succeeded ->
          do setContext [IIModule mdlName]
             hvalue <- compileExpr (show func)
-            onSuccess (unsafeCoerce# hvalue)
-       Failed    ->
-         do hvalue <- getFallback
-            onFailure (unsafeCoerce# hvalue)
-
--- | Apply function with given argument after reloading the module.
---
--- This works with GHC running as separate OS process.  Takes TemplateHaskell
--- name of 'GhcMonad' action and argument passed to the action. Only single
--- thread could be forked at the same time in each GHC process.
---
-applyAt ::
-  (HasFallback m, GhcMonad m)
-  => Time -- ^ Scheduled time.
-  -> Name -- ^ Name of function to evaluate.
-  -> t    -- ^ Argument passed to the function.
-  -> m b
-applyAt scheduledTime func arg =
-  do let thisModuleName = mkModuleName (extractModuleName func)
-     result <- load (LoadUpTo thisModuleName)
-     case result of
-       Failed    ->
-         do fallback <- getFallback
-            pauseThreadUntil scheduledTime
-            unsafeCoerce# fallback arg
-       Succeeded ->
-         do setContext [IIModule thisModuleName]
-            hvalue <- compileExpr (show func)
             setFallback hvalue
-            pauseThreadUntil scheduledTime
-            unsafeCoerce# hvalue arg
-
--- | Apply with given fallback function.
-applyWith :: GhcMonad m => Time -> Name -> t -> (t -> m a) -> m a
-applyWith scheduledTime func arg fallback =
-  do --
-     -- Tryed 'DriverPipeline.linkBinary'. When linking binary, there will be no
-     -- success flag since no compilation will happen here.
-     -- 'DriverPipeline.linkBinary' was for static lib and dynamic lib. Need to
-     -- load interface before linking object file. Following did not work:
-     --
-     --   hsc_env <- getSession
-     --   dflags <- getSessionDynFlags
-     --   mg <- depanal [] False
-     --   mapM_ (\mdl -> do pm <- parseModule mdl
-     --                     tm <- typecheckModule pm
-     --                     loadModule tm) mg
-     --   result <- liftIO (link (ghcLink dflags)
-     --                          dflags
-     --                          False
-     --                          (hsc_HPT hsc_env))
-     --
-     let thisModuleName = mkModuleName (extractModuleName func)
-     result <- load (LoadUpTo thisModuleName)
-     case result of
-       Failed    ->
-         do pauseThreadUntil scheduledTime
-            fallback arg
-       Succeeded ->
-         do setContext [IIModule thisModuleName]
-            hvalue <- compileExpr (show func)
-            pauseThreadUntil scheduledTime
-            unsafeCoerce# hvalue arg
+            run hvalue
+  where
+    run hvalue =
+      do arg <- mbArg
+         maybe (unsafeCoerce# hvalue) (unsafeCoerce# hvalue) arg
 
 -- | Setup GHC session with given package-dbs and target.
 setupSession ::
@@ -536,46 +487,9 @@ extractModuleName :: Name -> String
 extractModuleName n = reverse (tail (dropWhile (/= '.') (reverse (show n))))
 {-# WARNING extractModuleName "Will be removed soon." #-}
 
--- | Fork expression with given configuration.
-forkExprWith ::
-  Show a
-   => ReloadConfig -- ^ Configuration passed to @ghc@ command.
-   -> a            -- ^ Expression ran by 'ghc' @"-e"@.
-   -> IO ()
-forkExprWith config expr = forkGhcProcess config (show expr)
-
--- | Fork GHC process by running @ghc@ command.
-forkGhcProcess :: ReloadConfig -> String -> IO ()
---
--- Forking "ghc" command.  As of ghc-7.8.2, runGhc with forkIOs are not working
--- nicely. See:
--- <http://www.haskell.org/pipermail/ghc-devs/2014-January/003774.html>
---
-forkGhcProcess config str =
-  do packageDbs <- rcPackageDbs config
-     sourcePaths <- rcSourcePaths config
-     let args = map pkgFlag packageDbs ++
-                map ("-i" ++) sourcePaths ++
-                ["-package", "ghc"
-                ,"-e", str
-                ,rcTarget config]
-     void (forkIO (void (rawSystem ghc args)))
-  where
-    pkgFlag p = case p of
-                  GlobalPkgConf    -> "-global-package-db"
-                  UserPkgConf      -> "-user-package-db"
-                  PkgConfFile path -> "-package-db=" ++ path
-
--- | Kill forked process with @pkill@ system command.
-pkill :: String -> IO ()
-pkill str =
-  let args = ["-f", str]
-  in  void (rawSystem "pkill" args)
-
-
 -- --------------------------------------------------------------------------
 --
--- OSC wrapper
+-- OSC
 --
 -- --------------------------------------------------------------------------
 
@@ -583,7 +497,7 @@ pkill str =
 newtype OSCRec a = OSCRec {unOSCRec :: ReloadT (ReaderT UDP.UDP IO) a}
   deriving
     (Functor, Applicative, Monad, MonadIO, MonadThrow, MonadCatch, MonadMask,
-     HasDynFlags, ExceptionMonad, GhcMonad, HasFallback)
+     HasDynFlags, ExceptionMonad, GhcMonad, MonadReload)
 
 instance SendOSC OSCRec where
   sendOSC = OSCRec . lift . sendOSC
@@ -608,6 +522,50 @@ runOSCRec ::
   -> IO a
 runOSCRec config udpIO m =
   withTransport udpIO (runReloadT config (unOSCRec m))
+
+-- | Apply function with given argument after reloading the module.
+--
+applyAt ::
+  (MonadReload m, GhcMonad m)
+  => Time -- ^ Scheduled time.
+  -> Name -- ^ Name of function to evaluate.
+  -> t    -- ^ Argument passed to the function.
+  -> m b
+applyAt scheduledTime func arg =
+  reload func (do pauseThreadUntil scheduledTime
+                  return (Just arg))
+
+-- | Apply with given fallback function.
+applyWith :: GhcMonad m => Time -> Name -> t -> (t -> m a) -> m a
+applyWith scheduledTime func arg fallback =
+  do --
+     -- Tryed 'DriverPipeline.linkBinary'. When linking binary, there will be no
+     -- success flag since no compilation will happen here.
+     -- 'DriverPipeline.linkBinary' was for static lib and dynamic lib. Need to
+     -- load interface before linking object file. Following did not work:
+     --
+     --   hsc_env <- getSession
+     --   dflags <- getSessionDynFlags
+     --   mg <- depanal [] False
+     --   mapM_ (\mdl -> do pm <- parseModule mdl
+     --                     tm <- typecheckModule pm
+     --                     loadModule tm) mg
+     --   result <- liftIO (link (ghcLink dflags)
+     --                          dflags
+     --                          False
+     --                          (hsc_HPT hsc_env))
+     --
+     let thisModuleName = mkModuleName (extractModuleName func)
+     result <- load (LoadUpTo thisModuleName)
+     case result of
+       Failed    ->
+         do pauseThreadUntil scheduledTime
+            fallback arg
+       Succeeded ->
+         do setContext [IIModule thisModuleName]
+            hvalue <- compileExpr (show func)
+            pauseThreadUntil scheduledTime
+            unsafeCoerce# hvalue arg
 
 
 -- --------------------------------------------------------------------------
@@ -678,9 +636,3 @@ nextOffset m n t =
 {-# INLINE nextOffset #-}
 
 -}
-
-
-
--- Local Variables:
--- flycheck-haskell-ghc-executable: "ghc-with-ghc"
--- End:
