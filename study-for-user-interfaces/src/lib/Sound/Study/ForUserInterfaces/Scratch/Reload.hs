@@ -2,7 +2,6 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE MagicHash                  #-}
 {-# LANGUAGE MultiParamTypeClasses      #-}
-{-# LANGUAGE TemplateHaskell            #-}
 {-# LANGUAGE UndecidableInstances       #-}
 {-|
 Copyright   : 8c6794b6, 2014
@@ -50,16 +49,6 @@ module Sound.Study.ForUserInterfaces.Scratch.Reload
   , Name
   , ProcessID
   , forkProcess
-
-  --   -- * OSC related stuffs
-  -- , OSCRec(..)
-  -- , runOSCRec
-  -- , applyAt
-  -- , applyWith
-  -- , Metro(..)
-  -- , mkMetro
-  -- , beatDuration
-  -- , getOffset
 
   ) where
 
@@ -445,24 +434,7 @@ reloadWith ::
   -> (Maybe t -> m a) -- ^ Fallback function.
   -> m a
 reloadWith func mbArg fallback =
-  do --
-     -- Tryed 'DriverPipeline.linkBinary'. When linking binary, there will be no
-     -- success flag since no compilation will happen here.
-     -- 'DriverPipeline.linkBinary' was for static lib and dynamic lib. Need to
-     -- load interface before linking object file. Following did not work:
-     --
-     --   hsc_env <- getSession
-     --   dflags <- getSessionDynFlags
-     --   mg <- depanal [] False
-     --   mapM_ (\mdl -> do pm <- parseModule mdl
-     --                     tm <- typecheckModule pm
-     --                     loadModule tm) mg
-     --   result <- liftIO (link (ghcLink dflags)
-     --                          dflags
-     --                          False
-     --                          (hsc_HPT hsc_env))
-     --
-     result <- load (LoadUpTo mdlName)
+  do result <- load (LoadUpTo mdlName)
      case result of
        Failed    -> fallback =<< mbArg
        Succeeded ->
