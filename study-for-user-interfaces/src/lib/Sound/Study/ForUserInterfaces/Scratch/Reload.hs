@@ -33,32 +33,33 @@ module Sound.Study.ForUserInterfaces.Scratch.Reload
   , defaultReloadConfig
   , cabalizedReloadConfig
   , myModuleNameE
-  , cabalSourcePathsE
   , getCabalSourcePaths
   , getCabalPackageConf
-  , sandboxPackageDbE
   , extractModuleName
 
-    -- * Reloading and running
+    -- * Reloading
   , reload
+  , reloadWith
   , setupSession
 
     -- * Re-exports
+  , HasDynFlags(..)
+  , ExceptionMonad(..)
+  , GhcMonad(..)
   , PkgConfRef(..)
   , Name
   , ProcessID
   , forkProcess
 
-    -- * OSC related stuffs
-  , OSCRec(..)
-  , runOSCRec
-  , applyAt
-  , applyWith
-  , Metro(..)
-  , mkMetro
-  , beatDuration
-  , getOffset
-
+  --   -- * OSC related stuffs
+  -- , OSCRec(..)
+  -- , runOSCRec
+  -- , applyAt
+  -- , applyWith
+  -- , Metro(..)
+  -- , mkMetro
+  -- , beatDuration
+  -- , getOffset
 
   ) where
 
@@ -67,7 +68,6 @@ import           Control.Monad.Catch                   (MonadCatch (..),
                                                         MonadMask (..),
                                                         MonadThrow (..))
 import           Control.Monad.IO.Class                (MonadIO (..))
-import           Control.Monad.Random                  (MonadRandom (..))
 import           Control.Monad.Reader                  (ReaderT (..))
 import           Control.Monad.Reader.Class            (MonadReader (..))
 import qualified Control.Monad.RWS.Lazy                as Lazy
@@ -85,8 +85,7 @@ import           Data.IORef                            (IORef, newIORef,
                                                         readIORef, writeIORef)
 import           Data.List                             (isPrefixOf, nub)
 import           Data.Monoid                           (Monoid)
-import           Language.Haskell.TH                   (ExpQ, Name, appE, conE,
-                                                        listE, runIO, stringE)
+import           Language.Haskell.TH                   (ExpQ, Name, stringE)
 import           Language.Haskell.TH.Syntax            (Loc (..), Quasi (..))
 import           System.Directory                      (doesFileExist,
                                                         getCurrentDirectory)
@@ -114,15 +113,6 @@ import           GHC                                   hiding (Name)
 import           GHC.Paths                             (libdir)
 import           GHC.Prim                              (unsafeCoerce#)
 import           GhcMonad                              (GhcT (..), liftGhcT)
-
-import           Sound.OSC                             (DuplexOSC, RecvOSC (..),
-                                                        SendOSC (..), Time,
-                                                        Transport,
-                                                        pauseThreadUntil,
-                                                        sendOSC, time,
-                                                        withTransport)
-
-import qualified Sound.OSC.Transport.FD.UDP            as UDP
 
 
 -- --------------------------------------------------------------------------
@@ -405,18 +395,6 @@ getCabalSourcePaths =
              return (nub (concat sources))
         else return []
 
-cabalSourcePathsE :: ExpQ
-cabalSourcePathsE =
-  do paths <- runIO getCabalSourcePaths
-     listE (map stringE paths)
-
-sandboxPackageDbE :: ExpQ
-sandboxPackageDbE =
-  do dbs <- runIO getSandboxPackageDbs
-     if not (null dbs)
-        then listE (conE 'GlobalPkgConf :
-                    map (appE (conE 'PkgConfFile) . stringE) dbs)
-        else listE [conE 'GlobalPkgConf,  conE 'UserPkgConf]
 
 -- | Template haskell expression to get current module name.
 --
@@ -431,6 +409,13 @@ sandboxPackageDbE =
 myModuleNameE :: ExpQ
 myModuleNameE = stringE . loc_module =<< qLocation
 
+
+-- --------------------------------------------------------------------------
+--
+-- Reloading functions
+--
+-- --------------------------------------------------------------------------
+
 -- | Reload the module containing given function, then run the function.
 reload ::
   (MonadReload m, GhcMonad m)
@@ -439,8 +424,7 @@ reload ::
                  -- 'Nothing' if reloaded function does not need argument.
   -> m a
 reload func mbArg =
-  do let mdlName = mkModuleName (extractModuleName func)
-     result <- load (LoadUpTo mdlName)
+  do result <- load (LoadUpTo mdlName)
      case result of
        Failed    -> run =<< getFallback
        Succeeded ->
@@ -450,8 +434,46 @@ reload func mbArg =
             run hvalue
   where
     run hvalue =
-      do arg <- mbArg
-         maybe (unsafeCoerce# hvalue) (unsafeCoerce# hvalue) arg
+      maybe (unsafeCoerce# hvalue) (unsafeCoerce# hvalue) =<< mbArg
+    mdlName = mkModuleName (extractModuleName func)
+
+-- | Like 'reload', but use given fallback function.
+reloadWith ::
+  GhcMonad m
+  => Name             -- ^ Function to run after reloading the module.
+  -> m (Maybe t)      -- ^ Maybe argument.
+  -> (Maybe t -> m a) -- ^ Fallback function.
+  -> m a
+reloadWith func mbArg fallback =
+  do --
+     -- Tryed 'DriverPipeline.linkBinary'. When linking binary, there will be no
+     -- success flag since no compilation will happen here.
+     -- 'DriverPipeline.linkBinary' was for static lib and dynamic lib. Need to
+     -- load interface before linking object file. Following did not work:
+     --
+     --   hsc_env <- getSession
+     --   dflags <- getSessionDynFlags
+     --   mg <- depanal [] False
+     --   mapM_ (\mdl -> do pm <- parseModule mdl
+     --                     tm <- typecheckModule pm
+     --                     loadModule tm) mg
+     --   result <- liftIO (link (ghcLink dflags)
+     --                          dflags
+     --                          False
+     --                          (hsc_HPT hsc_env))
+     --
+     result <- load (LoadUpTo mdlName)
+     case result of
+       Failed    -> fallback =<< mbArg
+       Succeeded ->
+         do setContext [IIModule mdlName]
+            hvalue <- compileExpr (show func)
+            arg <- mbArg
+            case arg of
+              Nothing   -> unsafeCoerce# hvalue
+              Just arg' -> unsafeCoerce# hvalue arg'
+  where
+     mdlName = mkModuleName (extractModuleName func)
 
 -- | Setup GHC session with given package-dbs and target.
 setupSession ::
@@ -486,153 +508,3 @@ setupSession pkgDbs sourcePaths targetSource =
 extractModuleName :: Name -> String
 extractModuleName n = reverse (tail (dropWhile (/= '.') (reverse (show n))))
 {-# WARNING extractModuleName "Will be removed soon." #-}
-
--- --------------------------------------------------------------------------
---
--- OSC
---
--- --------------------------------------------------------------------------
-
--- | Newtype wrapper for recursive OSC action.
-newtype OSCRec a = OSCRec {unOSCRec :: ReloadT (ReaderT UDP.UDP IO) a}
-  deriving
-    (Functor, Applicative, Monad, MonadIO, MonadThrow, MonadCatch, MonadMask,
-     HasDynFlags, ExceptionMonad, GhcMonad, MonadReload)
-
-instance SendOSC OSCRec where
-  sendOSC = OSCRec . lift . sendOSC
-
-instance RecvOSC OSCRec where
-  recvPacket = OSCRec (lift recvPacket)
-
-instance DuplexOSC OSCRec
-instance Transport OSCRec
-
-instance MonadRandom OSCRec where
-  getRandom = liftIO getRandom
-  getRandoms = liftIO getRandoms
-  getRandomR = liftIO . getRandomR
-  getRandomRs = liftIO . getRandomRs
-
--- | Run 'OSCRec' with given settings.
-runOSCRec ::
-  ReloadConfig  -- ^ Setting for 'ReloadT'.
-  -> IO UDP.UDP -- ^ Destination of OSC messages.
-  -> OSCRec a   -- ^ Action to run.
-  -> IO a
-runOSCRec config udpIO m =
-  withTransport udpIO (runReloadT config (unOSCRec m))
-
--- | Apply function with given argument after reloading the module.
---
-applyAt ::
-  (MonadReload m, GhcMonad m)
-  => Time -- ^ Scheduled time.
-  -> Name -- ^ Name of function to evaluate.
-  -> t    -- ^ Argument passed to the function.
-  -> m b
-applyAt scheduledTime func arg =
-  reload func (do pauseThreadUntil scheduledTime
-                  return (Just arg))
-
--- | Apply with given fallback function.
-applyWith :: GhcMonad m => Time -> Name -> t -> (t -> m a) -> m a
-applyWith scheduledTime func arg fallback =
-  do --
-     -- Tryed 'DriverPipeline.linkBinary'. When linking binary, there will be no
-     -- success flag since no compilation will happen here.
-     -- 'DriverPipeline.linkBinary' was for static lib and dynamic lib. Need to
-     -- load interface before linking object file. Following did not work:
-     --
-     --   hsc_env <- getSession
-     --   dflags <- getSessionDynFlags
-     --   mg <- depanal [] False
-     --   mapM_ (\mdl -> do pm <- parseModule mdl
-     --                     tm <- typecheckModule pm
-     --                     loadModule tm) mg
-     --   result <- liftIO (link (ghcLink dflags)
-     --                          dflags
-     --                          False
-     --                          (hsc_HPT hsc_env))
-     --
-     let thisModuleName = mkModuleName (extractModuleName func)
-     result <- load (LoadUpTo thisModuleName)
-     case result of
-       Failed    ->
-         do pauseThreadUntil scheduledTime
-            fallback arg
-       Succeeded ->
-         do setContext [IIModule thisModuleName]
-            hvalue <- compileExpr (show func)
-            pauseThreadUntil scheduledTime
-            unsafeCoerce# hvalue arg
-
-
--- --------------------------------------------------------------------------
---
--- Client side synchronization
---
--- --------------------------------------------------------------------------
-
--- | Data type to manage client side time synchronization.
-data Metro =
-  Metro {beatsPerMinute :: {-# UNPACK #-} !Rational
-        ,oneBeat        :: {-# UNPACK #-} !Rational
-        ,currentBeat    :: !(Time -> Rational)
-        ,nextOffset     :: !(Int -> Time -> Time)}
-
-instance Show Metro where
-  show m = "Metro {beatsPerMinute = " ++ show (beatsPerMinute m) ++ "}"
-
--- | Returns a 'Metro' with given beats per minute.
-mkMetro :: Rational -> Metro
-mkMetro bpm =
-  let m = Metro {beatsPerMinute = bpm
-                ,oneBeat = 60 / bpm
-                ,currentBeat = \t -> (toRational t / oneBeat m)
-                ,nextOffset = \n t ->
-                  let gridDuration = oneBeat m * fromIntegral n
-                      numGrids :: Int
-                      (numGrids, _) =
-                        properFraction
-                          (toRational t / (fromIntegral n * oneBeat m))
-                  in  realToFrac (gridDuration * fromIntegral (numGrids + 1)) }
-  in  m `seq` m
-
-beatDuration :: Metro -> Double
-beatDuration = fromRational . oneBeat
-
--- | Get next offset from current time.
-getOffset :: Metro -> Int -> IO Time
-getOffset m n = nextOffset m n `fmap` time
-
-{-
-
---
--- Seems like, when running bytecode, data type with function records
--- performs better than defining each function as top level in this module.
--- Check it again later.
---
-
-newtype Metro = Metro {beatsPerMinute :: Double}
-
-mkMetro :: Double -> Metro
-mkMetro = Metro
-
-beatDuration   :: Metro -> Double
-beatDuration (Metro bpm) = 60 / bpm
-{-# INLINE beatDuration #-}
-
-currentBeat :: Metro -> Time -> Int
-currentBeat m t = fst (properFraction (t / beatDuration m))
-{-# INLINE currentBeat #-}
-
-nextOffset :: Metro -> Int -> Double -> Double
-nextOffset m n t =
-  let gridDuration = beatDuration m * fromIntegral n
-      numGrids :: Int
-      numGrids = fst (properFraction (t / (fromIntegral n * beatDuration m)))
-  in  gridDuration * fromIntegral (numGrids + 1)
-{-# INLINE nextOffset #-}
-
--}
