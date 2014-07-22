@@ -458,6 +458,19 @@ rawMessage msg = modify (\st -> st {tsMessages = msg `snoc` tsMessages st})
 bypass :: Monad m => String -> Track m a -> Track m a
 bypass = genControlledNode (\_ -> []) Nothing
 
+-- | Source node for ticking synchronized trigger with 'impulse'.
+metroNode :: Transport m => Double -> Double -> Track m ()
+metroNode bpm beat =
+  do st <- get
+     let nid = fromIntegral
+                 (abs (fromIntegral
+                         (joinID (tsGroupId st) (hash name)) :: Int32))
+         name = "metro"
+     rawNode (Synth nid name ["out" := metroOut
+                             ,"count" := countOut
+                             ,"bpm" := bpm
+                             ,"beat" := beat])
+
 -- | Run effect synth, apply paremater actions to nodes.
 effect :: Monad m => String -> Track m a -> Track m a
 effect = genControlledNode (\obus -> ["out":=obus,"in":=obus]) Nothing

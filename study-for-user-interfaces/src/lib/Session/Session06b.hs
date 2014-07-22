@@ -3,35 +3,18 @@ Copyright   : 8c6794b6, 2014
 License     : BSD3
 
 Maintainer  : 8c6794b6@gmail.com
-nStability   : experimental
+Stability   : experimental
 Portability : unknown
 
 Rewrite of Session06 with using 'runSettings'.
 -}
 module Session.Session06b where
 
-import Control.Monad.State (get)
-import Data.Hashable (hash)
-import Data.Int (Int32)
-
 import Session.Synthdefs
 import Sound.Study.ForUserInterfaces.TUI.TUI02
 
 main :: IO ()
 main = withSC3 (runSettings g06b)
-
--- | Source node for ticking synchronized trigger with 'impulse'.
-metroNode :: Transport m => Double -> Double -> Track m ()
-metroNode bpm beat =
-  do st <- get
-     let nid = fromIntegral
-                 (abs (fromIntegral
-                         (joinID (tsGroupId st) (hash name)) :: Int32))
-         name = "metro"
-     rawNode (Synth nid name ["out" := metroOut
-                             ,"count" := countOut
-                             ,"bpm" := bpm
-                             ,"beat" := beat])
 
 g06b :: Transport m => Track m ()
 g06b =

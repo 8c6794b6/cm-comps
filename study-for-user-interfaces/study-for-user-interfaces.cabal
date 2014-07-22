@@ -75,7 +75,7 @@ library
                    , threepenny-gui
                    , transformers
                    , unix
-                   -- , monad-reload
+                   , monad-reload
 
 executable gui
   main-is:           gui.hs

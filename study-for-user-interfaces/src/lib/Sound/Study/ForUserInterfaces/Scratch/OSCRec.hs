@@ -1,24 +1,32 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-|
+Copyright   : 8c6794b6, 2014
+License     : BSD3
+
+Maintainer  : 8c6794b6@gmail.com
+Stability   : experimental
+Portability : unknown
+
+Newtype wrapper with OSC related actions.
+
+-}
 module Sound.Study.ForUserInterfaces.Scratch.OSCRec
   ( module Sound.Study.ForUserInterfaces.Scratch.OSCRec
-  , module Sound.Study.ForUserInterfaces.Scratch.Reload
+  , module Control.Monad.Reload
   ) where
 
-import           Sound.Study.ForUserInterfaces.Scratch.Reload
-
-import           Control.Applicative (Applicative)
+import           Control.Applicative        (Applicative)
 import           Control.Monad.Catch
-import           Control.Monad.Random                         (MonadRandom (..))
+import           Control.Monad.Random       (MonadRandom (..))
 import           Control.Monad.Reader
-import           Sound.OSC                                    (DuplexOSC,
-                                                               RecvOSC (..),
-                                                               SendOSC (..),
-                                                               Time, Transport,
-                                                               pauseThreadUntil,
-                                                               time,
-                                                               withTransport)
+import           Control.Monad.Reload
 
-import qualified Sound.OSC.Transport.FD.UDP                   as UDP
+import           Sound.OSC                  (DuplexOSC, Message, RecvOSC (..),
+                                             SendOSC (..), Time, Transport,
+                                             bundle, pauseThreadUntil, time,
+                                             withTransport)
+
+import qualified Sound.OSC.Transport.FD.UDP as UDP
 
 
 -- --------------------------------------------------------------------------
@@ -57,7 +65,6 @@ runOSCRec ::
 runOSCRec config udpIO m = withTransport udpIO (runReloadT config (unOSCRec m))
 
 -- | Apply function with given argument after reloading the module.
---
 applyAt ::
   (MonadReload m, GhcMonad m)
   => Time -- ^ Scheduled time.
@@ -68,6 +75,10 @@ applyAt scheduledTime func arg =
   reload func (do pauseThreadUntil scheduledTime
                   return (Just arg))
 
+-- | Send bundled message at specified time.
+at :: Transport m => Time -> [Message] -> m ()
+at t msgs = unless (null msgs) (sendOSC (bundle t msgs))
+
 
 -- --------------------------------------------------------------------------
 --
@@ -77,13 +88,21 @@ applyAt scheduledTime func arg =
 
 -- | Data type to manage client side time synchronization.
 data Metro =
-  Metro {beatsPerMinute :: {-# UNPACK #-} !Rational
-        ,oneBeat        :: {-# UNPACK #-} !Rational
-        ,currentBeat    :: !(Time -> Rational)
-        ,nextOffset     :: !(Int -> Time -> Time)}
+  Metro
+    { -- | Beats per minute.
+     beatsPerMinute :: {-# UNPACK #-} !Rational
+     -- | Duration of one beat.
+    ,oneBeat        :: {-# UNPACK #-} !Rational
+     -- | Current number of beats with given time.
+    ,currentBeat    :: !(Time -> Rational)
+     -- | Next offset time in grid.
+    ,nextOffset     :: !(Int -> Time -> Time)}
 
 instance Show Metro where
   show m = "Metro {beatsPerMinute = " ++ show (beatsPerMinute m) ++ "}"
+
+instance Eq Metro where
+  m1 == m2 = beatsPerMinute m1 == beatsPerMinute m2
 
 -- | Returns a 'Metro' with given beats per minute.
 mkMetro :: Rational -> Metro
@@ -95,9 +114,9 @@ mkMetro bpm =
                   let gridDuration = oneBeat m * fromIntegral n
                       numGrids :: Int
                       (numGrids, _) =
-                        properFraction
-                          (toRational t / (fromIntegral n * oneBeat m))
-                  in  realToFrac (gridDuration * fromIntegral (numGrids + 1)) }
+                         properFraction
+                           (toRational t / (fromIntegral n * oneBeat m))
+                  in  realToFrac (gridDuration * fromIntegral (numGrids + 1))}
   in  m `seq` m
 
 beatDuration :: Metro -> Double

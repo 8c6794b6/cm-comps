@@ -17,7 +17,7 @@ module Sound.Study.ForUserInterfaces.Scratch.Reload
   ( -- * Type class
     MonadReload(..)
 
-    -- * Types
+    -- * Transformer type
   , ReloadT(..)
   , mapReloadT
   , Reload
@@ -80,14 +80,14 @@ import           System.Directory                      (doesFileExist,
                                                         getCurrentDirectory)
 import           System.FilePath                       (takeBaseName, (<.>),
                                                         (</>))
-import           System.Posix (ProcessID, forkProcess)
+import           System.Posix                          (ProcessID, forkProcess)
 
 import           Distribution.PackageDescription       (BuildInfo (..),
                                                         CondTree (..),
                                                         Executable (..),
-                                                        condLibrary,
+                                                        Library (..),
                                                         condExecutables,
-                                                        Library (..))
+                                                        condLibrary)
 import           Distribution.PackageDescription.Parse (readPackageDescription)
 import           Distribution.Verbosity                (normal)
 
@@ -354,6 +354,7 @@ getCabalPackageConf =
         then return (GlobalPkgConf : map PkgConfFile pkgDbs)
         else return [GlobalPkgConf, UserPkgConf]
 
+-- | Get package db from cabal sandbox config file.
 getSandboxPackageDbs :: IO [FilePath]
 getSandboxPackageDbs =
   do cwd <- getCurrentDirectory
