@@ -16,3 +16,6 @@ callback _name _arg =
      let name = undefined
      _hvalue <- getHValue hsc_env name
      return undefined
+
+pure_function_in_callback :: Int -> Int
+pure_function_in_callback x = x + 200
