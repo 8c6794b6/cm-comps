@@ -55,11 +55,12 @@ handleLoop
 handleLoop hdl host port input result =
   forever
     (do ln <- hGetLine hdl
-        unless (all isSpace ln)
-               (do putStrLn (host ++ ":" ++ show port ++ " " ++ ln)
-                   putMVar input ln
-                   hPutStr hdl =<< takeMVar result
-                   hFlush hdl))
+        unless
+          (all isSpace ln)
+          (do putStrLn ("[" ++ host ++ ":" ++ show port ++ "] " ++ ln)
+              putMVar input ln
+              hPutStr hdl =<< takeMVar result
+              hFlush hdl))
 
 ghcLoop :: ThreadId -> MVar String -> MVar String -> IO ()
 ghcLoop parentThread input result =
@@ -89,71 +90,56 @@ ghcLoop parentThread input result =
 
 replStep :: MVar String -> MVar String -> Ghc ()
 replStep input result =
-  liftIO (takeMVar input) >>= tryLoad >>= liftIO . putMVar result
+  do expr <- liftIO (takeMVar input)
+     res <- loadOrImport expr `gcatch`
+            (\(SomeException _) -> evalIO expr) `gcatch`
+            (\(SomeException _) -> evalShow expr) `gcatch`
+            (\(SomeException _) -> runToCompletion expr) `gcatch`
+            (\(SomeException e) -> return (show e))
+     liftIO (putMVar result res)
 
-tryLoad :: String -> Ghc String
-tryLoad expr
+loadOrImport :: String -> Ghc String
+loadOrImport expr
   | ":load " `isPrefixOf` expr =
-    do res <- gtry
-                (do target <- guessTarget (drop 6 expr) Nothing
-                    setTargets [target]
-                    load LoadAllTargets
-                    loaded <- getModuleGraph >>=
-                              filterM isLoaded . map ms_mod_name
-                    setContext . map IIDecl =<<
-                      mapM parseImportDecl
-                           ("import Prelude" :
-                            map (\m -> "import " ++ moduleNameString m)
-                                loaded)
-                    dflags <- getSessionDynFlags
-                    return ("loaded: " ++ showPpr dflags target))
-              :: Ghc (Either SomeException String)
-       case res of
-         Right str -> return str
-         Left  err -> return (show err)
-  | otherwise                 = tryImport expr
+    do target <- guessTarget (drop 6 expr) Nothing
+       setTargets [target]
+       _ <- load LoadAllTargets
+       loaded <- getModuleGraph >>= filterM isLoaded . map ms_mod_name
+       setContext . map IIDecl =<<
+         mapM parseImportDecl
+              ("import Prelude" :
+               map (\m -> "import " ++ moduleNameString m)
+                   loaded)
+       dflags <- getSessionDynFlags
+       return ("loaded: " ++ showPpr dflags target)
+  | otherwise                 =
+    do mdl <- parseImportDecl expr
+       getContext >>= setContext . (IIDecl mdl :)
+       dflags <- getSessionDynFlags
+       return (showPpr dflags mdl)
 
-tryImport :: String -> Ghc String
-tryImport expr =
-  do res <- gtry (do mdl <- parseImportDecl expr
-                     getContext >>= setContext . (IIDecl mdl :)
-                     dflags <- getSessionDynFlags
-                     -- liftIO (putMVar res (showPpr dflags mdl'))
-                     return (showPpr dflags mdl))
-                 :: Ghc (Either SomeException String)
-     case res of
-       Right str -> return str
-       _         -> tryEvalIO expr
+evalIO :: String -> Ghc String
+evalIO expr =
+  do hvalue <- dynCompileExpr expr
+     liftIO (do _ <- fromDyn hvalue (undefined :: IO ())
+                return "<<IO ()>>")
 
-tryEvalIO :: String -> Ghc String
-tryEvalIO expr =
-  do hvalue <- gtry (dynCompileExpr expr)
-               :: Ghc (Either SomeException Dynamic)
-     case fmap fromDynamic hvalue of
-       Right (Just act) -> liftIO (do act :: IO ()
-                                      return "<<IO ()>>")
-       _                -> tryEvalShow expr
+evalShow :: String -> Ghc String
+evalShow expr =
+  do hvalue <- dynCompileExpr ("Prelude.show (" ++ expr ++ ")")
+     let hv = fromDyn hvalue (undefined :: String)
+     liftIO (putStrLn hv >> return hv)
 
-tryEvalShow :: String -> Ghc String
-tryEvalShow expr =
-  do hvalue <- gtry (dynCompileExpr ("Prelude.show (" ++ expr ++ ")"))
-                    :: Ghc (Either SomeException Dynamic)
-     case fmap fromDynamic hvalue of
-       Right (Just hv) -> liftIO (putStrLn hv >> return hv)
-       _               -> tryRunStatement expr
-
-tryRunStatement :: String -> Ghc String
-tryRunStatement stmt =
-  do res' <- gtry (runStmt stmt RunToCompletion)
+runToCompletion :: String -> Ghc String
+runToCompletion stmt =
+  do res' <- (runStmt stmt RunToCompletion)
      case res' of
-       Right r ->
-         case r of
-           RunOk names ->
-             do dflags <- getSessionDynFlags
-                (return ("bound: " ++ unwords (map (showPpr dflags) names)))
-           _           ->
-             liftIO (do putStrLn "Statement result not RunOk"
-                        return "<<Statement>>")
-       Left (SomeException e) ->
-         liftIO (do print e
-                    return (show e))
+       RunOk names ->
+         do dflags <- getSessionDynFlags
+            (return ("bound: " ++ unwords (map (showPpr dflags) names)))
+       RunException e ->
+           liftIO (do putStrLn ("RunException: " ++ show e)
+                      return (show e))
+       RunBreak {} ->
+           liftIO (do putStrLn "Got RunBreak"
+                      return "RunBreak")
