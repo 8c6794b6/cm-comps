@@ -1,3 +1,4 @@
+{-# LANGUAGE MagicHash #-}
 {-|
 Copyright   : 8c6794b6, 2014
 License     : BSD3
@@ -11,13 +12,17 @@ Simple REPL server with GHC.
 -}
 module Language.Haskell.REPL.Server where
 
-import Language.Haskell.REPL.Callback
+import Language.Haskell.REPL.Global
 
 import GHC
 import GHC.Paths
 import DynFlags
 import Exception
-import Outputable
+import Outputable (showPpr)
+import HscMain (hscParseIdentifier, hscTcRnLookupRdrName)
+import Linker (getHValue)
+
+import GHC.Prim (unsafeCoerce#)
 
 import Control.Concurrent
 import Control.Monad
@@ -27,6 +32,12 @@ import Data.Dynamic
 import Data.List (isPrefixOf)
 import Network
 import System.IO
+
+-- --------------------------------------------------------------------------
+--
+-- Server
+--
+-- --------------------------------------------------------------------------
 
 runServer :: Int -> IO ()
 runServer port =
@@ -77,7 +88,8 @@ ghcLoop parentThread input result =
                            ,ghcLink = LinkInMemory
                            ,importPaths = [".", "src/lib"]}
           setContext . map IIDecl =<< mapM parseImportDecl ["import Prelude"]
-          getSession >>= liftIO . putServerHscEnv
+          hsc_env <- getSession
+          liftIO (initServerHscEnv hsc_env)
           forever (replStep input result))))
   `catch`
   (\UserInterrupt ->
@@ -91,10 +103,10 @@ ghcLoop parentThread input result =
 replStep :: MVar String -> MVar String -> Ghc ()
 replStep input result =
   do expr <- liftIO (takeMVar input)
-     res <- loadOrImport expr `gcatch`
+     res <- loadOrImport expr  `gcatch`
             (\(SomeException _) -> evalIO expr) `gcatch`
             (\(SomeException _) -> evalShow expr) `gcatch`
-            (\(SomeException _) -> runToCompletion expr) `gcatch`
+            (\(SomeException _) -> runStatement expr) `gcatch`
             (\(SomeException _) -> runDec expr) `gcatch`
             (\(SomeException e) -> return (show e))
      liftIO (putMVar result res)
@@ -109,8 +121,8 @@ loadOrImport expr
        setContext . map IIDecl =<<
          mapM parseImportDecl
               ("import Prelude" :
-               map (\m -> "import " ++ moduleNameString m)
-                   loaded)
+               map (\m -> "import " ++ moduleNameString m) loaded)
+       liftIO . initServerHscEnv =<< getSession
        dflags <- getSessionDynFlags
        return ("loaded: " ++ showPpr dflags target)
   | otherwise                 =
@@ -122,14 +134,14 @@ loadOrImport expr
 evalIO :: String -> Ghc String
 evalIO expr =
   do hvalue <- dynCompileExpr expr
-     liftIO (do _ <- fromDyn hvalue (undefined :: IO ())
+     liftIO (do fromDyn hvalue (undefined :: IO ())
                 return "<<IO ()>>")
 
 evalShow :: String -> Ghc String
 evalShow expr =
   do hvalue <- dynCompileExpr ("Prelude.show (" ++ expr ++ ")")
      let hv = fromDyn hvalue (undefined :: String)
-     liftIO (putStrLn hv >> return hv)
+     return hv
 
 runDec :: String -> Ghc String
 runDec dec =
@@ -137,9 +149,9 @@ runDec dec =
      dflags <- getSessionDynFlags
      return ("bound: " ++ concatMap (showPpr dflags) names)
 
-runToCompletion :: String -> Ghc String
-runToCompletion stmt =
-  do res' <- (runStmt stmt RunToCompletion)
+runStatement :: String -> Ghc String
+runStatement stmt =
+  do res' <- runStmt stmt RunToCompletion
      case res' of
        RunOk names ->
          do dflags <- getSessionDynFlags
@@ -150,3 +162,20 @@ runToCompletion stmt =
        RunBreak {} ->
            liftIO (do putStrLn "Got RunBreak"
                       return "RunBreak")
+
+
+-- --------------------------------------------------------------------------
+--
+-- Client
+--
+-- --------------------------------------------------------------------------
+
+callback :: String -> a -> IO a
+callback name arg =
+  do hsc_env <- readServerHscEnv
+     L _ rdr_name <- hscParseIdentifier hsc_env name
+     names <- hscTcRnLookupRdrName hsc_env rdr_name
+     hvalues <- mapM (getHValue hsc_env) names
+     case hvalues of
+       hvalue:_ -> unsafeCoerce# hvalue arg
+       []       -> error ("callback: Cannot find " ++ name)
