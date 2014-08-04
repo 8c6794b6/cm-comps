@@ -6,7 +6,7 @@ Maintainer  : 8c6794b6@gmail.com
 Stability   : experimental
 Portability : GHC-only
 
-Simple REPL server with GHC, with name lookup.
+Simple REPL server with GHC.
 
 -}
 module Language.Haskell.REPL.Server where
@@ -77,7 +77,7 @@ ghcLoop parentThread input result =
                            ,ghcLink = LinkInMemory
                            ,importPaths = [".", "src/lib"]}
           setContext . map IIDecl =<< mapM parseImportDecl ["import Prelude"]
-          getSession >>= liftIO . putMVar server_hsc_env
+          getSession >>= liftIO . putServerHscEnv
           forever (replStep input result))))
   `catch`
   (\UserInterrupt ->
@@ -95,6 +95,7 @@ replStep input result =
             (\(SomeException _) -> evalIO expr) `gcatch`
             (\(SomeException _) -> evalShow expr) `gcatch`
             (\(SomeException _) -> runToCompletion expr) `gcatch`
+            (\(SomeException _) -> runDec expr) `gcatch`
             (\(SomeException e) -> return (show e))
      liftIO (putMVar result res)
 
@@ -129,6 +130,12 @@ evalShow expr =
   do hvalue <- dynCompileExpr ("Prelude.show (" ++ expr ++ ")")
      let hv = fromDyn hvalue (undefined :: String)
      liftIO (putStrLn hv >> return hv)
+
+runDec :: String -> Ghc String
+runDec dec =
+  do names <- runDecls dec
+     dflags <- getSessionDynFlags
+     return ("bound: " ++ concatMap (showPpr dflags) names)
 
 runToCompletion :: String -> Ghc String
 runToCompletion stmt =
