@@ -32,9 +32,16 @@
               (region-end))))
     (process-send-string hs-repl-con (concat str "\n"))))
 
+(defun hs-repl-send-line ()
+  "Send current line to REPL."
+  (interactive)
+  (let ((str (thing-at-point 'line)))
+    (process-send-string hs-repl-con (concat str "\n"))))
+
 (defvar hs-repl-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "C-c M-j") 'hs-repl-connect)
+    (define-key map (kbd "C-c C-c") 'hs-repl-send-line)
     (define-key map (kbd "C-M-x") 'hs-repl-send-block)
     map))
 
