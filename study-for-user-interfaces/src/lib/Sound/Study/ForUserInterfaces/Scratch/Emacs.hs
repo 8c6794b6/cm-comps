@@ -1,3 +1,4 @@
+{-# OPTIONS_GHC -fno-warn-orphans #-}
 {-|
 Copyright   : 8c6794b6, 2014
 License     : BSD3
@@ -12,7 +13,10 @@ functionality with emacs.
 -}
 module Sound.Study.ForUserInterfaces.Scratch.Emacs where
 
-import Sound.Study.ForUserInterfaces.TUI.TUI02
+-- import Sound.Study.ForUserInterfaces.TUI.TUI02
+import Sound.OSC
+import Sound.SC3
+import Sound.SC3.ID
 
 main :: IO ()
 main =
@@ -58,8 +62,11 @@ foo =
 bar :: IO ()
 bar =
   do putStr "b"
-     putStr "a"
+     putStr "aaaa"
      putStrLn "r"
+
+instance Audible (IO a) where
+  play act = liftIO act >> return ()
 
 bar02 :: UGen
 bar02 =
@@ -68,9 +75,10 @@ bar02 =
        (mix
         (allpassC
          (product
-          [rlpf (saw AR
-                     ((tChoose 'a' t1 (mce [110, 220, 330, 440, 1320])) +
-                      (lfCub KR 0.5 0 * 3.8 + 3.9)))
+          [rlpf (lfCub AR
+                 ((tChoose 'a' t1 (mce [110, 220, 330, 440, 1320])) +
+                  (lfCub KR 0.5 0 * 3.8 + 3.9))
+                 0)
                 (lfdNoise3 'γ' KR 0.8 * 2800 + 2880)
                 (lfdNoise3 'δ' KR 0.3 * 0.4 + 0.41)
           ,decay (sum [dust 'α' KR df])
@@ -89,6 +97,9 @@ bar02 =
 
 withSC3 :: Connection TCP a -> IO a
 withSC3 = withTransport (openTCP "127.0.0.1" 57111)
+
+quux :: String
+quux = "QUUX"
 
 -- Local Variables:
 -- imenu-auto-rescan: t

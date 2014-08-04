@@ -44,17 +44,18 @@ library
                      Session.Session06b
                      Session.Synthdefs
   build-depends:     base >=4.6
-                   , bytestring
                    , Cabal -any
+                   , MonadRandom
+                   , bytestring
                    , containers
-                   , dyre
                    , directory
+                   , dyre
                    , exceptions
                    , filepath
                    , ghc
+                   , ghc-mtl
                    , ghc-paths
                    , ghc-prim
-                   , ghc-mtl
                    , hashable
                    , hint
                    , hosc >= 0.14
@@ -65,17 +66,18 @@ library
                    , hsc3-supply
                    , hsc3-th
                    , hsc3-tree
-                   , MonadRandom
+                   , monad-reload
                    , mtl
                    , murmur-hash
+                   , parsec
                    , plugins
                    , random
                    , random-shuffle
+                   , syb
                    , template-haskell
                    , threepenny-gui
                    , transformers
                    , unix
-                   , monad-reload
 
 executable gui
   main-is:           gui.hs
