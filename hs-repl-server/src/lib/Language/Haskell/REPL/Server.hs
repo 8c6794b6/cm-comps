@@ -170,7 +170,10 @@ runStatement stmt =
 --
 -- --------------------------------------------------------------------------
 
-callback :: String -> a -> IO a
+callback
+  :: String -- ^ Name of function with type @a -> IO a@.
+  -> a      -- ^ Argument to the function.
+  -> IO a
 callback name arg =
   do hsc_env <- readServerHscEnv
      L _ rdr_name <- hscParseIdentifier hsc_env name

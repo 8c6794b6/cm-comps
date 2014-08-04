@@ -1,4 +1,5 @@
 {-# LANGUAGE MagicHash #-}
+{-# OPTIONS_GHC -fno-cse #-}
 {-|
 Copyright   : 8c6794b6, 2014
 License     : BSD3
@@ -23,9 +24,11 @@ server_hsc_env =
     (newMVar (error "server_hsc_env not initialized") >>= newIORef)
 {-# NOINLINE server_hsc_env #-}
 
+
 initServerHscEnv :: HscEnv -> IO ()
 initServerHscEnv he =
-  do mvar <- readIORef server_hsc_env
+  do putStrLn "Initialized server_hsc_env"
+     mvar <- readIORef server_hsc_env
      takeMVar mvar >> putMVar mvar he
 
 readServerHscEnv :: IO HscEnv
