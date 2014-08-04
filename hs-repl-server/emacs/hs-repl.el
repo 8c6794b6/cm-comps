@@ -27,12 +27,9 @@
 (defun hs-repl-send-block ()
   "Send block to REPL."
   (interactive)
-  (let ((str (replace-regexp-in-string
-              "\n"
-              "\\\\n"
-              (buffer-substring-no-properties
-               (region-beginning)
-               (region-end)))))
+  (let ((str (buffer-substring-no-properties
+              (region-beginning)
+              (region-end))))
     (process-send-string hs-repl-con (concat str "\n"))))
 
 (defvar hs-repl-map

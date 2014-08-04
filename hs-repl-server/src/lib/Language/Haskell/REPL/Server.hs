@@ -30,64 +30,61 @@ import System.IO
 runServer :: Int -> IO ()
 runServer port =
   do me <- myThreadId
-     tids <- newMVar [me]
      withSocketsDo
-       (bracket
-          (listenOn (PortNumber (fromIntegral port)))
-          (\s -> do mapM_ killThread =<< readMVar tids
-                    sClose s)
-          (\sock ->
-            do inp <- newEmptyMVar :: IO (MVar String)
-               res <- newEmptyMVar :: IO (MVar String)
-               tid <- forkIO (ghcLoop inp res)
-               modifyMVar_ tids (return . (tid :))
-               serverLoop sock inp res))
+      (bracket
+       (listenOn (PortNumber (fromIntegral port)))
+       (\s ->
+          do putStr "Server killed, closing socket..."
+             sClose s
+             putStrLn " done.")
+       (\s ->
+         forever
+          (do (hdl, host, clientPort) <- accept s
+              input <- newEmptyMVar
+              result <- newEmptyMVar
+              putStrLn (unwords ["Client connected from "
+                                , host ++ ":" ++ show clientPort])
+              hSetBuffering hdl LineBuffering
+              forkIO (handleLoop hdl host clientPort input result)
+              forkIO (ghcLoop me input result))))
 
-serverLoop :: Socket -> MVar String -> MVar String -> IO ()
-serverLoop sock inp res =
-  do (hdl, _, _) <- accept sock
-     bracket
-       (return hdl)
-       (\h -> hClose h >> sClose sock)
-       (\h -> do hSetBuffering h NoBuffering
-                 _ <- forkIO (go h)
-                 serverLoop sock inp res)
-  where
-    go h =
-      do ln <- hGetLine h
-         unless
-           (all isSpace ln)
-           (do putStrLn ("serverLoop: " ++ ln)
-               putMVar inp ln
-               hPutStr h =<< takeMVar res
-               hFlush h
-               go h)
+handleLoop
+  :: Handle -> HostName -> PortNumber -> MVar String -> MVar String -> IO ()
+handleLoop hdl host port input result =
+  forever
+    (do ln <- hGetLine hdl
+        unless (all isSpace ln)
+               (do putStrLn (host ++ ":" ++ show port ++ " " ++ ln)
+                   putMVar input ln
+                   hPutStr hdl =<< takeMVar result
+                   hFlush hdl))
 
-
-ghcLoop :: MVar String -> MVar String -> IO ()
-ghcLoop inp res =
+ghcLoop :: ThreadId -> MVar String -> MVar String -> IO ()
+ghcLoop parentThread input result =
   defaultErrorHandler
-    defaultFatalMessager
-    defaultFlushOut
-    (runGhc
-      (Just libdir)
-      (do dflags <- getSessionDynFlags
-          _pkgs <- setSessionDynFlags
-                     dflags {verbosity = 0
-                            ,packageFlags = [ExposePackage "ghc"]
-                            ,hscTarget = HscInterpreted
-                            ,ghcLink = LinkInMemory
-                            ,ghcMode = CompManager
-                            ,importPaths = [".", "src/lib"]}
-          setContext . map IIDecl =<< mapM parseImportDecl ["import Prelude"]
-          getSession >>= liftIO . putMVar server_hsc_env
-          replLoop inp res))
+   defaultFatalMessager
+   defaultFlushOut
+   (runGhc
+     (Just libdir)
+     (do dflags <- getSessionDynFlags
+         _pkgs <- setSessionDynFlags
+                   dflags {verbosity = 0
+                          ,packageFlags = [ExposePackage "ghc"]
+                          ,hscTarget = HscInterpreted
+                          ,ghcLink = LinkInMemory
+                          ,importPaths = [".", "src/lib"]}
+         setContext . map IIDecl =<< mapM parseImportDecl ["import Prelude"]
+         getSession >>= liftIO . putMVar server_hsc_env
+         forever (replStep input result)))
+  `catch`
+   (\UserInterrupt ->
+      do putStrLn "Got user interrupt, killing server."
+         throwTo parentThread UserInterrupt)
 
-replLoop :: MVar String -> MVar String -> Ghc ()
-replLoop inp res =
-  do expr <- liftIO (takeMVar inp)
-     tryEvalIO expr res
-     replLoop inp res
+replStep :: MVar String -> MVar String -> Ghc ()
+replStep input result =
+  do expr <- liftIO (takeMVar input)
+     tryEvalIO expr result
 
 tryEvalIO :: String -> MVar String -> Ghc ()
 tryEvalIO expr res =
@@ -95,7 +92,7 @@ tryEvalIO expr res =
      case fmap fromDynamic hvalue of
        Right (Just act) -> liftIO (do act :: IO ()
                                       putMVar res "<<IO ()>>")
-       _               -> tryEvalShow expr res
+       _                -> tryEvalShow expr res
 
 tryEvalShow :: String -> MVar String -> Ghc ()
 tryEvalShow expr res =
@@ -109,8 +106,9 @@ tryRunStatement :: String -> MVar String -> Ghc ()
 tryRunStatement stmt res =
   do res' <- gtry (runStmt stmt RunToCompletion)
      case res' of
-       Left err -> liftIO (do print (err :: SomeException)
-                              putMVar res (show err))
+       Left (SomeException e) ->
+         liftIO (do print e
+                    putMVar res (show e))
        Right r  ->
          case r of
            RunOk names ->
