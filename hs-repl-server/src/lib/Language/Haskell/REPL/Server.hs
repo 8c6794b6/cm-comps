@@ -29,9 +29,10 @@ import Control.Monad
 import Control.Monad.IO.Class
 import Data.Char (isSpace)
 import Data.Dynamic
-import Data.List (isPrefixOf)
+import Data.List (intercalate, isPrefixOf)
 import Network
 import System.IO
+
 
 -- --------------------------------------------------------------------------
 --
@@ -63,15 +64,26 @@ runServer port =
 
 handleLoop
   :: Handle -> HostName -> PortNumber -> MVar String -> MVar String -> IO ()
-handleLoop hdl host port input result =
-  forever
-    (do ln <- hGetLine hdl
-        unless
-          (all isSpace ln)
-          (do putStrLn ("[" ++ host ++ ":" ++ show port ++ "] " ++ ln)
-              putMVar input ln
-              hPutStr hdl =<< takeMVar result
-              hFlush hdl))
+handleLoop hdl host port input result = go [] False
+  where
+    go acc isMultiLine =
+      do ln <- hGetLine hdl
+         showLine ln
+         if all isSpace ln
+            then go acc isMultiLine
+            else case (isMultiLine, ln) of
+                   (True,  ":}") -> do doEval (intercalate "\n" (reverse acc))
+                                       go [] False
+                   (True,  _   ) -> go (ln:acc) isMultiLine
+                   (False, ":{") -> go acc True
+                   (False, _   ) -> do doEval ln
+                                       go acc False
+    showLine str =
+      putStrLn ("[" ++ host ++ ":" ++ show port ++ "] " ++ str)
+    doEval str =
+      do putMVar input str
+         hPutStr hdl =<< takeMVar result
+         hFlush hdl
 
 ghcLoop :: ThreadId -> MVar String -> MVar String -> IO ()
 ghcLoop parentThread input result =

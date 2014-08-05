@@ -1,13 +1,49 @@
 ;; hs-repl.el -- Simple Haskell REPL server
 
+;; Copyright (c) 2014 8c6794b6. All rights reserved.
+;;
+;; This file is free software; you can redistribute it and/or modify
+;; it under the terms of the GNU General Public License as published by
+;; the Free Software Foundation; either version 3, or (at your option)
+;; any later version.
+
+;; This file is distributed in the hope that it will be useful,
+;; but WITHOUT ANY WARRANTY; without even the implied warranty of
+;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+;; GNU General Public License for more details.
+
+;; You should have received a copy of the GNU General Public License
+;; along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
 ;;; Commentary:
 ;;; Set of function to interact with hs-repl-server.
 
 ;;; Code:
 
-(defvar hs-repl-con
-  nil
+(require 'shm)
+(require 'pulse)
+
+(defvar hs-repl-con nil
   "Connection to REPL server.")
+
+(defun hs-repl-goto-top-level-node ()
+  "Go to current top level node."
+  (let ((orig-node (shm-current-node))
+        (next-node (progn
+                     (shm/goto-parent)
+                     (shm-current-node))))
+    (unless (equal orig-node next-node)
+      (hs-repl-goto-top-level-node))))
+
+(defun hs-repl-blink-node ()
+  "Temporary highlight current top level node with pulse."
+  (interactive)
+  (pulse-momentary-highlight-region
+   (save-excursion (hs-repl-goto-top-level-node)
+                   (shm-node-start (shm-current-node)))
+   (save-excursion (hs-repl-goto-top-level-node)
+                   (shm-node-end (shm-current-node))))
+  'shm-current-face)
 
 (defun hs-repl-connect (host port)
   "Get connection with HOST and PORT."
@@ -25,18 +61,25 @@
   (message contents))
 
 (defun hs-repl-send-block ()
-  "Send block to REPL."
+  "Send multiple-line block to REPL."
   (interactive)
-  (let ((str (buffer-substring-no-properties
-              (region-beginning)
-              (region-end))))
-    (process-send-string hs-repl-con (concat str "\n"))))
+  (save-excursion
+    (hs-repl-goto-top-level-node)
+    (let* ((current (shm-current-node))
+           (str (buffer-substring-no-properties
+                 (shm-node-start current)
+                 (shm-node-end current))))
+      (process-send-string
+       hs-repl-con
+       (concat ":{\n" str "\n:}\n"))))
+  (hs-repl-blink-node))
 
 (defun hs-repl-send-line ()
   "Send current line to REPL."
   (interactive)
-  (let ((str (thing-at-point 'line)))
-    (process-send-string hs-repl-con (concat str "\n"))))
+  (process-send-string
+   hs-repl-con
+   (concat (thing-at-point 'line) "\n")))
 
 (defvar hs-repl-map
   (let ((map (make-sparse-keymap)))
@@ -48,7 +91,7 @@
 ;;;###autoload
 (define-minor-mode hs-repl-mode
   "hs-repl"
-  :lighter " HsR"
+  :lighter " HsREPL"
   :keymap hs-repl-map)
 
 (provide 'hs-repl)
