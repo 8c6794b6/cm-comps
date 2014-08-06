@@ -1,4 +1,5 @@
 {-# LANGUAGE MagicHash #-}
+{-# LANGUAGE OverloadedStrings #-}
 {-|
 Copyright   : 8c6794b6, 2014
 License     : BSD3
@@ -24,11 +25,13 @@ import           Control.Monad
 import           Control.Monad.IO.Class
 import           Control.Monad.Reload   (getCabalPackageConf,
                                          getCabalSourcePaths)
+import qualified Data.ByteString.Char8 as BS
 import           Data.Char              (isSpace)
 import           Data.Dynamic           (fromDyn)
 import           Data.IORef
-import           Data.List              (intercalate, isPrefixOf)
+import           Data.List              (isPrefixOf)
 import           Network
+import qualified Network.Socket.ByteString as ByteString
 import qualified Network.Socket         as Socket
 import           System.IO
 
@@ -60,23 +63,26 @@ handleLoop
 handleLoop hdl host clientPort input result = go [] False
   where
     go acc isMultiLine =
-      do ln <- hGetLine hdl
-         if all isSpace ln
+      do ln <- BS.hGetLine hdl
+         if isEmptyLine ln
             then go acc isMultiLine
             else do showLine ln
                     case (isMultiLine, ln) of
-                      (True,  ":}") -> do doEval
-                                            (intercalate "\n" (reverse acc))
+                      (True,  ":}") -> do doEval (BS.unlines (reverse acc))
                                           go [] False
                       (True,  _   ) -> go (ln:acc) isMultiLine
                       (False, ":{") -> go acc True
                       (False, _   ) -> do doEval ln
                                           go acc False
-    showLine str =
-      putStrLn ("[" ++ host ++ ":" ++ show clientPort ++ "] " ++ str)
-    doEval str =
-      do putMVar input str
-         hPutStr hdl =<< takeMVar result
+    isEmptyLine = BS.foldr (\c t -> isSpace c && t) True
+    showLine bs =
+      BS.putStrLn
+        (BS.concat ["[", BS.pack host
+                   , ":", BS.pack (show clientPort)
+                   , "] ", bs])
+    doEval bs =
+      do putMVar input (BS.unpack bs)
+         BS.hPutStr hdl . BS.pack =<< takeMVar result
          hFlush hdl
 
 callbackLoop :: Int -> MVar String -> MVar String -> IO ()
@@ -96,8 +102,8 @@ callbackLoop port input output =
         return sock)
     Socket.sClose
     (\sock ->
-      forever (do (msg, _n, _d) <- Socket.recvFrom sock 2048
-                  putMVar input msg
+      forever (do (msg, _) <- ByteString.recvFrom sock 2048
+                  putMVar input (BS.unpack msg)
                   _ <- takeMVar output
                   return ()))
 
@@ -156,15 +162,15 @@ getCallbackSocket port =
 
 _callback :: Show a => Socket -> String -> a -> IO ()
 _callback sock name args =
-  do _ <- Socket.send sock (name ++ " " ++ show args)
-     return ()
+  void (forkIO
+          (void (ByteString.send sock (BS.pack (name ++ " " ++ show args)))))
 
 replStep :: MVar String -> MVar String -> Ghc ()
 replStep input result =
   do expr <- liftIO (takeMVar input)
      res <- evalIO expr
-            `gcatch` (\(SomeException _) -> runStatement expr)
             `gcatch` (\(SomeException _) -> evalShow expr)
+            `gcatch` (\(SomeException _) -> runStatement expr)
             `gcatch` (\(SomeException _) -> dumpHscEnv expr)
             `gcatch` (\(SomeException _) -> loadOrImport expr)
             `gcatch` (\(SomeException _) -> runDec expr)

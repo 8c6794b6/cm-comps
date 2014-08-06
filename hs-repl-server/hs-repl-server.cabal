@@ -22,6 +22,7 @@ library
   ghc-options:         -Wall
   ghc-prof-options:    -auto-all
   build-depends:       base >= 4.6
+                     , bytestring
                      , ghc
                      , ghc-paths
                      , ghc-prim
