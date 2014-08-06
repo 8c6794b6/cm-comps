@@ -17,7 +17,6 @@ cabal-version:       >=1.10
 
 library
   exposed-modules:     Language.Haskell.REPL.Server
-                       Language.Haskell.REPL.Global
   hs-source-dirs:      src/lib
   default-language:    Haskell2010
   ghc-options:         -Wall
@@ -26,13 +25,17 @@ library
                      , ghc
                      , ghc-paths
                      , ghc-prim
+                     , monad-reload
                      , network
                      , transformers
+                     --
+                     , hsc3
+                     , hosc
 
 executable hs-repl-server
   main-is:             Main.hs
   hs-source-dirs:      src/exec
-  ghc-options:         -Wall -threaded
+  ghc-options:         -Wall -threaded -rtsopts
   -- other-modules:
   -- other-extensions:
   build-depends:       base >=4.7 && <4.8

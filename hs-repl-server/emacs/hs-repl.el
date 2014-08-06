@@ -23,8 +23,10 @@
 (require 'shm)
 (require 'pulse)
 
-(defvar hs-repl-con nil
-  "Connection to REPL server.")
+
+(make-variable-buffer-local
+ (defvar hs-repl-con nil
+   "Connection to REPL server."))
 
 (defun hs-repl-goto-top-level-node ()
   "Go to current top level node."
@@ -58,7 +60,7 @@
 
 (defun hs-repl-filter (process contents)
   "Filter to read from PROCESS and display the CONTENTS."
-  (message contents))
+  (message "=> %s" contents))
 
 (defun hs-repl-send-block ()
   "Send multiple-line block to REPL."
