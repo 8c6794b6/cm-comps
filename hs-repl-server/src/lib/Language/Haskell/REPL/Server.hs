@@ -1,4 +1,4 @@
-{-# LANGUAGE MagicHash #-}
+{-# LANGUAGE MagicHash         #-}
 {-# LANGUAGE OverloadedStrings #-}
 {-|
 Copyright   : 8c6794b6, 2014
@@ -16,24 +16,26 @@ module Language.Haskell.REPL.Server where
 import           DynFlags
 import           Exception
 import           GHC
-import           GHC.Paths              (libdir)
+import           GHC.Paths                 (libdir)
 import           HscTypes
-import           Outputable             (Outputable (..), showPpr)
+import           Outputable                (Outputable (..), showPpr)
 
 import           Control.Concurrent
 import           Control.Monad
 import           Control.Monad.IO.Class
-import           Control.Monad.Reload   (getCabalPackageConf,
-                                         getCabalSourcePaths)
-import qualified Data.ByteString.Char8 as BS
-import           Data.Char              (isSpace)
-import           Data.Dynamic           (fromDyn)
+import           Control.Monad.Reload      (getCabalPackageConf,
+                                            getCabalSourcePaths)
+import qualified Data.ByteString.Char8     as BS
+import           Data.Char                 (isSpace)
+import           Data.Dynamic              (fromDyn)
 import           Data.IORef
-import           Data.List              (isPrefixOf)
+import           Data.List                 (isPrefixOf)
 import           Network
+import qualified Network.Socket            as Socket
 import qualified Network.Socket.ByteString as ByteString
-import qualified Network.Socket         as Socket
 import           System.IO
+
+import           Sound.OSC
 
 runServer :: Int -> IO ()
 runServer port =
@@ -56,11 +58,12 @@ runServer port =
            hSetBuffering hdl LineBuffering
            _ <- forkIO (handleLoop hdl host clientPort input output)
            _ <- forkIO (callbackLoop (port + 1) input output)
-           forkIO (ghcLoop tid input output))))
+           _ <- forkIO (ghcLoop tid input output)
+           return ())))
 
 handleLoop
   :: Handle -> HostName -> PortNumber -> Chan String -> Chan String -> IO ()
-handleLoop hdl host clientPort input result = go [] False
+handleLoop hdl host clientPort input output = go [] False
   where
     go acc isMultiLine =
       do ln <- BS.hGetLine hdl
@@ -82,11 +85,11 @@ handleLoop hdl host clientPort input result = go [] False
                    ,"] ", bs])
     doEval bs =
       do writeChan input (BS.unpack bs)
-         BS.hPutStr hdl . BS.pack =<< readChan result
+         BS.hPutStr hdl . BS.pack =<< readChan output
          hFlush hdl
 
 ghcLoop :: ThreadId -> Chan String -> Chan String -> IO ()
-ghcLoop parentThread input result =
+ghcLoop parentThread input output =
   (defaultErrorHandler
      defaultFatalMessager
      defaultFlushOut
@@ -101,21 +104,23 @@ ghcLoop parentThread input result =
                             ,extraPkgConfs = const pkgDbs
                             ,hscTarget = HscInterpreted
                             ,ghcLink = LinkInMemory
+                            -- ,hscTarget = HscInterpreted
+                            -- ,ghcLink   = LinkBinary
                             ,importPaths = srcPaths}
-           imports <- return . map IIDecl
-                      =<< mapM parseImportDecl ["import Prelude"]
+           imps <- return . map IIDecl =<< mapM parseImportDecl initialImports
            target <- guessTarget "Language.Haskell.REPL.Server" Nothing
            setTargets [target]
            _ <- load LoadAllTargets
            setContext (IIModule (mkModuleName "Language.Haskell.REPL.Server")
-                      : imports )
+                      : imps )
            liftIO (putStrLn "Preparing callback")
            liftIO . putStrLn =<<
              runStatement ("__sock__ <- getCallbackSocket 9238")
            liftIO . putStrLn =<<
-             runDec (unlines ["callback :: Show a => String -> a -> IO ()"
-                             ,"callback = _callback __sock__"])
-           forever (replStep input result))))
+             runDec
+               (unlines ["callback :: Show a => Time -> String -> a -> IO ()"
+                        ,"callback = _callback __sock__"])
+           forever (replStep input output))))
   `catch`
   (\UserInterrupt ->
      do putStrLn "Got user interrupt, killing server."
@@ -123,7 +128,10 @@ ghcLoop parentThread input result =
   `catch`
   (\(SomeException e) ->
      do putStrLn (show e)
-        ghcLoop parentThread input result)
+        ghcLoop parentThread input output)
+
+initialImports :: [String]
+initialImports = ["import Prelude"]
 
 callbackLoop :: Int -> Chan String -> Chan String -> IO ()
 callbackLoop port input output =
@@ -158,13 +166,16 @@ getCallbackSocket port =
      Socket.connect sock (Socket.addrAddress serverAddr)
      return sock
 
-_callback :: Show a => Socket -> String -> a -> IO ()
-_callback sock name args =
-  void (forkIO
-          (void (ByteString.send sock (BS.pack (name ++ " " ++ show args)))))
+_callback :: Show a => Socket -> Time -> String -> a -> IO ()
+_callback sock scheduled name args =
+  do _ <- forkIO
+            (do pauseThreadUntil scheduled
+                _ <- ByteString.send sock (BS.pack (name ++ " " ++ show args))
+                return ())
+     return ()
 
 replStep :: Chan String -> Chan String -> Ghc ()
-replStep input result =
+replStep input output =
   do expr <- liftIO (readChan input)
      res <- evalIO expr
             `gcatch` (\(SomeException _) -> evalShow expr)
@@ -173,7 +184,7 @@ replStep input result =
             `gcatch` (\(SomeException _) -> loadOrImport expr)
             `gcatch` (\(SomeException _) -> runDec expr)
             `gcatch` (\(SomeException e) -> return (show e))
-     liftIO (writeChan result res)
+     liftIO (writeChan output res)
 
 dumpHscEnv :: String -> Ghc String
 dumpHscEnv expr
