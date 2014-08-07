@@ -83,8 +83,12 @@ handleLoop hdl host clientPort input output = go [] False
             then go acc isMultiLine
             else do showLine ln
                     case (isMultiLine, ln) of
-                      (True,  ":}") -> do doEval (BS.unlines (reverse acc))
-                                          go [] False
+                      (True,  ":}") ->
+                        do case acc of
+                             []  -> return ()
+                             [l] -> doEval l
+                             _   -> doEval (BS.unlines (reverse acc))
+                           go [] False
                       (True,  _   ) -> go (ln:acc) isMultiLine
                       (False, ":{") -> go acc True
                       (False, _   ) -> do doEval ln
