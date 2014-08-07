@@ -47,19 +47,7 @@
  (defvar hs-repl-con nil
    "Connection to REPL server."))
 
-(defun hs-repl-connect (host port)
-  "Get connection with HOST and PORT."
-  (interactive "sHost: \nnPort: ")
-  (setq hs-repl-con
-        (make-network-process
-         :name "hs-repl"
-         :host host
-         :service port
-         :nowait t
-         :filter 'hs-repl-filter
-         :sentinel 'hs-repl-sentinel)))
-
-(defun hs-repl-do-connect ()
+(defun hs-repl-connect ()
   "Show prompt to connect with defaults."
   (interactive)
   (let ((host (read-string
@@ -147,7 +135,7 @@
 
 (defvar hs-repl-map
   (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "C-c M-j") 'hs-repl-do-connect)
+    (define-key map (kbd "C-c M-j") 'hs-repl-connect)
     (define-key map (kbd "C-c C-c") 'hs-repl-send-line)
     (define-key map (kbd "C-M-x") 'hs-repl-send-block)
     map))
