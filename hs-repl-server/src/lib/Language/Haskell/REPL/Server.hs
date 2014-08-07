@@ -8,13 +8,11 @@ Maintainer  : 8c6794b6@gmail.com
 Stability   : experimental
 Portability : GHC-only
 
-Simple REPL server with GHC.
+Simple interpreter running as a server, implemented with GHC. Supports function
+callback by name, defining top level functions.
 
 -}
-module Language.Haskell.REPL.Server
-  ( module Language.Haskell.REPL.Server
-  , Time
-  ) where
+module Language.Haskell.REPL.Server where
 
 import           DynFlags
 import           Exception
@@ -242,7 +240,9 @@ runDec :: String -> Ghc String
 runDec dec =
   do names <- runDecls dec
      dflags <- getSessionDynFlags
-     return ("dec: " ++ concatMap (showPpr dflags) names)
+     return (if null names
+                then "dec: no names bound."
+                else "dec: " ++ concatMap (showPpr dflags) names)
 
 runStatement :: String -> Ghc String
 runStatement stmt =
@@ -252,7 +252,7 @@ runStatement stmt =
          do dflags <- getSessionDynFlags
             return
               (if null names
-                  then ""
+                  then "stmt: no names bound."
                   else ("stmt: " ++ unwords (map (showPpr dflags) names)))
        RunException e ->
          liftIO (do putStrLn ("RunException: " ++ show e)
