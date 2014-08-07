@@ -23,10 +23,9 @@
 (require 'shm)
 (require 'pulse)
 
-
-(make-variable-buffer-local
- (defvar hs-repl-con nil
-   "Connection to REPL server."))
+(defgroup 'hs-repl
+  "Minor mode for interacting with hs-repl-server."
+  :group 'haskell)
 
 (defvar hs-repl-host-history nil
   "History of host used for connection.")
@@ -34,6 +33,19 @@
 (defvar hs-repl-port-history nil
   "History of port used for connection.")
 
+(defcustom hs-repl-default-host "localhost"
+  "Default host of hs-repl-server to connect."
+  :group 'hs-repl
+  :type 'string)
+
+(defcustom hs-repl-default-port 9237
+  "Default port of hs-repl-server to connect."
+  :group 'hs-repl
+  :type 'integer)
+
+(make-variable-buffer-local
+ (defvar hs-repl-con nil
+   "Connection to REPL server."))
 
 (defun hs-repl-connect (host port)
   "Get connection with HOST and PORT."
@@ -51,11 +63,15 @@
   "Show prompt to connect with defaults."
   (interactive)
   (let ((host (read-string
-               "Host (localhost): "
-               nil 'hs-repl-host-history "localhost" nil))
+               (concat "Host ("  hs-repl-default-host "): ")
+               nil 'hs-repl-host-history hs-repl-default-host nil))
         (port (read-string
-               "Port (9237): "
-               nil 'hs-repl-port-history "9237" nil)))
+               (concat "Port ("
+                       (number-to-string hs-repl-default-port)
+                       "): ")
+               nil 'hs-repl-port-history
+               (number-to-string hs-repl-default-port)
+               nil)))
     (setq hs-repl-con
           (make-network-process
            :name "hs-repl"
@@ -89,18 +105,38 @@
         (shm-current-node)
       (hs-repl-goto-top-level-node))))
 
+(defun hs-repl-wrap-multiple-line (str)
+  "Wrap STR as multiple line message."
+  (concat ":{\n" str "\n:}\n"))
+
 (defun hs-repl-send-block ()
-  "Send multiple-line block to REPL."
+  "Send current top level node or selected region."
+  (interactive)
+  (if (region-active-p)
+      (hs-repl-send-region)
+    (hs-repl-send-current-top-level)))
+
+(defun hs-repl-send-current-top-level ()
+  "Send current top level node of haskell code."
   (interactive)
   (let* ((current (save-excursion
-                    (hs-repl-goto-top-level-node)
-                    (shm-current-node)))
+                    (hs-repl-goto-top-level-node)))
          (str (buffer-substring-no-properties
                (shm-node-start current)
                (shm-node-end current))))
     (process-send-string
      hs-repl-con
-     (concat ":{\n" str "\n:}\n"))))
+     (hs-repl-wrap-multiple-line str))))
+
+(defun hs-repl-send-region ()
+  "Send current region."
+  (interactive)
+  (process-send-string
+   hs-repl-con
+   (hs-repl-wrap-multiple-line
+    (buffer-substring-no-properties
+     (region-beginning)
+     (region-end))))))
 
 (defun hs-repl-send-line ()
   "Send current line to REPL."
