@@ -11,7 +11,10 @@ Portability : GHC-only
 Simple REPL server with GHC.
 
 -}
-module Language.Haskell.REPL.Server where
+module Language.Haskell.REPL.Server
+  ( module Language.Haskell.REPL.Server
+  , Time
+  ) where
 
 import           DynFlags
 import           Exception
@@ -109,22 +112,25 @@ ghcLoop parentThread input output =
        (do srcPaths <- liftIO getCabalSourcePaths
            pkgDbs <- liftIO getCabalPackageConf
            dflags <- getSessionDynFlags
+           (dflags',_, _) <- parseDynamicFlags
+                               dflags
+                               [mkGeneralLocated "flag" initialOptions]
            _pkgs <- setSessionDynFlags
-                     dflags {verbosity = 0
-                            ,packageFlags = [ExposePackage "ghc"]
-                            ,extraPkgConfs = const pkgDbs
-                            ,hscTarget = HscInterpreted
-                            ,ghcLink = LinkInMemory
-                            ,importPaths = srcPaths}
+                     dflags' {verbosity = 0
+                             ,packageFlags = [ExposePackage "ghc"]
+                             ,extraPkgConfs = const pkgDbs
+                             ,hscTarget = HscInterpreted
+                             ,ghcLink = LinkInMemory
+                             ,importPaths = srcPaths}
            imps <- return . map IIDecl =<< mapM parseImportDecl initialImports
            target <- guessTarget "Language.Haskell.REPL.Server" Nothing
            setTargets [target]
            _ <- load LoadAllTargets
-           setContext (IIModule (mkModuleName "Language.Haskell.REPL.Server")
-                      : imps )
+           setContext
+             (IIModule (mkModuleName "Language.Haskell.REPL.Server") : imps)
            void (runStatement ("__sock__ <- getCallbackSocket 9238"))
            void (runDec
-                  (unlines ["callback :: Show a => Time -> String -> a -> IO ()"
+                  (unlines ["callback :: Show a => Double -> String -> a -> IO ()"
                            ,"callback = _callback __sock__"]))
            liftIO (putStrLn "GHC loop ready.")
            forever (replStep input output))))
@@ -139,6 +145,9 @@ ghcLoop parentThread input output =
 
 initialImports :: [String]
 initialImports = ["import Prelude"]
+
+initialOptions :: String
+initialOptions = "-XTemplateHaskell"
 
 callbackLoop :: Int -> Chan String -> Chan String -> IO ()
 callbackLoop port input output =
