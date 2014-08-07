@@ -23,6 +23,7 @@
 (require 'shm)
 (require 'pulse)
 
+
 (make-variable-buffer-local
  (defvar hs-repl-con nil
    "Connection to REPL server."))
@@ -33,24 +34,6 @@
 (defvar hs-repl-port-history nil
   "History of port used for connection.")
 
-(defun hs-repl-goto-top-level-node ()
-  "Go to current top level node."
-  (let ((orig-node (shm-current-node))
-        (next-node (progn
-                     (shm/goto-parent)
-                     (shm-current-node))))
-    (unless (equal orig-node next-node)
-      (hs-repl-goto-top-level-node))))
-
-(defun hs-repl-blink-node ()
-  "Temporary highlight current top level node with pulse."
-  (interactive)
-  (pulse-momentary-highlight-region
-   (save-excursion (hs-repl-goto-top-level-node)
-                   (shm-node-start (shm-current-node)))
-   (save-excursion (hs-repl-goto-top-level-node)
-                   (shm-node-end (shm-current-node))))
-  'shm-current-face)
 
 (defun hs-repl-connect (host port)
   "Get connection with HOST and PORT."
@@ -95,19 +78,29 @@
         (t (message "hs-repl: %s"
                     (replace-regexp-in-string "\n" " " msg)))))
 
+(defun hs-repl-goto-top-level-node ()
+  "Go to current top level node."
+  (interactive)
+  (let ((orig-node (shm-current-node))
+        (next-node (progn
+                     (shm/goto-parent)
+                     (shm-current-node))))
+    (if (equal orig-node next-node)
+        (shm-current-node)
+      (hs-repl-goto-top-level-node))))
+
 (defun hs-repl-send-block ()
   "Send multiple-line block to REPL."
   (interactive)
-  (save-excursion
-    (hs-repl-goto-top-level-node)
-    (let* ((current (shm-current-node))
-           (str (buffer-substring-no-properties
-                 (shm-node-start current)
-                 (shm-node-end current))))
-      (process-send-string
-       hs-repl-con
-       (concat ":{\n" str "\n:}\n"))))
-  (hs-repl-blink-node))
+  (let* ((current (save-excursion
+                    (hs-repl-goto-top-level-node)
+                    (shm-current-node)))
+         (str (buffer-substring-no-properties
+               (shm-node-start current)
+               (shm-node-end current))))
+    (process-send-string
+     hs-repl-con
+     (concat ":{\n" str "\n:}\n"))))
 
 (defun hs-repl-send-line ()
   "Send current line to REPL."
