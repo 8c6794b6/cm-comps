@@ -23,10 +23,15 @@
 (require 'shm)
 (require 'pulse)
 
-
 (make-variable-buffer-local
  (defvar hs-repl-con nil
    "Connection to REPL server."))
+
+(defvar hs-repl-host-history nil
+  "History of host used for connection.")
+
+(defvar hs-repl-port-history nil
+  "History of port used for connection.")
 
 (defun hs-repl-goto-top-level-node ()
   "Go to current top level node."
@@ -56,11 +61,39 @@
          :host host
          :service port
          :nowait t
-         :filter 'hs-repl-filter)))
+         :filter 'hs-repl-filter
+         :sentinel 'hs-repl-sentinel)))
 
-(defun hs-repl-filter (process contents)
-  "Filter to read from PROCESS and display the CONTENTS."
-  (message "=> %s" contents))
+(defun hs-repl-do-connect ()
+  "Show prompt to connect with defaults."
+  (interactive)
+  (let ((host (read-string
+               "Host (localhost): "
+               nil 'hs-repl-host-history "localhost" nil))
+        (port (read-string
+               "Port (9237): "
+               nil 'hs-repl-port-history "9237" nil)))
+    (setq hs-repl-con
+          (make-network-process
+           :name "hs-repl"
+           :host host
+           :service port
+           :nowait t
+           :filter 'hs-repl-filter
+           :sentinel 'hs-repl-sentinel))))
+
+(defun hs-repl-filter (process msg)
+  "Filter to read from PROCESS and display the MSG."
+  (message "=> %s" msg))
+
+(defun hs-repl-sentinel (process msg)
+  "Sentinel function for PROCESS with MSG."
+  (cond ((string= "open\n" msg)
+         (message "Connected to server."))
+        ((string-prefix-p "failed" msg)
+         (message "Failed to connect to server."))
+        (t (message "hs-repl: %s"
+                    (replace-regexp-in-string "\n" " " msg)))))
 
 (defun hs-repl-send-block ()
   "Send multiple-line block to REPL."
@@ -85,7 +118,7 @@
 
 (defvar hs-repl-map
   (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "C-c M-j") 'hs-repl-connect)
+    (define-key map (kbd "C-c M-j") 'hs-repl-do-connect)
     (define-key map (kbd "C-c C-c") 'hs-repl-send-line)
     (define-key map (kbd "C-M-x") 'hs-repl-send-block)
     map))
