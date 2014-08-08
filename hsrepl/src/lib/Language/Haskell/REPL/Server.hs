@@ -6,10 +6,11 @@ License     : BSD3
 
 Maintainer  : 8c6794b6@gmail.com
 Stability   : experimental
-Portability : GHC-only
+Portability : non-portable (GHC only)
 
-Simple interpreter running as a server, implemented with GHC. Supports function
-callback by name, defining top level functions.
+Simple read-eval-print-loop running as a server, implemented with GHC. Supports
+function callback by name, defining (and redefining) top-level functions without
+@let@, and redefining top level functions.
 
 -}
 module Language.Haskell.REPL.Server where
@@ -69,8 +70,8 @@ runServer port =
                              , host ++ ":" ++ show clientPort])
            hSetBuffering hdl LineBuffering
            _ <- forkIO (handleLoop hdl host clientPort input output)
-           _ <- forkIO (callbackLoop (port + 1) input output)
-           _ <- forkIO (ghcLoop tid input output)
+           _ <- forkIO (callbackLoop (fromIntegral clientPort + 1) input output)
+           _ <- forkIO (ghcLoop (fromIntegral clientPort + 1) tid input output)
            return ())))
 
 handleLoop
@@ -104,8 +105,8 @@ handleLoop hdl host clientPort input output = go [] False
          BS.hPutStr hdl . BS.pack =<< readChan output
          hFlush hdl
 
-ghcLoop :: ThreadId -> Chan String -> Chan String -> IO ()
-ghcLoop parentThread input output =
+ghcLoop :: Int -> ThreadId -> Chan String -> Chan String -> IO ()
+ghcLoop port parentThread input output =
   (defaultErrorHandler
      defaultFatalMessager
      defaultFlushOut
@@ -130,7 +131,7 @@ ghcLoop parentThread input output =
            _ <- load LoadAllTargets
            setContext
              (IIModule (mkModuleName "Language.Haskell.REPL.Server") : imps)
-           void (runStatement ("__sock__ <- getCallbackSocket 9238"))
+           void (runStatement ("__sock__ <- getCallbackSocket " ++ show port))
            void (runDec
                   (unlines ["callback :: Show a => Double -> String -> a -> IO ()"
                            ,"callback = _callback __sock__"]))
@@ -143,7 +144,7 @@ ghcLoop parentThread input output =
   `catch`
   (\(SomeException e) ->
      do putStrLn (show e)
-        ghcLoop parentThread input output)
+        ghcLoop port parentThread input output)
 
 initialImports :: [String]
 initialImports = ["import Prelude"]

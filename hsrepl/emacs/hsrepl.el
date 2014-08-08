@@ -1,4 +1,4 @@
-;; hs-repl.el -- Simple Haskell REPL server
+;; hsrepl.el -- Minor mode to interact with hsrepl
 
 ;; Copyright (c) 2014 8c6794b6. All rights reserved.
 ;;
@@ -21,68 +21,67 @@
 ;;; Code:
 
 (require 'shm)
-(require 'pulse)
 
-(defgroup 'hs-repl
-  "Minor mode for interacting with hs-repl-server."
+(defgroup hsrepl nil
+  "Minor mode for interacting with hsrepl-server."
   :group 'haskell)
 
-(defvar hs-repl-host-history nil
+(defvar hsrepl-host-history nil
   "History of host used for connection.")
 
-(defvar hs-repl-port-history nil
+(defvar hsrepl-port-history nil
   "History of port used for connection.")
 
-(defcustom hs-repl-default-host "localhost"
-  "Default host of hs-repl-server to connect."
-  :group 'hs-repl
+(defcustom hsrepl-default-host "localhost"
+  "Default host of hsrepl-server to connect."
+  :group 'hsrepl
   :type 'string)
 
-(defcustom hs-repl-default-port 9237
-  "Default port of hs-repl-server to connect."
-  :group 'hs-repl
+(defcustom hsrepl-default-port 9237
+  "Default port of hsrepl-server to connect."
+  :group 'hsrepl
   :type 'integer)
 
 (make-variable-buffer-local
- (defvar hs-repl-con nil
+ (defvar hsrepl-con nil
    "Connection to REPL server."))
 
-(defun hs-repl-connect ()
-  "Show prompt to connect with defaults."
+(defun hsrepl-connect ()
+  "Show prompt for connecting to server."
   (interactive)
   (let ((host (read-string
-               (concat "Host ("  hs-repl-default-host "): ")
-               nil 'hs-repl-host-history hs-repl-default-host nil))
+               (concat "Host ("  hsrepl-default-host "): ")
+               nil 'hsrepl-host-history hsrepl-default-host nil))
         (port (read-string
                (concat "Port ("
-                       (number-to-string hs-repl-default-port)
+                       (number-to-string hsrepl-default-port)
                        "): ")
-               nil 'hs-repl-port-history
-               (number-to-string hs-repl-default-port)
+               nil 'hsrepl-port-history
+               (number-to-string hsrepl-default-port)
                nil)))
-    (setq hs-repl-con
+    (setq hsrepl-con
           (make-network-process
-           :name "hs-repl"
+           :name "hsrepl"
            :host host
            :service port
            :nowait t
-           :filter 'hs-repl-filter
-           :sentinel 'hs-repl-sentinel))))
+           :filter 'hsrepl-filter
+           :sentinel 'hsrepl-sentinel))))
 
-(defun hs-repl-filter (process msg)
+(defun hsrepl-filter (process msg)
   "Filter to read from PROCESS and display the MSG."
   (message "=> %s" msg))
 
-(defun hs-repl-sentinel (process msg)
+(defun hsrepl-sentinel (process msg)
   "Sentinel function for PROCESS with MSG."
   (cond ((string= "open\n" msg)
          (message "Connected to server."))
         ((string-prefix-p "failed" msg)
          (message "Failed to connect to server."))
-        (t (message "hs-repl: %s"
+        (t (message "hsrepl: %s"
                     (replace-regexp-in-string "\n" " " msg)))))
 
-(defun hs-repl-goto-top-level-node ()
+(defun hsrepl-goto-top-level-node ()
   "Go to current top level node."
   (interactive)
   (let ((orig-node (shm-current-node))
@@ -91,61 +90,59 @@
                      (shm-current-node))))
     (if (equal orig-node next-node)
         (shm-current-node)
-      (hs-repl-goto-top-level-node))))
+      (hsrepl-goto-top-level-node))))
 
-(defun hs-repl-wrap-multiple-line (str)
+(defun hsrepl-wrap-multiple-line (str)
   "Wrap STR as multiple line message."
   (concat ":{\n" str "\n:}\n"))
 
-(defun hs-repl-send-block ()
+(defun hsrepl-send-block ()
   "Send current top level node or selected region."
   (interactive)
   (if (region-active-p)
-      (hs-repl-send-region)
-    (hs-repl-send-current-top-level)))
+      (hsrepl-send-region)
+    (hsrepl-send-current-top-level)))
 
-(defun hs-repl-send-current-top-level ()
+(defun hsrepl-send-current-top-level ()
   "Send current top level node of haskell code."
   (interactive)
   (let* ((current (save-excursion
-                    (hs-repl-goto-top-level-node)))
+                    (hsrepl-goto-top-level-node)))
          (str (buffer-substring-no-properties
                (shm-node-start current)
                (shm-node-end current))))
     (process-send-string
-     hs-repl-con
-     (hs-repl-wrap-multiple-line str))))
+     hsrepl-con
+     (hsrepl-wrap-multiple-line str))))
 
-(defun hs-repl-send-region ()
+(defun hsrepl-send-region ()
   "Send current region."
   (interactive)
   (process-send-string
-   hs-repl-con
-   (hs-repl-wrap-multiple-line
-    (buffer-substring-no-properties
-     (region-beginning)
-     (region-end))))))
+   hsrepl-con
+   (hsrepl-wrap-multiple-line
+    (buffer-substring-no-properties (region-beginning) (region-end)))))
 
-(defun hs-repl-send-line ()
+(defun hsrepl-send-line ()
   "Send current line to REPL."
   (interactive)
   (process-send-string
-   hs-repl-con
+   hsrepl-con
    (concat (thing-at-point 'line) "\n")))
 
-(defvar hs-repl-map
+(defvar hsrepl-map
   (let ((map (make-sparse-keymap)))
-    (define-key map (kbd "C-c M-j") 'hs-repl-connect)
-    (define-key map (kbd "C-c C-c") 'hs-repl-send-line)
-    (define-key map (kbd "C-M-x") 'hs-repl-send-block)
+    (define-key map (kbd "C-c M-j") 'hsrepl-connect)
+    (define-key map (kbd "C-c C-c") 'hsrepl-send-line)
+    (define-key map (kbd "C-M-x") 'hsrepl-send-block)
     map))
 
 ;;;###autoload
-(define-minor-mode hs-repl-mode
-  "hs-repl"
-  :lighter " HsREPL"
-  :keymap hs-repl-map)
+(define-minor-mode hsrepl-mode
+  "hsrepl"
+  :lighter " Hsrepl"
+  :keymap hsrepl-map)
 
-(provide 'hs-repl)
+(provide 'hsrepl)
 
-;;; hs-repl.el ends here
+;;; hsrepl.el ends here
