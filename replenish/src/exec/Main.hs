@@ -1,6 +1,6 @@
 module Main where
 
-import Language.Haskell.REPL.Server
+import Language.Haskell.Replenish.Server
 
 import Control.Exception
 import System.Environment

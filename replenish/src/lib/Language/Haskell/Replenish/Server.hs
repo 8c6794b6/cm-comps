@@ -8,12 +8,11 @@ Maintainer  : 8c6794b6@gmail.com
 Stability   : experimental
 Portability : non-portable (GHC only)
 
-Simple read-eval-print-loop running as a server, implemented with GHC. Supports
-function callback by name, defining (and redefining) top-level functions without
-@let@, and redefining top level functions.
+Simple REPL server, implemented with GHC. Supports defining (and redefining)
+top-level functions without @let@ and function callback by name.
 
 -}
-module Language.Haskell.REPL.Server where
+module Language.Haskell.Replenish.Server where
 
 import           DynFlags
 import           Exception
@@ -107,36 +106,44 @@ handleLoop hdl host clientPort input output = go [] False
 
 ghcLoop :: Int -> ThreadId -> Chan String -> Chan String -> IO ()
 ghcLoop port parentThread input output =
-  (defaultErrorHandler
-     defaultFatalMessager
-     defaultFlushOut
-     (runGhc
-       (Just libdir)
-       (do srcPaths <- liftIO getCabalSourcePaths
-           pkgDbs <- liftIO getCabalPackageConf
-           dflags <- getSessionDynFlags
-           (dflags',_, _) <- parseDynamicFlags
-                               dflags
-                               [mkGeneralLocated "flag" initialOptions]
-           _pkgs <- setSessionDynFlags
-                     dflags' {verbosity = 0
-                             ,packageFlags = [ExposePackage "ghc"]
-                             ,extraPkgConfs = const pkgDbs
-                             ,hscTarget = HscInterpreted
-                             ,ghcLink = LinkInMemory
-                             ,importPaths = srcPaths}
-           imps <- return . map IIDecl =<< mapM parseImportDecl initialImports
-           target <- guessTarget "Language.Haskell.REPL.Server" Nothing
-           setTargets [target]
-           _ <- load LoadAllTargets
-           setContext
-             (IIModule (mkModuleName "Language.Haskell.REPL.Server") : imps)
-           void (runStatement ("__sock__ <- getCallbackSocket " ++ show port))
-           void (runDec
-                  (unlines ["callback :: Show a => Double -> String -> a -> IO ()"
-                           ,"callback = _callback __sock__"]))
-           liftIO (putStrLn "GHC loop ready.")
-           forever (replStep input output))))
+  defaultErrorHandler
+    defaultFatalMessager
+    defaultFlushOut
+    (runGhc
+      (Just libdir)
+      (do srcPaths <- liftIO getCabalSourcePaths
+          pkgDbs <- liftIO getCabalPackageConf
+          dflags <- getSessionDynFlags
+          liftIO
+            (do putStrLn ("src:\n" ++
+                          unlines (map ("  " ++) srcPaths))
+                putStrLn ("package-dbs:\n" ++
+                          unlines (map (("  " ++ ) . showPkgConfRef) pkgDbs)))
+          (dflags',_, _) <- parseDynamicFlags
+                              dflags
+                              [mkGeneralLocated "flag" initialOptions]
+          void (setSessionDynFlags
+                  dflags' {verbosity = 0
+                          ,packageFlags = [ExposePackage "ghc"]
+                          ,extraPkgConfs = const pkgDbs
+                          ,hscTarget = HscInterpreted
+                          ,ghcLink = LinkInMemory
+                          ,importPaths = srcPaths})
+          let me = "Language.Haskell.REPL.Server"
+          (setContext =<< mapM (fmap IIDecl . parseImportDecl)
+                               (("import " ++ me) : initialImports))
+            `gcatch`
+            (\(SomeException e) ->
+              do liftIO (do putStrLn ("Caught exception: " ++ show e)
+                            putStrLn ("Loading " ++ me ++ " as target."))
+                 target <- guessTarget me Nothing
+                 setTargets [target]
+                 _ <- load LoadAllTargets
+                 setContext [IIModule (mkModuleName me)])
+          void (runStatement (getCallbackSocket_stmt port))
+          void (runDec callback_dec)
+          liftIO (putStrLn "REPL ready.")
+          forever (replStep input output)))
   `catch`
   (\UserInterrupt ->
      do putStrLn "Got user interrupt, killing server."
@@ -145,6 +152,13 @@ ghcLoop port parentThread input output =
   (\(SomeException e) ->
      do putStrLn (show e)
         ghcLoop port parentThread input output)
+
+showPkgConfRef :: PkgConfRef -> String
+showPkgConfRef ref =
+  case ref of
+    GlobalPkgConf    -> "GlobalPkgConf"
+    UserPkgConf      -> "UserPkgConf"
+    PkgConfFile path -> "PkgConfFile \"" ++ path  ++ "\""
 
 initialImports :: [String]
 initialImports = ["import Prelude"]
@@ -155,17 +169,17 @@ initialOptions = "-XTemplateHaskell"
 callbackLoop :: Int -> Chan String -> Chan String -> IO ()
 callbackLoop port input output =
   bracket
-    (do (serverAddr:_) <- Socket.getAddrInfo
-                            (Just
-                               (Socket.defaultHints
-                                 {Socket.addrFlags = [Socket.AI_PASSIVE]}))
-                            Nothing
-                            (Just (show port))
+    (do (saddr:_) <- Socket.getAddrInfo
+                       (Just
+                          (Socket.defaultHints
+                            {Socket.addrFlags = [Socket.AI_PASSIVE]}))
+                       Nothing
+                       (Just (show port))
         sock <- Socket.socket
-                  (Socket.addrFamily serverAddr)
+                  (Socket.addrFamily saddr)
                   Socket.Datagram
                   Socket.defaultProtocol
-        Socket.bindSocket sock (Socket.addrAddress serverAddr)
+        Socket.bindSocket sock (Socket.addrAddress saddr)
         return sock)
     Socket.sClose
     (\sock ->
@@ -269,7 +283,7 @@ runStatement stmt =
 
 -- --------------------------------------------------------------------------
 --
--- Client side functions for callback
+-- Client side code
 --
 -- --------------------------------------------------------------------------
 
@@ -284,9 +298,17 @@ getCallbackSocket port =
      Socket.connect sock (Socket.addrAddress serverAddr)
      return sock
 
+getCallbackSocket_stmt :: Int -> String
+getCallbackSocket_stmt port = "__sock__ <- getCallbackSocket " ++ show port
+
 _callback :: Show a => Socket -> Time -> String -> a -> IO ()
 _callback sock scheduled name args =
   void (forkIO
           (do pauseThreadUntil scheduled
               void (ByteString.send
                       sock (BS.pack (name ++ " " ++ show args)))))
+
+callback_dec :: String
+callback_dec =
+  unlines ["callback :: Show a => Double -> String -> a -> IO ()"
+          ,"callback = _callback __sock__"]
