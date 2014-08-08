@@ -28,8 +28,6 @@ library
                      , monad-reload
                      , network
                      , transformers
-                     --
-                     , hsc3
                      , hosc
 
 executable replenish

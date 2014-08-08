@@ -73,6 +73,7 @@ runServer port =
            _ <- forkIO (ghcLoop (fromIntegral clientPort + 1) tid input output)
            return ())))
 
+-- | Loop to get input and reply output with connected 'Handle'.
 handleLoop
   :: Handle -> HostName -> PortNumber -> Chan String -> Chan String -> IO ()
 handleLoop hdl host clientPort input output = go [] False
@@ -104,6 +105,30 @@ handleLoop hdl host clientPort input output = go [] False
          BS.hPutStr hdl . BS.pack =<< readChan output
          hFlush hdl
 
+-- | Loop to take care of callbacks.
+callbackLoop :: Int -> Chan String -> Chan String -> IO ()
+callbackLoop port input output =
+  bracket
+    (do (saddr:_) <- Socket.getAddrInfo
+                       (Just
+                          (Socket.defaultHints
+                            {Socket.addrFlags = [Socket.AI_PASSIVE]}))
+                       Nothing
+                       (Just (show port))
+        sock <- Socket.socket
+                  (Socket.addrFamily saddr)
+                  Socket.Datagram
+                  Socket.defaultProtocol
+        Socket.bindSocket sock (Socket.addrAddress saddr)
+        return sock)
+    Socket.sClose
+    (\sock ->
+      forever (do (msg, _) <- ByteString.recvFrom sock 2048
+                  writeChan input (BS.unpack msg)
+                  _ <- readChan output
+                  return ()))
+
+-- | Loop to interpret Haskell codes with GHC.
 ghcLoop :: Int -> ThreadId -> Chan String -> Chan String -> IO ()
 ghcLoop port parentThread input output =
   defaultErrorHandler
@@ -129,7 +154,7 @@ ghcLoop port parentThread input output =
                           ,hscTarget = HscInterpreted
                           ,ghcLink = LinkInMemory
                           ,importPaths = srcPaths})
-          let me = "Language.Haskell.REPL.Server"
+          let me = "Language.Haskell.Replenish.Server"
           (setContext =<< mapM (fmap IIDecl . parseImportDecl)
                                (("import " ++ me) : initialImports))
             `gcatch`
@@ -140,9 +165,10 @@ ghcLoop port parentThread input output =
                  setTargets [target]
                  _ <- load LoadAllTargets
                  setContext [IIModule (mkModuleName me)])
-          void (runStatement (getCallbackSocket_stmt port))
-          void (runDec callback_dec)
-          liftIO (putStrLn "REPL ready.")
+          liftIO (putStr "Binding callback function ...")
+          void (evalStatement (getCallbackSocket_stmt port))
+          void (evalDec callback_dec)
+          liftIO (putStrLn " replenish server ready.")
           forever (replStep input output)))
   `catch`
   (\UserInterrupt ->
@@ -166,42 +192,21 @@ initialImports = ["import Prelude"]
 initialOptions :: String
 initialOptions = "-XTemplateHaskell"
 
-callbackLoop :: Int -> Chan String -> Chan String -> IO ()
-callbackLoop port input output =
-  bracket
-    (do (saddr:_) <- Socket.getAddrInfo
-                       (Just
-                          (Socket.defaultHints
-                            {Socket.addrFlags = [Socket.AI_PASSIVE]}))
-                       Nothing
-                       (Just (show port))
-        sock <- Socket.socket
-                  (Socket.addrFamily saddr)
-                  Socket.Datagram
-                  Socket.defaultProtocol
-        Socket.bindSocket sock (Socket.addrAddress saddr)
-        return sock)
-    Socket.sClose
-    (\sock ->
-      forever (do (msg, _) <- ByteString.recvFrom sock 2048
-                  writeChan input (BS.unpack msg)
-                  _ <- readChan output
-                  return ()))
-
+-- | Single step to evaluate Haskell code.
 replStep :: Chan String -> Chan String -> Ghc ()
 replStep input output =
   do expr <- liftIO (readChan input)
      res <- evalShow expr
             `gcatch` (\(SomeException _) -> evalVoid expr)
-            `gcatch` (\(SomeException _) -> runStatement expr)
-            `gcatch` (\(SomeException _) -> dumpHscEnv expr)
-            `gcatch` (\(SomeException _) -> loadOrImport expr)
-            `gcatch` (\(SomeException _) -> runDec expr)
+            `gcatch` (\(SomeException _) -> evalStatement expr)
+            `gcatch` (\(SomeException _) -> evalDump expr)
+            `gcatch` (\(SomeException _) -> evalLoadOrImport expr)
+            `gcatch` (\(SomeException _) -> evalDec expr)
             `gcatch` (\(SomeException e) -> return (show e))
      liftIO (writeChan output res)
 
-dumpHscEnv :: String -> Ghc String
-dumpHscEnv expr
+evalDump :: String -> Ghc String
+evalDump expr
   | ":dump_hsc_env" `isPrefixOf` expr =
     do hsc_env <- getSession
        liftIO
@@ -226,8 +231,8 @@ dumpHscEnv expr
        return "dumped names."
   | otherwise = error "Not a dump command."
 
-loadOrImport :: String -> Ghc String
-loadOrImport expr
+evalLoadOrImport :: String -> Ghc String
+evalLoadOrImport expr
   | ":load " `isPrefixOf` expr =
     do target <- guessTarget (drop 6 expr) Nothing
        setTargets [target]
@@ -255,16 +260,16 @@ evalShow :: String -> Ghc String
 evalShow expr =
   fmap unsafeCoerce (compileExpr ("Prelude.show (" ++ expr ++ ")"))
 
-runDec :: String -> Ghc String
-runDec dec =
+evalDec :: String -> Ghc String
+evalDec dec =
   do names <- runDecls dec
      dflags <- getSessionDynFlags
      return (if null names
                 then "dec: no names bound."
                 else "dec: " ++ concatMap (showPpr dflags) names)
 
-runStatement :: String -> Ghc String
-runStatement stmt =
+evalStatement :: String -> Ghc String
+evalStatement stmt =
   do res' <- runStmt stmt RunToCompletion
      case res' of
        RunOk names ->

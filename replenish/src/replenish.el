@@ -28,7 +28,7 @@
 (require 'shm)
 
 (defgroup replenish nil
-  "Minor mode for interacting with replenish server."
+  "Interacting with replenish server."
   :group 'haskell)
 
 (defcustom replenish-default-host "localhost"
