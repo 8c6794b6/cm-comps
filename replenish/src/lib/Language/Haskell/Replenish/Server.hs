@@ -57,9 +57,9 @@ runServer port =
         me <- myThreadId
         return (s, me))
     (\(s, _) ->
-       do putStr "Server killed, closing socket"
+       do putStr "Server killed, closing socket ... "
           sClose s
-          putStrLn "... done.")
+          putStrLn "done.")
     (\(s, tid) ->
       forever
        (do (hdl, host, clientPort) <- accept s
@@ -68,15 +68,25 @@ runServer port =
            putStrLn (unwords ["Client connected from"
                              , host ++ ":" ++ show clientPort])
            hSetBuffering hdl LineBuffering
-           _ <- forkIO (handleLoop hdl host clientPort input output)
-           _ <- forkIO (callbackLoop (fromIntegral clientPort + 1) input output)
-           _ <- forkIO (ghcLoop (fromIntegral clientPort + 1) tid input output)
-           return ())))
+           let clientPort' = fromIntegral clientPort + 1
+           gtid <- forkIO (ghcLoop clientPort' tid input output)
+           ctid <- forkIO (callbackLoop clientPort' input output)
+           void
+             (forkIO
+                (handleLoop hdl host clientPort [gtid,ctid] input output)))))
 
 -- | Loop to get input and reply output with connected 'Handle'.
 handleLoop
-  :: Handle -> HostName -> PortNumber -> Chan String -> Chan String -> IO ()
-handleLoop hdl host clientPort input output = go [] False
+  :: Handle -> HostName -> PortNumber -> [ThreadId]
+  -> Chan String -> Chan String -> IO ()
+handleLoop hdl host clientPort tids input output =
+  go [] False
+  `catch`
+  (\(SomeException e) ->
+     do putStr (unlines ["handleLoop: Caught " ++ show e
+                        ,"Killing ghc and callback loop for " ++
+                          host ++ ":" ++ show clientPort])
+        mapM_ killThread tids)
   where
     go acc isMultiLine =
       do ln <- BS.hGetLine hdl
@@ -142,7 +152,8 @@ ghcLoop port parentThread input output =
             (do putStr ("src:\n" ++
                         unlines (map ("  " ++) srcPaths))
                 putStr ("package-dbs:\n" ++
-                        unlines (map (("  " ++ ) . showPkgConfRef) pkgDbs)))
+                        unlines (map (("  " ++ ) . showPkgConfRef) pkgDbs))
+                putStrLn "Setting up context ...")
           (dflags',_, _) <- parseDynamicFlags
                               dflags
                               [mkGeneralLocated "flag" initialOptions]
@@ -164,22 +175,18 @@ ghcLoop port parentThread input output =
                  setTargets [target]
                  _ <- load LoadAllTargets
                  setContext [IIModule (mkModuleName me)])
-          liftIO (putStr "Binding callback function ...")
           -- void (evalStatement (getCallbackSocket_stmt port))
           -- void (evalDec callback_dec)
           void (evalDec (callback_dec' port))
-          liftIO (putStrLn " server ready.")
+          liftIO (putStrLn "Server ready.")
           replStep input output))
   `catch`
   (\UserInterrupt ->
-     do putStrLn "Got user interrupt, killing server."
+     do putStrLn "Got UserInterrupt, killing the server."
         throwTo parentThread UserInterrupt)
   `catch`
   (\(SomeException e) ->
-     do putStrLn (show e)
-        throwTo parentThread e
-        -- ghcLoop port parentThread input output
-        )
+     do putStrLn ("ghcLoop: " ++ show e))
 
 showPkgConfRef :: PkgConfRef -> String
 showPkgConfRef ref =

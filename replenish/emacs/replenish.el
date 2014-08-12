@@ -16,7 +16,7 @@
 ;; along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 ;; Author: 8c6794b6 <8c6794b6@gmail.com>
-;; Version: 20140812.2
+;; Version: 20140812.4
 ;; Package-Requires: ((haskell-mode "20140805.942") (shm "20140714.341"))
 ;; Keywords: haskell repl
 
@@ -58,24 +58,27 @@
 (defun replenish-connect ()
   "Show prompt for connecting to server."
   (interactive)
-  (let ((host (read-string
-               (concat "Host ("  replenish-default-host "): ")
-               nil 'replenish-host-history replenish-default-host nil))
-        (port (read-string
-               (concat "Port ("
-                       (number-to-string replenish-default-port)
-                       "): ")
-               nil 'replenish-port-history
-               (number-to-string replenish-default-port)
-               nil)))
-    (setq replenish-con
-          (make-network-process
-           :name "replenish"
-           :host host
-           :service port
-           :nowait t
-           :filter 'replenish-filter
-           :sentinel 'replenish-sentinel))))
+  (if (and (not (equal nil replenish-con))
+           (process-live-p replenish-con))
+      (message "Connection exists.")
+    (let ((host (read-string
+                 (concat "Host ("  replenish-default-host "): ")
+                 nil 'replenish-host-history replenish-default-host nil))
+          (port (read-string
+                 (concat "Port ("
+                         (number-to-string replenish-default-port)
+                         "): ")
+                 nil 'replenish-port-history
+                 (number-to-string replenish-default-port)
+                 nil)))
+      (setq replenish-con
+            (make-network-process
+             :name "replenish"
+             :host host
+             :service port
+             :nowait t
+             :filter 'replenish-filter
+             :sentinel 'replenish-sentinel)))))
 
 (defun replenish-disconnect ()
   "Disconnect from replenish server."
