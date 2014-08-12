@@ -37,7 +37,7 @@ import           System.IO                 (BufferMode (..), Handle, hFlush,
                                             hSetBuffering)
 import           Unsafe.Coerce             (unsafeCoerce)
 
-import           Sound.OSC
+import           Sound.OSC                 (Time, pauseThreadUntil)
 
 
 -- --------------------------------------------------------------------------
@@ -123,10 +123,9 @@ callbackLoop port input output =
         return sock)
     Socket.sClose
     (\sock ->
-      forever (do (msg, _) <- ByteString.recvFrom sock 2048
+      forever (do msg <- ByteString.recv sock 8192
                   writeChan input (BS.unpack msg)
-                  _ <- readChan output
-                  return ()))
+                  void (readChan output)))
 
 -- | Loop to interpret Haskell codes with GHC.
 ghcLoop :: Int -> ThreadId -> Chan String -> Chan String -> IO ()
@@ -140,10 +139,10 @@ ghcLoop port parentThread input output =
           pkgDbs <- liftIO getCabalPackageConf
           dflags <- getSessionDynFlags
           liftIO
-            (do putStrLn ("src:\n" ++
-                          unlines (map ("  " ++) srcPaths))
-                putStrLn ("package-dbs:\n" ++
-                          unlines (map (("  " ++ ) . showPkgConfRef) pkgDbs)))
+            (do putStr ("src:\n" ++
+                        unlines (map ("  " ++) srcPaths))
+                putStr ("package-dbs:\n" ++
+                        unlines (map (("  " ++ ) . showPkgConfRef) pkgDbs)))
           (dflags',_, _) <- parseDynamicFlags
                               dflags
                               [mkGeneralLocated "flag" initialOptions]
@@ -166,10 +165,11 @@ ghcLoop port parentThread input output =
                  _ <- load LoadAllTargets
                  setContext [IIModule (mkModuleName me)])
           liftIO (putStr "Binding callback function ...")
-          void (evalStatement (getCallbackSocket_stmt port))
-          void (evalDec callback_dec)
-          liftIO (putStrLn " replenish server ready.")
-          forever (replStep input output)))
+          -- void (evalStatement (getCallbackSocket_stmt port))
+          -- void (evalDec callback_dec)
+          void (evalDec (callback_dec' port))
+          liftIO (putStrLn " server ready.")
+          replStep input output))
   `catch`
   (\UserInterrupt ->
      do putStrLn "Got user interrupt, killing server."
@@ -177,7 +177,9 @@ ghcLoop port parentThread input output =
   `catch`
   (\(SomeException e) ->
      do putStrLn (show e)
-        ghcLoop port parentThread input output)
+        throwTo parentThread e
+        -- ghcLoop port parentThread input output
+        )
 
 showPkgConfRef :: PkgConfRef -> String
 showPkgConfRef ref =
@@ -192,18 +194,18 @@ initialImports = ["import Prelude"]
 initialOptions :: String
 initialOptions = "-XTemplateHaskell"
 
--- | Single step to evaluate Haskell code.
+-- | Evaluate Haskell code.
 replStep :: Chan String -> Chan String -> Ghc ()
 replStep input output =
-  do expr <- liftIO (readChan input)
-     res <- evalShow expr
-            `gcatch` (\(SomeException _) -> evalVoid expr)
-            `gcatch` (\(SomeException _) -> evalStatement expr)
-            `gcatch` (\(SomeException _) -> evalDump expr)
-            `gcatch` (\(SomeException _) -> evalLoadOrImport expr)
-            `gcatch` (\(SomeException _) -> evalDec expr)
-            `gcatch` (\(SomeException e) -> return (show e))
-     liftIO (writeChan output res)
+  liftIO (getChanContents input) >>=
+  mapM_ (\x -> (evalShow x
+                `gcatch` (\(SomeException _) -> evalVoid x)
+                `gcatch` (\(SomeException _) -> evalStatement x)
+                `gcatch` (\(SomeException _) -> evalDump x)
+                `gcatch` (\(SomeException _) -> evalLoadOrImport x)
+                `gcatch` (\(SomeException _) -> evalDec x)
+                `gcatch` (\(SomeException e) -> return (show e)))
+                >>= liftIO . writeChan output)
 
 evalDump :: String -> Ghc String
 evalDump expr
@@ -230,6 +232,7 @@ evalDump expr
        liftIO (mapM_ (putStrLn . showPpr dflags) names)
        return "dumped names."
   | otherwise = error "Not a dump command."
+{-# INLINE evalDump #-}
 
 evalLoadOrImport :: String -> Ghc String
 evalLoadOrImport expr
@@ -249,16 +252,19 @@ evalLoadOrImport expr
        getContext >>= setContext . (IIDecl mdl :)
        dflags <- getSessionDynFlags
        return (showPpr dflags mdl)
+{-# INLINE evalLoadOrImport #-}
 
 evalVoid :: String -> Ghc String
 evalVoid expr =
   do hvalue <- compileExpr expr
      liftIO (do unsafeCoerce hvalue :: IO ()
                 return "<<IO ()>>")
+{-# INLINE evalVoid #-}
 
 evalShow :: String -> Ghc String
 evalShow expr =
   fmap unsafeCoerce (compileExpr ("Prelude.show (" ++ expr ++ ")"))
+{-# INLINE evalShow #-}
 
 evalDec :: String -> Ghc String
 evalDec dec =
@@ -267,6 +273,7 @@ evalDec dec =
      return (if null names
                 then "dec: no names bound."
                 else "dec: " ++ concatMap (showPpr dflags) names)
+{-# INLINE evalDec #-}
 
 evalStatement :: String -> Ghc String
 evalStatement stmt =
@@ -284,6 +291,7 @@ evalStatement stmt =
        RunBreak {} ->
          liftIO (do putStrLn "Got RunBreak"
                     return "RunBreak")
+{-# INLINE evalStatement #-}
 
 
 -- --------------------------------------------------------------------------
@@ -310,8 +318,30 @@ _callback :: Show a => Socket -> Time -> String -> a -> IO ()
 _callback sock scheduled name args =
   void (forkIO
           (do pauseThreadUntil scheduled
-              void (ByteString.send
-                      sock (BS.pack (name ++ " " ++ show args)))))
+              ByteString.sendAll sock (BS.pack (name ++ " " ++ show args))))
+
+__callback :: Show a => Int -> Time -> String -> a -> IO ()
+__callback port scheduled name args =
+  void
+    (forkIO
+       (do pauseThreadUntil scheduled
+           bracket
+             (do addr:_ <- Socket.getAddrInfo
+                             Nothing (Just "127.0.0.1") (Just (show port))
+                 sock <- Socket.socket
+                           (Socket.addrFamily addr)
+                           Socket.Datagram
+                           Socket.defaultProtocol
+                 Socket.connect sock (Socket.addrAddress addr)
+                 return sock)
+             Socket.sClose
+             (\sock ->
+                ByteString.sendAll sock (BS.pack (name ++ " " ++ show args)))))
+
+callback_dec' :: Int -> String
+callback_dec' port =
+  unlines ["callback :: Show a => Double -> String -> a -> IO ()"
+          ,"callback = __callback " ++ show port]
 
 callback_dec :: String
 callback_dec =
