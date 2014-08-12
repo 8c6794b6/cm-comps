@@ -16,7 +16,7 @@
 ;; along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 ;; Author: 8c6794b6 <8c6794b6@gmail.com>
-;; Version: 20140812.4
+;; Version: 20140813.1
 ;; Package-Requires: ((haskell-mode "20140805.942") (shm "20140714.341"))
 ;; Keywords: haskell repl
 
@@ -155,6 +155,9 @@
     (define-key map (kbd "C-c M-k") 'replenish-disconnect)
     (define-key map (kbd "C-c C-c") 'replenish-send-line)
     (define-key map (kbd "C-M-x") 'replenish-send-block)
+    (define-key map (kbd "C-c C-l") nil)
+    (define-key map (kbd "C-c C-t") nil)
+    (define-key map (kbd "C-c C-i") nil)
     map)
   "Keymap for replenish mode.
 Most part of the keymaps are inherited from `haskell-mode'.")
