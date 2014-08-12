@@ -133,7 +133,7 @@ callbackLoop port input output =
         return sock)
     Socket.sClose
     (\sock ->
-      forever (do msg <- ByteString.recv sock 8192
+      forever (do msg <- ByteString.recv sock 1024
                   writeChan input (BS.unpack msg)
                   void (readChan output)))
 
