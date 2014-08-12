@@ -7,9 +7,11 @@ import System.Environment
 
 main :: IO ()
 main =
-  do port <- handle
-               (\(SomeException _) -> return 9237)
-               (do (port':_) <- getArgs
-                   evaluate (read port'))
+  do port <- do (port':_) <- getArgs
+                evaluate (read port')
+             `catch`
+             \(SomeException _) ->
+               do putStrLn "Using default port"
+                  return 9237
      putStrLn ("Starting REPL server at port " ++ show port)
      runServer port
