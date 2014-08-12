@@ -1,4 +1,4 @@
-;;; replenish.el --- Minor mode to interact with replenish server.
+;;; replenish.el --- Derived mode to interact with replenish server.
 
 ;; Copyright (c) 2014 8c6794b6. All rights reserved.
 ;;
@@ -16,19 +16,20 @@
 ;; along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 ;; Author: 8c6794b6 <8c6794b6@gmail.com>
-;; Version: 20140808.342
-;; Package-Requires: ((shm "20140714.341"))
+;; Version: 20140812.2
+;; Package-Requires: ((haskell-mode "20140805.942") (shm "20140714.341"))
 ;; Keywords: haskell repl
 
 ;;; Commentary:
-;;; Minor mode to interact with replenish server.
+;;; Derived mode to interact with replenish server.
 
 ;;; Code:
 
+(require 'haskell-mode)
 (require 'shm)
 
 (defgroup replenish nil
-  "Interacting with replenish server."
+  "Major mode to interact with replenish server"
   :group 'haskell)
 
 (defcustom replenish-default-host "localhost"
@@ -44,6 +45,9 @@
 (make-variable-buffer-local
  (defvar replenish-con nil
    "Connection to REPL server."))
+
+(defvar replenish-mode-hook nil
+  "Hook for replenish-mode.")
 
 (defvar replenish-host-history nil
   "History of host used for connection.")
@@ -73,6 +77,11 @@
            :filter 'replenish-filter
            :sentinel 'replenish-sentinel))))
 
+(defun replenish-disconnect ()
+  "Disconnect from replenish server."
+  (interactive)
+  (delete-process replenish-con))
+
 (defun replenish-filter (process msg)
   "Filter to read from PROCESS and display the MSG."
   (message "=> %s" msg))
@@ -82,7 +91,7 @@
   (cond ((string= "open\n" msg)
          (message "Connected to server."))
         ((string-prefix-p "failed" msg)
-         (message "Failed to connect to server."))
+         (message "Failed connecting to server."))
         (t (message "replenish: %s"
                     (replace-regexp-in-string "\n" " " msg)))))
 
@@ -99,7 +108,9 @@
 
 (defun replenish-wrap-multiple-line (str)
   "Wrap STR as multiple line message."
-  (concat ":{\n" str "\n:}\n"))
+  (concat ":{\n" str "\n:}\n")
+  ;; (concat str "\n")
+  )
 
 (defun replenish-send-block ()
   "Send current top level node or selected region."
@@ -129,26 +140,40 @@
     (buffer-substring-no-properties (region-beginning) (region-end)))))
 
 (defun replenish-send-line ()
-  "Send current line to REPL."
+  "Send current line."
   (interactive)
   (process-send-string
    replenish-con
    (concat (thing-at-point 'line) "\n")))
 
-;;;###autoload
-(defvar replenish-map
+(defvar replenish-mode-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "C-c M-j") 'replenish-connect)
+    (define-key map (kbd "C-c M-k") 'replenish-disconnect)
     (define-key map (kbd "C-c C-c") 'replenish-send-line)
     (define-key map (kbd "C-M-x") 'replenish-send-block)
-    map))
+    map)
+  "Keymap for replenish mode.
+Most part of the keymaps are inherited from `haskell-mode'.")
+
+;; ;;;###autoload
+;; (define-minor-mode replenish-mode
+;;   "Minor mode to interact with replenish server."
+;;   :lighter " Replenish"
+;;   :keymap replenish-map)
 
 ;;;###autoload
-(define-minor-mode replenish-mode
-  "Minor mode to interact with replenish server."
-  :lighter " Replenish"
-  :keymap replenish-map)
+(define-derived-mode replenish-mode
+  haskell-mode "HsRepl"
 
+  "Derived major mode of `haskell-mode' to interact with replenish server.
+Invoke `replenish-connect' before sending messages to server.
+
+\\{replenish-mode-map}"
+  (set (make-local-variable 'indent-line-function) 'indent-relative))
+
+;;;###autoload
+(add-to-list 'auto-mode-alist '("\\.hsrepl\\'" . replenish-mode))
 
 (provide 'replenish)
 
