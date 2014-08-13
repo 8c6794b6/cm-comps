@@ -23,8 +23,7 @@ __callback :: Show a => Int -> Time -> String -> a -> IO ()
 __callback port scheduled name args =
   void
     (forkIO
-       (do pauseThreadUntil scheduled
-           bracket
+       (do bracket
              (do addr:_ <- getAddrInfo
                              Nothing (Just "127.0.0.1") (Just (show port))
                  sock <- socket (addrFamily addr) Datagram defaultProtocol
@@ -32,8 +31,10 @@ __callback port scheduled name args =
                  return sock)
              sClose
              (\sock ->
-                BS.sendAll
-                  sock (BS.unwords (map BS.pack [name, show args])))))
+                do pauseThreadUntil scheduled
+                   BS.sendAll
+                     sock
+                     (BS.unwords (map BS.pack [name, show args])))))
 
 callback_dec :: Int -> String
 callback_dec port =
