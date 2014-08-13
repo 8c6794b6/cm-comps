@@ -10,17 +10,16 @@ Maintainer  : 8c6794b6@gmail.com
 Stability   : experimental
 Portability : unknown
 
-Module to contain orphan instances.
+Temporary module to contain orphan instances for data types defined in hsc3.
 
 -}
-module Sound.Study.ForUserInterfaces.Orphan where
-
--- For Data.Hashable
-import GHC.Generics (Generic)
-import Data.Hashable (Hashable)
+module Sound.SC3.Orphan where
 
 import Sound.SC3
 import Sound.SC3.UGen.MCE
+
+import GHC.Generics (Generic)
+import Data.Hashable (Hashable)
 
 #define DERIVE_1(ty) \
 deriving instance Generic ty; \

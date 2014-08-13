@@ -56,7 +56,7 @@ import           Sound.SC3.Supply
 import           Sound.SC3.TH.Synthdef                (synthdefGenerator)
 import           Sound.SC3.Tree
 
-import           Sound.Study.ForUserInterfaces.Orphan ()
+import           Sound.SC3.Orphan ()
 
 -- --------------------------------------------------------------------------
 --

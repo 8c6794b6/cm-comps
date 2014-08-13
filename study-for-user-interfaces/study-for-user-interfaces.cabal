@@ -30,7 +30,6 @@ library
                      Sound.Study.ForUserInterfaces.GUI.JS
                      Sound.Study.ForUserInterfaces.TUI.TUI01
                      Sound.Study.ForUserInterfaces.TUI.TUI02
-                     Sound.Study.ForUserInterfaces.Orphan
                      Sound.Study.ForUserInterfaces.Scratch.Demand
                      Sound.Study.ForUserInterfaces.Scratch.Reload
                      Paths_study_for_user_interfaces
@@ -61,7 +60,8 @@ library
                    , hosc >= 0.14
                    , hsc3 >= 0.14
                    , hsc3-db
-                   , hsc3-lang
+                   -- , hsc3-lang
+                   , hsc3-orphan
                    , hsc3-parser
                    , hsc3-supply
                    , hsc3-th
@@ -73,6 +73,7 @@ library
                    , plugins
                    , random
                    , random-shuffle
+                   , replenish
                    , syb
                    , template-haskell
                    , threepenny-gui
