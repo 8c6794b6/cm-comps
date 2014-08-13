@@ -87,7 +87,7 @@
 
 (defun replenish-filter (process msg)
   "Filter to read from PROCESS and display the MSG."
-  (message "%s" msg))
+  (message "%s" (s-replace "" "‘" (s-replace "" "’" msg))))
 
 (defun replenish-sentinel (process msg)
   "Sentinel function for PROCESS with MSG."
