@@ -21,11 +21,14 @@ import           GHC.Paths                 (libdir)
 import           HscTypes
 import           Outputable                (Outputable (..), showPpr)
 
+import           GHC.Exts                  (unsafeCoerce#)
+
 import           Control.Concurrent
 import           Control.Monad
 import           Control.Monad.IO.Class
 import           Control.Monad.Reload      (getCabalPackageConf,
                                             getCabalSourcePaths)
+import           Data.ByteString           (ByteString)
 import qualified Data.ByteString.Char8     as BS
 import           Data.Char                 (isSpace)
 import           Data.IORef
@@ -35,7 +38,6 @@ import qualified Network.Socket            as Socket
 import qualified Network.Socket.ByteString as ByteString
 import           System.IO                 (BufferMode (..), Handle, hFlush,
                                             hSetBuffering)
-import           Unsafe.Coerce             (unsafeCoerce)
 
 import           Sound.OSC                 (Time, pauseThreadUntil)
 
@@ -78,15 +80,15 @@ runServer port =
 -- | Loop to get input and reply output with connected 'Handle'.
 handleLoop
   :: Handle -> HostName -> PortNumber -> [ThreadId]
-  -> Chan String -> Chan String -> IO ()
+  -> Chan ByteString -> Chan ByteString -> IO ()
 handleLoop hdl host clientPort tids input output =
   go [] False
   `catch`
-  (\(SomeException e) ->
-     do putStr (unlines ["handleLoop: Caught " ++ show e
-                        ,"Killing ghc and callback loop for " ++
-                          host ++ ":" ++ show clientPort])
-        mapM_ killThread tids)
+  \(SomeException e) ->
+    do putStr (unlines ["handleLoop: Caught " ++ show e
+                       ,"Killing ghc and callback loop for " ++
+                         host ++ ":" ++ show clientPort])
+       mapM_ killThread tids
   where
     go acc isMultiLine =
       do ln <- BS.hGetLine hdl
@@ -111,12 +113,12 @@ handleLoop hdl host clientPort tids input output =
                    ,":", BS.pack (show clientPort)
                    ,"] ", bs])
     doEval bs =
-      do writeChan input (BS.unpack bs)
-         BS.hPutStr hdl . BS.pack =<< readChan output
+      do writeChan input bs
+         BS.hPutStr hdl =<< readChan output
          hFlush hdl
 
 -- | Loop to take care of callbacks.
-callbackLoop :: Int -> Chan String -> Chan String -> IO ()
+callbackLoop :: Int -> Chan ByteString -> Chan ByteString -> IO ()
 callbackLoop port input output =
   bracket
     (do (saddr:_) <- Socket.getAddrInfo
@@ -134,11 +136,11 @@ callbackLoop port input output =
     Socket.sClose
     (\sock ->
       forever (do msg <- ByteString.recv sock 1024
-                  writeChan input (BS.unpack msg)
+                  writeChan input msg
                   void (readChan output)))
 
 -- | Loop to interpret Haskell codes with GHC.
-ghcLoop :: Int -> ThreadId -> Chan String -> Chan String -> IO ()
+ghcLoop :: Int -> ThreadId -> Chan ByteString -> Chan ByteString -> IO ()
 ghcLoop port parentThread input output =
   defaultErrorHandler
     defaultFatalMessager
@@ -179,14 +181,14 @@ ghcLoop port parentThread input output =
           -- void (evalDec callback_dec)
           void (evalDec (callback_dec' port))
           liftIO (putStrLn "Server ready.")
-          replStep input output))
+          eval input output))
   `catch`
-  (\UserInterrupt ->
-     do putStrLn "Got UserInterrupt, killing the server."
-        throwTo parentThread UserInterrupt)
+  \UserInterrupt ->
+    do putStrLn "Got UserInterrupt, killing the server."
+       throwTo parentThread UserInterrupt
   `catch`
-  (\(SomeException e) ->
-     do putStrLn ("ghcLoop: " ++ show e))
+  \(SomeException e) ->
+    do putStrLn ("ghcLoop: " ++ show e)
 
 showPkgConfRef :: PkgConfRef -> String
 showPkgConfRef ref =
@@ -201,18 +203,19 @@ initialImports = ["import Prelude"]
 initialOptions :: String
 initialOptions = "-XTemplateHaskell"
 
--- | Evaluate Haskell code.
-replStep :: Chan String -> Chan String -> Ghc ()
-replStep input output =
+eval :: Chan ByteString -> Chan ByteString -> Ghc ()
+eval input output =
   liftIO (getChanContents input) >>=
-  mapM_ (\x -> (evalShow x
-                `gcatch` (\(SomeException _) -> evalVoid x)
-                `gcatch` (\(SomeException _) -> evalStatement x)
-                `gcatch` (\(SomeException _) -> evalDump x)
-                `gcatch` (\(SomeException _) -> evalLoadOrImport x)
-                `gcatch` (\(SomeException _) -> evalDec x)
-                `gcatch` (\(SomeException e) -> return (show e)))
-                >>= liftIO . writeChan output)
+  mapM_ (\x ->
+           let x' = BS.unpack x
+           in (evalShow x'
+               `gcatch` \(SomeException _) -> evalVoid x'
+               `gcatch` \(SomeException _) -> evalStatement x'
+               `gcatch` \(SomeException _) -> evalDump x'
+               `gcatch` \(SomeException _) -> evalLoadOrImport x'
+               `gcatch` \(SomeException _) -> evalDec x'
+               `gcatch` \(SomeException e) -> return (show e))
+               >>= liftIO . writeChan output . BS.pack)
 
 evalDump :: String -> Ghc String
 evalDump expr
@@ -264,13 +267,13 @@ evalLoadOrImport expr
 evalVoid :: String -> Ghc String
 evalVoid expr =
   do hvalue <- compileExpr expr
-     liftIO (do unsafeCoerce hvalue :: IO ()
+     liftIO (do unsafeCoerce# hvalue :: IO ()
                 return "<<IO ()>>")
 {-# INLINE evalVoid #-}
 
 evalShow :: String -> Ghc String
 evalShow expr =
-  fmap unsafeCoerce (compileExpr ("Prelude.show (" ++ expr ++ ")"))
+  fmap unsafeCoerce# (compileExpr ("Prelude.show (" ++ expr ++ ")"))
 {-# INLINE evalShow #-}
 
 evalDec :: String -> Ghc String
