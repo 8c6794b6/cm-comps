@@ -160,9 +160,7 @@ ghcLoop port parentThread input output =
                  setTargets [target]
                  _ <- load LoadAllTargets
                  setContext [IIModule (mkModuleName me)])
-          -- void (evalStatement (getCallbackSocket_stmt port))
-          -- void (evalDec callback_dec)
-          void (evalDec (callback_dec' port))
+          void (evalDec (callback_dec port))
           liftIO (putStrLn "GHC ready.")
           eval input output))
   `catch`
@@ -171,7 +169,7 @@ ghcLoop port parentThread input output =
        throwTo parentThread UserInterrupt
   `catch`
   \(SomeException e) ->
-    do putStrLn ("ghcLoop: " ++ show e)
+    putStrLn ("ghcLoop: " ++ show e)
 
 showPkgConfRef :: PkgConfRef -> String
 showPkgConfRef ref =
@@ -293,26 +291,6 @@ evalStatement stmt =
 --
 -- --------------------------------------------------------------------------
 
-getCallbackSocket :: Int -> IO Socket
-getCallbackSocket port =
-  do (serverAddr:_) <- Socket.getAddrInfo
-                         Nothing (Just "127.0.0.1") (Just (show port))
-     sock <- Socket.socket
-               (Socket.addrFamily serverAddr)
-               Socket.Datagram
-               Socket.defaultProtocol
-     Socket.connect sock (Socket.addrAddress serverAddr)
-     return sock
-
-getCallbackSocket_stmt :: Int -> String
-getCallbackSocket_stmt port = "__sock__ <- getCallbackSocket " ++ show port
-
-_callback :: Show a => Socket -> Time -> String -> a -> IO ()
-_callback sock scheduled name args =
-  void (forkIO
-          (do pauseThreadUntil scheduled
-              BS.sendAll sock (BS.pack (name ++ " " ++ show args))))
-
 __callback :: Show a => Int -> Time -> String -> a -> IO ()
 __callback port scheduled name args =
   void
@@ -331,12 +309,7 @@ __callback port scheduled name args =
              (\sock ->
                 BS.sendAll sock (BS.pack (name ++ " " ++ show args)))))
 
-callback_dec' :: Int -> String
-callback_dec' port =
+callback_dec :: Int -> String
+callback_dec port =
   unlines ["callback :: Show a => Double -> String -> a -> IO ()"
           ,"callback = __callback " ++ show port]
-
-callback_dec :: String
-callback_dec =
-  unlines ["callback :: Show a => Double -> String -> a -> IO ()"
-          ,"callback = _callback __sock__"]
