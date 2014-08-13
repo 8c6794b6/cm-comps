@@ -35,7 +35,7 @@ import           Data.IORef
 import           Data.List                 (isPrefixOf)
 import           Network
 import qualified Network.Socket            as Socket
-import qualified Network.Socket.ByteString as ByteString
+import qualified Network.Socket.ByteString as BS
 import           System.IO                 (BufferMode (..), Handle, hFlush,
                                             hSetBuffering)
 
@@ -82,40 +82,23 @@ handleLoop
   :: Handle -> HostName -> PortNumber -> [ThreadId]
   -> Chan ByteString -> Chan ByteString -> IO ()
 handleLoop hdl host clientPort tids input output =
-  go [] False
-  `catch`
-  \(SomeException e) ->
-    do putStr (unlines ["handleLoop: Caught " ++ show e
-                       ,"Killing ghc and callback loop for " ++
-                         host ++ ":" ++ show clientPort])
-       mapM_ killThread tids
+  go `catch` \(SomeException e) ->
+               do putStr (unlines ["handleLoop: Caught " ++ show e
+                                  ,"Killing ghc and callback loop for " ++
+                                    host ++ ":" ++ show clientPort])
+                  mapM_ killThread tids
   where
-    go acc isMultiLine =
-      do ln <- BS.hGetLine hdl
-         if isEmptyLine ln
-            then go acc isMultiLine
-            else do showLine ln
-                    case (isMultiLine, ln) of
-                      (True,  ":}") ->
-                        do case acc of
-                             []  -> return ()
-                             [l] -> doEval l
-                             _   -> doEval (BS.unlines (reverse acc))
-                           go [] False
-                      (True,  _   ) -> go (ln:acc) isMultiLine
-                      (False, ":{") -> go acc True
-                      (False, _   ) -> do doEval ln
-                                          go acc False
-    isEmptyLine = BS.foldr (\c t -> isSpace c && t) True
+    go = forever
+           (do chunk <- BS.hGetSome hdl 65536
+               unless (BS.all isSpace chunk)
+                      (do mapM_ showLine (BS.lines chunk)
+                          writeChan input chunk
+                          BS.hPutStr hdl =<< readChan output
+                          hFlush hdl))
     showLine bs =
       BS.putStrLn
-        (BS.concat ["[", BS.pack host
-                   ,":", BS.pack (show clientPort)
-                   ,"] ", bs])
-    doEval bs =
-      do writeChan input bs
-         BS.hPutStr hdl =<< readChan output
-         hFlush hdl
+        (BS.concat
+           (map BS.pack ["[", host, ":", show clientPort, "] "]) `BS.append` bs)
 
 -- | Loop to take care of callbacks.
 callbackLoop :: Int -> Chan ByteString -> Chan ByteString -> IO ()
@@ -135,7 +118,7 @@ callbackLoop port input output =
         return sock)
     Socket.sClose
     (\sock ->
-      forever (do msg <- ByteString.recv sock 1024
+      forever (do msg <- BS.recv sock 4096
                   writeChan input msg
                   void (readChan output)))
 
@@ -180,7 +163,7 @@ ghcLoop port parentThread input output =
           -- void (evalStatement (getCallbackSocket_stmt port))
           -- void (evalDec callback_dec)
           void (evalDec (callback_dec' port))
-          liftIO (putStrLn "Server ready.")
+          liftIO (putStrLn "GHC ready.")
           eval input output))
   `catch`
   \UserInterrupt ->
@@ -328,7 +311,7 @@ _callback :: Show a => Socket -> Time -> String -> a -> IO ()
 _callback sock scheduled name args =
   void (forkIO
           (do pauseThreadUntil scheduled
-              ByteString.sendAll sock (BS.pack (name ++ " " ++ show args))))
+              BS.sendAll sock (BS.pack (name ++ " " ++ show args))))
 
 __callback :: Show a => Int -> Time -> String -> a -> IO ()
 __callback port scheduled name args =
@@ -346,7 +329,7 @@ __callback port scheduled name args =
                  return sock)
              Socket.sClose
              (\sock ->
-                ByteString.sendAll sock (BS.pack (name ++ " " ++ show args)))))
+                BS.sendAll sock (BS.pack (name ++ " " ++ show args)))))
 
 callback_dec' :: Int -> String
 callback_dec' port =

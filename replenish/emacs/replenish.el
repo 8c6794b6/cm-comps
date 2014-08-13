@@ -16,7 +16,7 @@
 ;; along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 ;; Author: 8c6794b6 <8c6794b6@gmail.com>
-;; Version: 20140813.1
+;; Version: 20140813.2
 ;; Package-Requires: ((haskell-mode "20140805.942") (shm "20140714.341"))
 ;; Keywords: haskell repl
 
@@ -111,9 +111,7 @@
 
 (defun replenish-wrap-multiple-line (str)
   "Wrap STR as multiple line message."
-  (concat ":{\n" str "\n:}\n")
-  ;; (concat str "\n")
-  )
+  str)
 
 (defun replenish-send-block ()
   "Send current top level node or selected region."
@@ -147,7 +145,7 @@
   (interactive)
   (process-send-string
    replenish-con
-   (concat (thing-at-point 'line) "\n")))
+   (thing-at-point 'line)))
 
 (defvar replenish-mode-map
   (let ((map (make-sparse-keymap)))
