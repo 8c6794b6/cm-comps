@@ -16,7 +16,7 @@
 ;; along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 ;; Author: 8c6794b6 <8c6794b6@gmail.com>
-;; Version: 20140813.2
+;; Version: 20140813.4
 ;; Package-Requires: ((haskell-mode "20140805.942") (shm "20140714.341"))
 ;; Keywords: haskell repl
 
@@ -87,14 +87,14 @@
 
 (defun replenish-filter (process msg)
   "Filter to read from PROCESS and display the MSG."
-  (message "=> %s" msg))
+  (message "%s" msg))
 
 (defun replenish-sentinel (process msg)
   "Sentinel function for PROCESS with MSG."
   (cond ((string= "open\n" msg)
-         (message "Connected to server."))
+         (message "replenish: Connected to server."))
         ((string-prefix-p "failed" msg)
-         (message "Failed connecting to server."))
+         (message "replenish: Failed connecting to server."))
         (t (message "replenish: %s"
                     (replace-regexp-in-string "\n" " " msg)))))
 
@@ -147,6 +147,13 @@
    replenish-con
    (thing-at-point 'line)))
 
+(defun replenish-info-at-point ()
+  "Send for getting info with `thing-at-point'."
+  (interactive)
+  (process-send-string
+   replenish-con
+   (concat ":dump_info " (thing-at-point 'symbol))))
+
 (defvar replenish-mode-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "C-c M-j") 'replenish-connect)
@@ -155,7 +162,7 @@
     (define-key map (kbd "C-M-x") 'replenish-send-block)
     (define-key map (kbd "C-c C-l") nil)
     (define-key map (kbd "C-c C-t") nil)
-    (define-key map (kbd "C-c C-i") nil)
+    (define-key map (kbd "C-c TAB") 'replenish-info-at-point)
     map)
   "Keymap for replenish mode.
 Most part of the keymaps are inherited from `haskell-mode'.")

@@ -20,7 +20,9 @@ import           DynFlags
 import           Exception
 import           GHC
 import           HscTypes
-import           Outputable                        (Outputable (..), showPpr)
+import           Outputable                        (Outputable (..), showPpr,
+                                                    showSDocUnqual)
+import           PprTyThing                        (pprTyThingHdr)
 
 import           GHC.Exts                          (unsafeCoerce#)
 import           GHC.Paths                         (libdir)
@@ -35,7 +37,7 @@ import           Data.ByteString                   (ByteString)
 import qualified Data.ByteString.Char8             as BS
 import           Data.Char                         (isSpace)
 import           Data.IORef                        (readIORef)
-import           Data.List                         (isPrefixOf)
+import           Data.List                         (intersperse, isPrefixOf)
 import qualified Network                           as Network
 import           Network.Socket                    hiding (send)
 import qualified Network.Socket.ByteString         as BS
@@ -212,6 +214,20 @@ evalDump expr
        dflags <- getSessionDynFlags
        liftIO (mapM_ (putStrLn . showPpr dflags) names)
        return "dumped names."
+  | ":dump_info" `isPrefixOf` expr =
+    do df <- getSessionDynFlags
+       let expr' = dropWhile isSpace (drop 10 expr)
+           pp :: Outputable o => o -> String
+           pp   = showPpr df
+       names <- parseName expr'
+       mbInfo:_ <- mapM (getInfo True) names
+       return
+         (maybe ("not in scope: " ++ expr')
+                (\(t,_f,cs,_fs) ->
+                   let t' = showSDocUnqual df (pprTyThingHdr t)
+                       is = t' : map pp cs
+                   in  concat (intersperse "\n" is))
+                 mbInfo)
   | otherwise = error "Not a dump command."
 {-# INLINE evalDump #-}
 
