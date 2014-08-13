@@ -14,68 +14,62 @@ top-level functions without @let@ and function callback by name.
 -}
 module Language.Haskell.Replenish.Server where
 
+import           Language.Haskell.Replenish.Client
+
 import           DynFlags
 import           Exception
 import           GHC
-import           GHC.Paths                 (libdir)
 import           HscTypes
-import           Outputable                (Outputable (..), showPpr)
+import           Outputable                        (Outputable (..), showPpr)
 
-import           GHC.Exts                  (unsafeCoerce#)
+import           GHC.Exts                          (unsafeCoerce#)
+import           GHC.Paths                         (libdir)
 
 import           Control.Concurrent
-import           Control.Monad
-import           Control.Monad.IO.Class
-import           Control.Monad.Reload      (getCabalPackageConf,
-                                            getCabalSourcePaths)
-import           Data.ByteString           (ByteString)
-import qualified Data.ByteString.Char8     as BS
-import           Data.Char                 (isSpace)
-import           Data.IORef
-import           Data.List                 (isPrefixOf)
-import           Network
-import qualified Network.Socket            as Socket
-import qualified Network.Socket.ByteString as BS
-import           System.IO                 (BufferMode (..), Handle, hFlush,
-                                            hSetBuffering)
-
-import           Sound.OSC                 (Time, pauseThreadUntil)
-
-
--- --------------------------------------------------------------------------
---
--- Server
---
--- --------------------------------------------------------------------------
+import           Control.Monad                     (filterM, forever, unless,
+                                                    void)
+import           Control.Monad.IO.Class            (liftIO)
+import           Control.Monad.Reload              (getCabalPackageConf,
+                                                    getCabalSourcePaths)
+import           Data.ByteString                   (ByteString)
+import qualified Data.ByteString.Char8             as BS
+import           Data.Char                         (isSpace)
+import           Data.IORef                        (readIORef)
+import           Data.List                         (isPrefixOf)
+import qualified Network                           as Network
+import           Network.Socket                    hiding (send)
+import qualified Network.Socket.ByteString         as BS
+import           System.IO                         (BufferMode (..), Handle,
+                                                    hFlush, hSetBuffering)
 
 -- | Start a server.
 runServer
   :: Int -- ^ Port number to receive fragment of valid Haskell codes.
    -> IO ()
 runServer port =
-  withSocketsDo
-   (bracket
-    (do s <- listenOn (PortNumber (fromIntegral port))
-        me <- myThreadId
-        return (s, me))
-    (\(s, _) ->
-       do putStr "Server killed, closing socket ... "
-          sClose s
-          putStrLn "done.")
-    (\(s, tid) ->
-      forever
-       (do (hdl, host, clientPort) <- accept s
-           input <- newChan
-           output <- newChan
-           putStrLn (unwords ["Client connected from"
-                             , host ++ ":" ++ show clientPort])
-           hSetBuffering hdl LineBuffering
-           let clientPort' = fromIntegral clientPort + 1
-           gtid <- forkIO (ghcLoop clientPort' tid input output)
-           ctid <- forkIO (callbackLoop clientPort' input output)
-           void
-             (forkIO
-                (handleLoop hdl host clientPort [gtid,ctid] input output)))))
+  Network.withSocketsDo
+    (bracket
+     (do s <- Network.listenOn (Network.PortNumber (fromIntegral port))
+         me <- myThreadId
+         return (s, me))
+     (\(s, _) ->
+        do putStr "Server killed, closing socket ... "
+           Network.sClose s
+           putStrLn "done.")
+     (\(s, tid) ->
+       forever
+        (do (hdl, host, clientPort) <- Network.accept s
+            input <- newChan
+            output <- newChan
+            putStrLn (unwords ["Client connected from"
+                              , host ++ ":" ++ show clientPort])
+            hSetBuffering hdl LineBuffering
+            let clientPort' = fromIntegral clientPort + 1
+            gtid <- forkIO (ghcLoop clientPort' tid input output)
+            ctid <- forkIO (callbackLoop clientPort' input output)
+            void
+              (forkIO
+                 (handleLoop hdl host clientPort [gtid,ctid] input output)))))
 
 -- | Loop to get input and reply output with connected 'Handle'.
 handleLoop
@@ -98,25 +92,21 @@ handleLoop hdl host clientPort tids input output =
     showLine bs =
       BS.putStrLn
         (BS.concat
-           (map BS.pack ["[", host, ":", show clientPort, "] "]) `BS.append` bs)
+           (map BS.pack ["[", host, ":", show clientPort, "] "])
+         `BS.append` bs)
 
 -- | Loop to take care of callbacks.
 callbackLoop :: Int -> Chan ByteString -> Chan ByteString -> IO ()
 callbackLoop port input output =
   bracket
-    (do (saddr:_) <- Socket.getAddrInfo
-                       (Just
-                          (Socket.defaultHints
-                            {Socket.addrFlags = [Socket.AI_PASSIVE]}))
+    (do (saddr:_) <- getAddrInfo
+                       (Just (defaultHints {addrFlags = [AI_PASSIVE]}))
                        Nothing
                        (Just (show port))
-        sock <- Socket.socket
-                  (Socket.addrFamily saddr)
-                  Socket.Datagram
-                  Socket.defaultProtocol
-        Socket.bindSocket sock (Socket.addrAddress saddr)
+        sock <- socket (addrFamily saddr) Datagram defaultProtocol
+        bindSocket sock (addrAddress saddr)
         return sock)
-    Socket.sClose
+    sClose
     (\sock ->
       forever (do msg <- BS.recv sock 4096
                   writeChan input msg
@@ -138,7 +128,7 @@ ghcLoop port parentThread input output =
                         unlines (map ("  " ++) srcPaths))
                 putStr ("package-dbs:\n" ++
                         unlines (map (("  " ++ ) . showPkgConfRef) pkgDbs))
-                putStrLn "Setting up context ...")
+                putStr "Setting up context ... ")
           (dflags',_, _) <- parseDynamicFlags
                               dflags
                               [mkGeneralLocated "flag" initialOptions]
@@ -149,19 +139,19 @@ ghcLoop port parentThread input output =
                           ,hscTarget = HscInterpreted
                           ,ghcLink = LinkInMemory
                           ,importPaths = srcPaths})
-          let me = "Language.Haskell.Replenish.Server"
+          let client = "Language.Haskell.Replenish.Client"
           (setContext =<< mapM (fmap IIDecl . parseImportDecl)
-                               (("import " ++ me) : initialImports))
+                               (("import " ++ client) : initialImports))
             `gcatch`
             (\(SomeException e) ->
               do liftIO (do putStrLn ("Caught exception: " ++ show e)
-                            putStrLn ("Loading " ++ me ++ " as target."))
-                 target <- guessTarget me Nothing
+                            putStrLn ("Loading " ++ client ++ " as target."))
+                 target <- guessTarget client Nothing
                  setTargets [target]
                  _ <- load LoadAllTargets
-                 setContext [IIModule (mkModuleName me)])
+                 setContext [IIModule (mkModuleName client)])
           void (evalDec (callback_dec port))
-          liftIO (putStrLn "GHC ready.")
+          liftIO (putStrLn "ready.")
           eval input output))
   `catch`
   \UserInterrupt ->
@@ -275,7 +265,7 @@ evalStatement stmt =
             return
               (if null names
                   then "stmt: no names bound."
-                  else ("stmt: " ++ unwords (map (showPpr dflags) names)))
+                  else "stmt: " ++ unwords (map (showPpr dflags) names))
        RunException e ->
          liftIO (do putStrLn ("RunException: " ++ show e)
                     return (show e))
@@ -283,33 +273,3 @@ evalStatement stmt =
          liftIO (do putStrLn "Got RunBreak"
                     return "RunBreak")
 {-# INLINE evalStatement #-}
-
-
--- --------------------------------------------------------------------------
---
--- Client side code
---
--- --------------------------------------------------------------------------
-
-__callback :: Show a => Int -> Time -> String -> a -> IO ()
-__callback port scheduled name args =
-  void
-    (forkIO
-       (do pauseThreadUntil scheduled
-           bracket
-             (do addr:_ <- Socket.getAddrInfo
-                             Nothing (Just "127.0.0.1") (Just (show port))
-                 sock <- Socket.socket
-                           (Socket.addrFamily addr)
-                           Socket.Datagram
-                           Socket.defaultProtocol
-                 Socket.connect sock (Socket.addrAddress addr)
-                 return sock)
-             Socket.sClose
-             (\sock ->
-                BS.sendAll sock (BS.pack (name ++ " " ++ show args)))))
-
-callback_dec :: Int -> String
-callback_dec port =
-  unlines ["callback :: Show a => Double -> String -> a -> IO ()"
-          ,"callback = __callback " ++ show port]
