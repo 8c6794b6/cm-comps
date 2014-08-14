@@ -20,29 +20,47 @@ import           DynFlags
 import           Exception
 import           GHC
 import           HscTypes
-import           Outputable                        (Outputable (..), showPpr,
-                                                    showSDocUnqual)
-import           PprTyThing                        (pprTyThingHdr)
+import           Outputable                            (Outputable (..),
+                                                        showPpr, showSDocUnqual)
+import           PprTyThing                            (pprTyThingHdr)
 
-import           GHC.Exts                          (unsafeCoerce#)
-import           GHC.Paths                         (libdir)
+import           GHC.Exts                              (unsafeCoerce#)
+import           GHC.Paths                             (libdir)
 
 import           Control.Concurrent
-import           Control.Monad                     (filterM, forever, unless,
-                                                    void)
-import           Control.Monad.IO.Class            (liftIO)
-import           Control.Monad.Reload              (getCabalPackageConf,
-                                                    getCabalSourcePaths)
-import           Data.ByteString                   (ByteString)
-import qualified Data.ByteString.Char8             as BS
-import           Data.Char                         (isSpace)
-import           Data.IORef                        (readIORef)
-import           Data.List                         (intersperse, isPrefixOf)
-import qualified Network                           as Network
-import           Network.Socket                    hiding (send)
-import           System.IO                         (BufferMode (..), Handle,
-                                                    hClose, hFlush, hSetBinaryMode,
-                                                    hSetBuffering)
+import           Control.Monad                         (filterM, forever,
+                                                        unless, void)
+import           Control.Monad.IO.Class                (liftIO)
+import           Data.ByteString                       (ByteString)
+import qualified Data.ByteString.Char8                 as BS
+import           Data.Char                             (isSpace)
+import           Data.IORef                            (readIORef)
+import           Data.List                             (intersperse, isPrefixOf,
+                                                        nub)
+import           Distribution.PackageDescription       (BuildInfo (..),
+                                                        CondTree (..),
+                                                        Executable (..),
+                                                        Library (..),
+                                                        condExecutables,
+                                                        condLibrary)
+import           Distribution.PackageDescription.Parse (readPackageDescription)
+import           Distribution.Verbosity                (normal)
+import qualified Network                               as Network
+import           Network.Socket                        hiding (send)
+import           System.Directory                      (doesFileExist,
+                                                        getCurrentDirectory)
+import           System.FilePath                       (takeBaseName, (<.>),
+                                                        (</>))
+import           System.IO                             (BufferMode (..), Handle,
+                                                        hClose, hFlush,
+                                                        hSetBinaryMode,
+                                                        hSetBuffering)
+
+-- --------------------------------------------------------------------------
+--
+-- Server
+--
+-- --------------------------------------------------------------------------
 
 -- | Start a server.
 runServer
@@ -61,12 +79,12 @@ runServer port =
      (\(s, me) ->
        forever
         (do (hdl, host, clientPort) <- Network.accept s
+            hSetBuffering hdl (BlockBuffering Nothing)
+            hSetBinaryMode hdl True
             input <- newChan
             output <- newChan
             putStrLn (unwords ["Client connected from"
                               , host ++ ":" ++ show clientPort])
-            hSetBuffering hdl (BlockBuffering Nothing)
-            hSetBinaryMode hdl True
             let clientPort' = fromIntegral clientPort + 1
             _ctid <- forkIO (callbackLoop clientPort' input output)
             _htid <- forkIO (handleLoop hdl host clientPort input output)
@@ -284,3 +302,49 @@ evalStatement stmt =
          liftIO (do putStrLn "Got RunBreak"
                     return "RunBreak")
 {-# INLINE evalStatement #-}
+
+
+-- --------------------------------------------------------------------------
+--
+-- For Cabal configuration file
+--
+-- --------------------------------------------------------------------------
+
+-- | Reads cabal sandbox file if it exists, returns 'PkgConfRef' from the file.
+getCabalPackageConf :: IO [PkgConfRef]
+getCabalPackageConf =
+  do pkgDbs <- getSandboxPackageDbs
+     if not (null pkgDbs)
+        then return (GlobalPkgConf : map PkgConfFile pkgDbs)
+        else return [GlobalPkgConf, UserPkgConf]
+
+-- | Get package db from cabal sandbox config file.
+getSandboxPackageDbs :: IO [FilePath]
+getSandboxPackageDbs =
+  do cwd <- getCurrentDirectory
+     let sandboxConfigFile = cwd </> "cabal.sandbox.config"
+         filterPackageDbLines =
+           map (tail . dropWhile (not . isSpace)) .
+           filter ("package-db:" `isPrefixOf`) .
+           lines
+     hasSandboxConfig <- doesFileExist sandboxConfigFile
+     if hasSandboxConfig
+        then fmap filterPackageDbLines (readFile sandboxConfigFile)
+        else return []
+
+-- | Reads cabal config file and get source directories.
+getCabalSourcePaths :: IO [String]
+getCabalSourcePaths =
+  do cwd <- getCurrentDirectory
+     let configFile = cwd </> takeBaseName cwd <.> "cabal"
+     hasConfigFile <- doesFileExist configFile
+     if hasConfigFile
+        then
+          do gPkgDesc <- readPackageDescription normal configFile
+             let lib = fmap (hsSourceDirs . libBuildInfo . condTreeData)
+                            (condLibrary gPkgDesc)
+                 exes = fmap (hsSourceDirs . buildInfo . condTreeData . snd)
+                             (condExecutables gPkgDesc)
+                 sources = maybe exes (: exes) lib
+             return (nub (concat sources))
+        else return []

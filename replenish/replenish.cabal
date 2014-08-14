@@ -24,9 +24,11 @@ library
   ghc-prof-options:    -auto-all
   build-depends:       base >= 4.6
                      , bytestring
+                     , Cabal
+                     , directory
+                     , filepath
                      , ghc
                      , ghc-paths
-                     , monad-reload
                      , network
                      , transformers
                      , hosc
