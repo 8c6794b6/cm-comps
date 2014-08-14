@@ -145,7 +145,7 @@
   (interactive)
   (process-send-string
    replenish-con
-   (thing-at-point 'line)))
+   (s-replace "\n" "" (thing-at-point 'line))))
 
 (defun replenish-info-at-point ()
   "Send for getting info with `thing-at-point'."

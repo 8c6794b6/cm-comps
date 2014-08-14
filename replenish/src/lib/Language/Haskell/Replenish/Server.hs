@@ -42,7 +42,8 @@ import qualified Network                           as Network
 import           Network.Socket                    hiding (send)
 import qualified Network.Socket.ByteString         as BS
 import           System.IO                         (BufferMode (..), Handle,
-                                                    hFlush, hSetBuffering)
+                                                    hFlush, hSetBinaryMode,
+                                                    hSetBuffering)
 
 -- | Start a server.
 runServer
@@ -58,31 +59,25 @@ runServer port =
         do putStr "Server killed, closing socket ... "
            Network.sClose s
            putStrLn "done.")
-     (\(s, tid) ->
+     (\(s, me) ->
        forever
         (do (hdl, host, clientPort) <- Network.accept s
             input <- newChan
             output <- newChan
             putStrLn (unwords ["Client connected from"
                               , host ++ ":" ++ show clientPort])
-            hSetBuffering hdl LineBuffering
+            hSetBuffering hdl (BlockBuffering Nothing)
+            hSetBinaryMode hdl True
             let clientPort' = fromIntegral clientPort + 1
-            gtid <- forkIO (ghcLoop clientPort' tid input output)
-            ctid <- forkIO (callbackLoop clientPort' input output)
-            void
-              (forkIO
-                 (handleLoop hdl host clientPort [gtid,ctid] input output)))))
+            _ctid <- forkIO (callbackLoop clientPort' input output)
+            _htid <- forkIO (handleLoop hdl host clientPort input output)
+            void (forkIO (ghcLoop clientPort' me input output)))))
 
 -- | Loop to get input and reply output with connected 'Handle'.
 handleLoop
-  :: Handle -> HostName -> PortNumber -> [ThreadId]
+  :: Handle -> HostName -> PortNumber
   -> Chan ByteString -> Chan ByteString -> IO ()
-handleLoop hdl host clientPort tids input output =
-  go `catch` \(SomeException e) ->
-               do putStr (unlines ["handleLoop: Caught " ++ show e
-                                  ,"Killing ghc and callback loop for " ++
-                                    host ++ ":" ++ show clientPort])
-                  mapM_ killThread tids
+handleLoop hdl host clientPort input output = go
   where
     go = forever
            (do chunk <- BS.hGetSome hdl 65536
@@ -176,7 +171,7 @@ initialImports = ["import Prelude"]
 initialOptions :: String
 initialOptions = "-XTemplateHaskell"
 
-eval :: Chan ByteString -> Chan ByteString -> Ghc ()
+eval ::  Chan ByteString -> Chan ByteString -> Ghc ()
 eval input output =
   liftIO (getChanContents input) >>=
   mapM_ (\x ->
