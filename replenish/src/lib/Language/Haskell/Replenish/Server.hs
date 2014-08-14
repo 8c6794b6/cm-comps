@@ -40,9 +40,8 @@ import           Data.IORef                        (readIORef)
 import           Data.List                         (intersperse, isPrefixOf)
 import qualified Network                           as Network
 import           Network.Socket                    hiding (send)
-import qualified Network.Socket.ByteString         as BS
 import           System.IO                         (BufferMode (..), Handle,
-                                                    hFlush, hSetBinaryMode,
+                                                    hClose, hFlush, hSetBinaryMode,
                                                     hSetBuffering)
 
 -- | Start a server.
@@ -57,7 +56,7 @@ runServer port =
          return (s, me))
      (\(s, _) ->
         do putStr "Server killed, closing socket ... "
-           Network.sClose s
+           close s
            putStrLn "done.")
      (\(s, me) ->
        forever
@@ -96,18 +95,19 @@ handleLoop hdl host clientPort input output = go
 callbackLoop :: Int -> Chan ByteString -> Chan ByteString -> IO ()
 callbackLoop port input output =
   bracket
-    (do (saddr:_) <- getAddrInfo
-                       (Just (defaultHints {addrFlags = [AI_PASSIVE]}))
-                       Nothing
-                       (Just (show port))
-        sock <- socket (addrFamily saddr) Datagram defaultProtocol
-        bindSocket sock (addrAddress saddr)
-        return sock)
-    sClose
-    (\sock ->
-      forever (do msg <- BS.recv sock 4096
-                  writeChan input msg
-                  void (readChan output)))
+    (do s <- Network.listenOn (Network.PortNumber (fromIntegral port))
+        (hdl, _, _) <- Network.accept s
+        hSetBuffering hdl (BlockBuffering Nothing)
+        hSetBinaryMode hdl True
+        return (s, hdl))
+    (\(s, hdl) ->
+      do hClose hdl
+         close s)
+    (\(_, hdl) ->
+      do putStrLn "Callback loop ready."
+         forever (do chunk <- BS.hGetSome hdl 8192
+                     writeChan input chunk
+                     void (readChan output)))
 
 -- | Loop to interpret Haskell codes with GHC.
 ghcLoop :: Int -> ThreadId -> Chan ByteString -> Chan ByteString -> IO ()
@@ -124,8 +124,7 @@ ghcLoop port parentThread input output =
             (do putStr ("src:\n" ++
                         unlines (map ("  " ++) srcPaths))
                 putStr ("package-dbs:\n" ++
-                        unlines (map (("  " ++ ) . showPkgConfRef) pkgDbs))
-                putStr "Setting up context ... ")
+                        unlines (map (("  " ++ ) . showPkgConfRef) pkgDbs)))
           (dflags',_, _) <- parseDynamicFlags
                               dflags
                               [mkGeneralLocated "flag" initialOptions]
@@ -147,8 +146,9 @@ ghcLoop port parentThread input output =
                  setTargets [target]
                  _ <- load LoadAllTargets
                  setContext [IIModule (mkModuleName client)])
-          void (evalDec (callback_dec port))
-          liftIO (putStrLn "ready.")
+          void (evalStatement (getCallbackHandle_stmt port))
+          void (evalDec (callback_dec'))
+          liftIO (putStrLn "GHC loop ready.")
           eval input output))
   `catch`
   \UserInterrupt ->

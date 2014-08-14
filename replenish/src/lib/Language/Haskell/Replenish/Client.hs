@@ -12,31 +12,32 @@ Client side code for function callback in REPL.
 module Language.Haskell.Replenish.Client where
 
 import           Control.Concurrent        (forkIO)
-import           Control.Exception         (bracket)
 import           Control.Monad             (void)
 import qualified Data.ByteString.Char8     as BS
-import           Network.Socket            hiding (recv, send)
-import qualified Network.Socket.ByteString as BS
-import           Sound.OSC                 (Time, pauseThreadUntil)
+import           Network                   (PortID (..), connectTo)
+import           Sound.OSC                 (pauseThreadUntil)
+import           System.IO                 (BufferMode (..), Handle, hFlush,
+                                            hSetBinaryMode, hSetBuffering)
 
-__callback :: Show a => Int -> Time -> String -> a -> IO ()
-__callback port scheduled name args =
+_callback :: Show a => Handle -> Double -> String -> a -> IO ()
+_callback hdl scheduled name args =
   void
     (forkIO
-       (do bracket
-             (do addr:_ <- getAddrInfo
-                             Nothing (Just "127.0.0.1") (Just (show port))
-                 sock <- socket (addrFamily addr) Datagram defaultProtocol
-                 connect sock (addrAddress addr)
-                 return sock)
-             sClose
-             (\sock ->
-                do pauseThreadUntil scheduled
-                   BS.sendAll
-                     sock
-                     (BS.unwords (map BS.pack [name, show args])))))
+      (do pauseThreadUntil scheduled
+          BS.hPutStrLn hdl (BS.unwords (map BS.pack [name, show args]))
+          hFlush hdl))
 
-callback_dec :: Int -> String
-callback_dec port =
+_getCallbackHandle :: Int -> IO Handle
+_getCallbackHandle port =
+  do hdl <- connectTo "127.0.0.1" (PortNumber (fromIntegral port))
+     hSetBuffering hdl (BlockBuffering Nothing)
+     hSetBinaryMode hdl True
+     return hdl
+
+getCallbackHandle_stmt :: Int -> String
+getCallbackHandle_stmt port = "__cb_hdl__ <- _getCallbackHandle " ++ show port
+
+callback_dec' :: String
+callback_dec' =
   unlines ["callback :: Show a => Double -> String -> a -> IO ()"
-          ,"callback = __callback " ++ show port]
+          ,"callback = _callback __cb_hdl__"]
