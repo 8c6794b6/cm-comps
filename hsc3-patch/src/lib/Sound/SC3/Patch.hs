@@ -1,64 +1,75 @@
+{-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE DeriveDataTypeable #-}
 {-# LANGUAGE DeriveGeneric #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE MultiParamTypeClasses #-}
+{-# LANGUAGE FunctionalDependencies #-}
+{-# LANGUAGE FlexibleInstances #-}
+{-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE TypeFamilies #-}
 {-|
-Scratch to work with patching running nodes in scsynth server.
+Copyright   : 8c6794b6, 2014
+License     : BSD3
+
+Maintainer  : 8c6794b6@gmail.com
+Stability   : experimental
+Portability : unknown
+
+Scratch to work with patching nodes in scsynth server.
 -}
 module Sound.SC3.Patch where
 
 import Sound.SC3.Orphan ()
 
-import Control.Monad (unless)
+import Control.Applicative
+import Control.Monad (unless, when)
 import Data.Data (Data, Typeable)
 import GHC.Generics
 import Data.Hashable
 import Data.Int (Int32)
+import Data.Monoid
 import Sound.OSC
 import Sound.SC3
 import Sound.SC3.ID hiding (hash)
 import Sound.SC3.Tree
 
--- | Anonymous synth nodes.
-data An = Ag {-# UNPACK #-} !Int [An]
-        | As !Int {-# UNPACK #-} !String {-# UNPACK #-} !UGen
-          deriving (Eq, Show, Data, Typeable, Generic)
+-- | Anononymous synth nodes.
+data ANode
+  = AGroup {-# UNPACK #-} !Int [ANode]
+  | ASynth {-# UNPACK #-} !Int !String !UGen
+    deriving (Eq, Show, Data, Typeable, Generic)
 
 hashUG :: UGen -> Int32
 hashUG = abs . fromIntegral . hash
 
-ppAn :: An -> String
-ppAn = drawSCNode . anToSCNode
+ppANode :: ANode -> String
+ppANode = drawSCNode . anToSCNode
 
--- | Get synthdef names used in 'An'.
-anSyns :: An -> [(Int,String,UGen)]
-anSyns an =
-  case an of
-    Ag _ ans -> concatMap anSyns ans
-    As i n u -> [(i,n,u)]
+-- | Get synthdef names used in 'ANode'.
+anSyns :: ANode -> [(Int, String, UGen)]
+anSyns an = foldr f [] [an]
+  where
+    f x acc = case x of
+                AGroup _ ans -> foldr f acc ans
+                ASynth i n u -> (i,n,u) : acc
 
-anToSCNode :: An -> SCNode
+anToSCNode :: ANode -> SCNode
 anToSCNode a =
   case a of
-    Ag i ns  -> Group i (map anToSCNode ns)
-    As i n _ -> Synth i n []
+    AGroup i ns  -> Group i (map anToSCNode ns)
+    ASynth i n _ -> Synth i n []
 
-ag :: Int -> [An] -> An
-ag = Ag
-
-as :: UGen -> An
-as ug = As (fromIntegral i) n ug
-  where
-    i = hashUG ug
-    n = "anon_" ++ show i
-
-patch :: Transport m => Int -> An -> m [Message]
+patch :: Transport m => Int -> ANode -> m [Message]
 patch gid an =
   do sn <- getNode gid
      let sn' = filterSCNode (fmap (>= 0) nodeId) sn
-         as_d_recv (_,n,ug) =
-           case queryN (synthName ==? n) sn' of
-             [] -> [d_recv (synthdef n ug)]
-             _  -> []
-         drecvs = concatMap as_d_recv (anSyns an)
+         drecvs =
+           foldr (\(_,n,ug) acc ->
+                    case queryN (synthName ==? n) sn' of
+                      [] -> d_recv (synthdef n ug) : acc
+                      _  -> acc)
+                 []
+                 (anSyns an)
          dms = diffMessage sn' (anToSCNode an)
          msgs
            | null dms && null dms = []
@@ -70,33 +81,83 @@ patch gid an =
                go (dr:drs) = withCM dr (go drs)
      return msgs
 
-an01 :: An
-an01 =
-  ag 0
-     [ag 999 [as (out 100 (sinOsc AR 110.02 0 * 8))]
-     ,ag 1
-          [as (out 0 (sinOsc AR 220 (in' 1 KR 100) *
-                      (sinOsc KR 0.333 0 * 0.1 + 0.2)))
-          ,as (out 1 (sinOsc AR 221 (in' 1 KR 100) *
-                      (sinOsc KR 0.328 0 * 0.1 + 0.2)))]
-     ,ag 2
-         [as (let i = in' 2 AR 0
-                  t = linLin (lfdNoise3 'd' KR 0.03 + 2) 1 3 0.05 0.01
-                  f x acc = allpassN acc 0.01 t x + acc * 0.5
-                  c = foldr f i [0.0032,0.01,0.103,0.238,0.327]
-                  a = c * linLin (lfCub KR 3.8 0) (-1) 1 0.4 0.6
-              in  replaceOut 0 (limiter a 0.9 0.01))]]
+ag :: Int -> [ANode] -> ANode
+ag = AGroup
 
-test_ex01 :: IO ()
-test_ex01 =
-  do withSC3
-       (do msgs <- patch 0 an01
-           now <- time
-           unless (null msgs)
-                  (sendOSC (bundle (now + 0.1) msgs))
-           send (sync (hash now))
-           _ <- waitAddress "/synced"
-           r <- getRootNode
-           liftIO
-             (putStrLn
-                (drawSCNode (filterSCNode (fmap (>= 0) nodeId) r))))
+as :: UGen -> ANode
+as ug = ASynth (fromIntegral i) n ug
+  where
+    i = hashUG ug
+    n = "anon_" ++ show i
+
+-- --------------------------------------------------------------------------
+--
+-- Builder
+--
+-- --------------------------------------------------------------------------
+
+-- | Type class for building 'ANode' with polyvariadic function.
+class Monoid acc => BuildA acc out ret | ret -> out where
+  buildA :: (acc->out) -> acc -> ret
+
+instance (BuildA acc out ret, e ~ acc) => BuildA acc out (e->ret) where
+  buildA f acc = \x -> buildA f (acc <> x)
+
+-- | Wrapper newtype for diff list.
+newtype DiffList a = DiffList {unDiffList :: [a] -> [a]}
+  deriving (Monoid)
+
+-- | Wrapper type to contain intermediate build result.
+newtype AList a = AList {unAList :: DiffList a}
+  deriving (Monoid)
+
+instance Monoid acc => BuildA acc (AList e) (AList e) where
+  buildA f acc = f acc
+
+-- | Convert to 'ANode'. Fail when given 'AList' is empty.
+toANode :: AList ANode -> ANode
+toANode (AList ns) =
+  case unDiffList ns [] of
+    []  -> error "toANode: empty node"
+    x:_ -> x
+
+-- | Group node with node ID.
+gnode :: BuildA (AList ANode) (AList ANode) ret =>
+         Int -> AList ANode -> ret
+gnode n =
+  buildA (\(AList ns) ->
+            let ns' = unDiffList ns []
+            in  AList (DiffList (AGroup n ns' :)))
+
+-- | Anonymous synth node.
+anon :: UGen -> AList ANode
+anon u = AList (DiffList (as u :))
+
+-- | Empty node.
+nil :: AList a
+nil = AList (DiffList id)
+
+--
+-- From: <http://www.haskell.org/haskellwiki/Idiom_brackets>
+--
+
+class Applicative i => Idiomatic i f g | g -> f i where
+  idiomatic :: i f -> g
+
+iI :: Idiomatic i f g => f -> g
+iI = idiomatic . pure
+
+data Ii = Ii
+
+instance Applicative i => Idiomatic i x (Ii -> i x) where
+  idiomatic xi Ii = xi
+
+instance Idiomatic i f g => Idiomatic i (s -> f) (i s -> g) where
+  idiomatic sfi si = idiomatic (sfi <*> si)
+
+-- Needs type signature,
+f01 :: (Idiomatic f f1 (Ii -> t), Num f1) => t
+f01 = iI (+) (pure 3) (pure 8) Ii
+
+-- ... or unused argument to make GHC quiet.
+f02 () = iI (+) (pure 3) (pure 8) Ii
