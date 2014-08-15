@@ -59,8 +59,7 @@ import           System.IO                             (BufferMode (..), Handle,
 import Sound.OSC
 
 import Data.Dynamic
-import Data.Typeable
-import FastString (fsLit)
+import Data.Maybe
 import Var
 import Type
 import Linker
@@ -206,12 +205,8 @@ eval input output =
   liftIO (getChanContents input) >>=
   mapM_ (\x ->
            let x' = BS.unpack x
-           in (evalCallback input output x'
-               `gcatch` \(SomeException _) -> evalStatement input x'
-               `gcatch` \(SomeException e) ->
-                 -- do liftIO (do putStrLn "Caught exception from evalCallback"
-                 --               print e)
-                    evalShow x'
+           in (evalShow x'
+               `gcatch` \(SomeException _) -> evalStatement input output x'
                `gcatch` \(SomeException _) -> evalVoid x'
                `gcatch` \(SomeException _) -> evalLoadOrImport x'
                `gcatch` \(SomeException _) -> evalDec x'
@@ -281,13 +276,13 @@ evalDec dec =
                 else "decs: " ++ concatMap (showPpr dflags) names)
 {-# INLINE evalDec #-}
 
-evalStatement :: Chan ByteString -> String -> Ghc String
-evalStatement input stmt =
+evalStatement :: Chan ByteString -> Chan ByteString -> String -> Ghc String
+evalStatement input output stmt =
   do res' <- runStmt stmt RunToCompletion
      case res' of
        RunOk names ->
          do dflags <- getSessionDynFlags
-            -- tryCallback input names
+            tryCallback input output names
             return
               (if null names
                   then "stmt: no names bound."
@@ -300,48 +295,34 @@ evalStatement input stmt =
                     return "RunBreak")
 {-# INLINE evalStatement #-}
 
-tryCallback :: Chan ByteString -> [Name] -> Ghc ()
-tryCallback input names =
+tryCallback :: Chan ByteString -> Chan ByteString -> [Name] -> Ghc ()
+tryCallback input output names =
   case names of
     name:_ ->
       do mbTyThing <- lookupName name
          case mbTyThing of
            Just (AnId x) | isId x ->
-             do df <- getSessionDynFlags
+             do hsc_env <- getSession
+                df <- getSessionDynFlags
                 let tyX = varType x
-                liftIO (putStrLn (showPpr df tyX))
-                if "Language.Haskell.Replenish.Client.Callback" == showPpr df tyX
-                   then do liftIO (putStrLn "Got Callback, forking.")
-                           forkCallback input name
-                   else liftIO (putStrLn "Got returned type, not callback.")
-           _  -> liftIO (putStrLn "Not an Id")
-    _ -> liftIO (putStrLn "Multiple names given")
+                if "Language.Haskell.Replenish.Client.Callback" ==
+                   showPpr df tyX
+                   then do liftIO (forkCallback input output hsc_env name)
+                   else return ()
+           _  -> return ()
+    _ -> return ()
 
-forkCallback :: Chan ByteString -> Name -> Ghc ()
-forkCallback input name =
-  do df <- getSessionDynFlags
-     hsc_env <- getSession
-     let expr = showPpr df name
-     liftIO (putStrLn ("hscStmt with `" ++ expr ++ "'"))
-     mb_res <- liftIO (hscStmt hsc_env expr)
-     case mb_res of
-       Just (_,hvalsIO,_) ->
-         do hvals <- liftIO hvalsIO
-            case hvals of
-              hval:_ ->
-                do let cb = unsafeCoerce# hval :: Callback
-                   liftIO (putStrLn ("cb = " ++ show cb))
-                   liftIO
-                     (void
-                       (forkIO
-                          (do pauseThreadUntil (cbTime cb)
-                              writeChan input
-                                        (BS.unwords (map BS.pack [cbFunc cb, cbArgs cb])))))
-
-              _ -> return ()
+forkCallback :: Chan ByteString -> Chan ByteString -> HscEnv -> Name -> IO ()
+forkCallback input output hsc_env name =
+  do hval <- getHValue hsc_env name
+     case unsafeCoerce# hval of
+       Callback t f args ->
+         void
+           (forkIO
+              (do pauseThreadUntil t
+                  writeChan input (BS.unwords (map BS.pack [f, args]))
+                  void (readChan output)))
        _ -> return ()
-
-
 
 evalDump :: String -> Ghc String
 evalDump expr

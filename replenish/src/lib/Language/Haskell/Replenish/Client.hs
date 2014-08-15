@@ -49,7 +49,7 @@ data Callback = Callback {cbTime :: Double
                          ,cbFunc :: String
                          ,cbArgs :: String}
               | End
-              deriving (Eq, Show, Data, Typeable)
+              deriving (Eq, Data, Typeable)
 
 callback :: Show a => Double -> String -> a -> IO Callback
 callback scheduled f args = return (Callback scheduled f (show args))
