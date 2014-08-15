@@ -1,3 +1,4 @@
+{-# LANGUAGE DeriveDataTypeable #-}
 {-|
 Copyright   : 8c6794b6, 2014
 License     : BSD3
@@ -18,6 +19,8 @@ import           Network                   (PortID (..), connectTo)
 import           Sound.OSC                 (pauseThreadUntil)
 import           System.IO                 (BufferMode (..), Handle, hFlush,
                                             hSetBinaryMode, hSetBuffering)
+
+import Data.Data (Data, Typeable)
 
 _callback :: Show a => Handle -> Double -> String -> a -> IO ()
 _callback hdl scheduled name args =
@@ -41,3 +44,12 @@ callback_dec' :: String
 callback_dec' =
   unlines ["callback :: Show a => Double -> String -> a -> IO ()"
           ,"callback = _callback __cb_hdl__"]
+
+data Callback = Callback {cbTime :: Double
+                         ,cbFunc :: String
+                         ,cbArgs :: String}
+              | End
+              deriving (Eq, Show, Data, Typeable)
+
+callback :: Show a => Double -> String -> a -> IO Callback
+callback scheduled f args = return (Callback scheduled f (show args))

@@ -56,6 +56,16 @@ import           System.IO                             (BufferMode (..), Handle,
                                                         hSetBinaryMode,
                                                         hSetBuffering)
 
+import Sound.OSC
+
+import Data.Dynamic
+import Data.Typeable
+import FastString (fsLit)
+import Var
+import Type
+import Linker
+import HscMain
+
 -- --------------------------------------------------------------------------
 --
 -- Server
@@ -86,7 +96,7 @@ runServer port =
             putStrLn (unwords ["Client connected from"
                               , host ++ ":" ++ show clientPort])
             let clientPort' = fromIntegral clientPort + 1
-            _ctid <- forkIO (callbackLoop clientPort' input output)
+            -- _ctid <- forkIO (callbackLoop clientPort' input output)
             _htid <- forkIO (handleLoop hdl host clientPort input output)
             void (forkIO (ghcLoop clientPort' me input output)))))
 
@@ -109,23 +119,23 @@ handleLoop hdl host clientPort input output = go
            (map BS.pack ["[", host, ":", show clientPort, "] "])
          `BS.append` bs)
 
--- | Loop to take care of callbacks.
-callbackLoop :: Int -> Chan ByteString -> Chan ByteString -> IO ()
-callbackLoop port input output =
-  bracket
-    (do s <- Network.listenOn (Network.PortNumber (fromIntegral port))
-        (hdl, _, _) <- Network.accept s
-        hSetBuffering hdl (BlockBuffering Nothing)
-        hSetBinaryMode hdl True
-        return (s, hdl))
-    (\(s, hdl) ->
-      do hClose hdl
-         close s)
-    (\(_, hdl) ->
-      do putStrLn "Callback loop ready."
-         forever (do chunk <- BS.hGetSome hdl 8192
-                     writeChan input chunk
-                     void (readChan output)))
+-- -- | Loop to take care of callbacks.
+-- callbackLoop :: Int -> Chan ByteString -> Chan ByteString -> IO ()
+-- callbackLoop port input output =
+--   bracket
+--     (do s <- Network.listenOn (Network.PortNumber (fromIntegral port))
+--         (hdl, _, _) <- Network.accept s
+--         hSetBuffering hdl (BlockBuffering Nothing)
+--         hSetBinaryMode hdl True
+--         return (s, hdl))
+--     (\(s, hdl) ->
+--       do hClose hdl
+--          close s)
+--     (\(_, hdl) ->
+--       do putStrLn "Callback loop ready."
+--          forever (do chunk <- BS.hGetSome hdl 8192
+--                      writeChan input chunk
+--                      void (readChan output)))
 
 -- | Loop to interpret Haskell codes with GHC.
 ghcLoop :: Int -> ThreadId -> Chan ByteString -> Chan ByteString -> IO ()
@@ -163,9 +173,10 @@ ghcLoop port parentThread input output =
                  target <- guessTarget client Nothing
                  setTargets [target]
                  _ <- load LoadAllTargets
-                 setContext [IIModule (mkModuleName client)])
-          void (evalStatement (getCallbackHandle_stmt port))
-          void (evalDec (callback_dec'))
+                 inis <- mapM (fmap IIDecl . parseImportDecl) initialImports
+                 setContext (IIModule (mkModuleName client) : inis))
+          -- void (evalStatement (getCallbackHandle_stmt port))
+          -- void (evalDec (callback_dec'))
           liftIO (putStrLn "GHC loop ready.")
           eval input output))
   `catch`
@@ -184,7 +195,8 @@ showPkgConfRef ref =
     PkgConfFile path -> "PkgConfFile \"" ++ path  ++ "\""
 
 initialImports :: [String]
-initialImports = ["import Prelude"]
+initialImports = ["import Prelude"
+                 ,"import Data.Dynamic"]
 
 initialOptions :: String
 initialOptions = "-XTemplateHaskell"
@@ -194,14 +206,142 @@ eval input output =
   liftIO (getChanContents input) >>=
   mapM_ (\x ->
            let x' = BS.unpack x
-           in (evalShow x'
+           in (evalCallback input output x'
+               `gcatch` \(SomeException _) -> evalStatement input x'
+               `gcatch` \(SomeException e) ->
+                 -- do liftIO (do putStrLn "Caught exception from evalCallback"
+                 --               print e)
+                    evalShow x'
                `gcatch` \(SomeException _) -> evalVoid x'
-               `gcatch` \(SomeException _) -> evalStatement x'
-               `gcatch` \(SomeException _) -> evalDump x'
                `gcatch` \(SomeException _) -> evalLoadOrImport x'
                `gcatch` \(SomeException _) -> evalDec x'
+               `gcatch` \(SomeException _) -> evalDump x'
                `gcatch` \(SomeException e) -> return (show e))
                >>= liftIO . writeChan output . BS.pack)
+
+evalLoadOrImport :: String -> Ghc String
+evalLoadOrImport expr
+  | ":load " `isPrefixOf` expr =
+    do target <- guessTarget (drop 6 expr) Nothing
+       setTargets [target]
+       _ <- load LoadAllTargets
+       loaded <- getModuleGraph >>= filterM isLoaded . map ms_mod_name
+       setContext . map IIDecl =<<
+         mapM parseImportDecl
+              ("import Prelude" :
+               map (\m -> "import " ++ moduleNameString m) loaded)
+       dflags <- getSessionDynFlags
+       return ("loaded: " ++ showPpr dflags target)
+  | otherwise                 =
+    do mdl <- parseImportDecl expr
+       getContext >>= setContext . (IIDecl mdl :)
+       dflags <- getSessionDynFlags
+       return (showPpr dflags mdl)
+{-# INLINE evalLoadOrImport #-}
+
+evalShow :: String -> Ghc String
+evalShow expr =
+  fmap unsafeCoerce# (compileExpr ("Prelude.show (" ++ expr ++ ")"))
+{-# INLINE evalShow #-}
+
+evalVoid :: String -> Ghc String
+evalVoid expr =
+  do hvalue <- compileExpr expr
+     liftIO (do unsafeCoerce# hvalue :: IO ()
+                return "<<IO ()>>")
+{-# INLINE evalVoid #-}
+
+evalCallback :: Chan ByteString -> Chan ByteString -> String -> Ghc String
+evalCallback input output expr =
+  do let stmt = "Data.Dynamic.toDyn (" ++ expr ++ ")"
+     dyn <- fmap unsafeCoerce# (compileExpr stmt)
+     case fromDynamic dyn of
+       Just cb_io ->
+         do cb <- liftIO cb_io
+            case cb of
+              Callback t f args ->
+                do liftIO
+                     (void
+                        (forkIO
+                           (do pauseThreadUntil t
+                               writeChan input
+                                         (BS.unwords [BS.pack f, BS.pack args])
+                               void (readChan output))))
+                   return ("Called back " ++ f)
+              End -> return "Callback terminated."
+       Nothing -> error "Not a callback."
+{-# INLINE evalCallback #-}
+
+evalDec :: String -> Ghc String
+evalDec dec =
+  do names <- runDecls dec
+     dflags <- getSessionDynFlags
+     return (if null names
+                then "decs: no names bound."
+                else "decs: " ++ concatMap (showPpr dflags) names)
+{-# INLINE evalDec #-}
+
+evalStatement :: Chan ByteString -> String -> Ghc String
+evalStatement input stmt =
+  do res' <- runStmt stmt RunToCompletion
+     case res' of
+       RunOk names ->
+         do dflags <- getSessionDynFlags
+            -- tryCallback input names
+            return
+              (if null names
+                  then "stmt: no names bound."
+                  else "stmt: " ++ unwords (map (showPpr dflags) names))
+       RunException e ->
+         liftIO (do putStrLn ("RunException: " ++ show e)
+                    return (show e))
+       RunBreak {} ->
+         liftIO (do putStrLn "Got RunBreak"
+                    return "RunBreak")
+{-# INLINE evalStatement #-}
+
+tryCallback :: Chan ByteString -> [Name] -> Ghc ()
+tryCallback input names =
+  case names of
+    name:_ ->
+      do mbTyThing <- lookupName name
+         case mbTyThing of
+           Just (AnId x) | isId x ->
+             do df <- getSessionDynFlags
+                let tyX = varType x
+                liftIO (putStrLn (showPpr df tyX))
+                if "Language.Haskell.Replenish.Client.Callback" == showPpr df tyX
+                   then do liftIO (putStrLn "Got Callback, forking.")
+                           forkCallback input name
+                   else liftIO (putStrLn "Got returned type, not callback.")
+           _  -> liftIO (putStrLn "Not an Id")
+    _ -> liftIO (putStrLn "Multiple names given")
+
+forkCallback :: Chan ByteString -> Name -> Ghc ()
+forkCallback input name =
+  do df <- getSessionDynFlags
+     hsc_env <- getSession
+     let expr = showPpr df name
+     liftIO (putStrLn ("hscStmt with `" ++ expr ++ "'"))
+     mb_res <- liftIO (hscStmt hsc_env expr)
+     case mb_res of
+       Just (_,hvalsIO,_) ->
+         do hvals <- liftIO hvalsIO
+            case hvals of
+              hval:_ ->
+                do let cb = unsafeCoerce# hval :: Callback
+                   liftIO (putStrLn ("cb = " ++ show cb))
+                   liftIO
+                     (void
+                       (forkIO
+                          (do pauseThreadUntil (cbTime cb)
+                              writeChan input
+                                        (BS.unwords (map BS.pack [cbFunc cb, cbArgs cb])))))
+
+              _ -> return ()
+       _ -> return ()
+
+
 
 evalDump :: String -> Ghc String
 evalDump expr
@@ -243,66 +383,6 @@ evalDump expr
                  mbInfo)
   | otherwise = error "Not a dump command."
 {-# INLINE evalDump #-}
-
-evalLoadOrImport :: String -> Ghc String
-evalLoadOrImport expr
-  | ":load " `isPrefixOf` expr =
-    do target <- guessTarget (drop 6 expr) Nothing
-       setTargets [target]
-       _ <- load LoadAllTargets
-       loaded <- getModuleGraph >>= filterM isLoaded . map ms_mod_name
-       setContext . map IIDecl =<<
-         mapM parseImportDecl
-              ("import Prelude" :
-               map (\m -> "import " ++ moduleNameString m) loaded)
-       dflags <- getSessionDynFlags
-       return ("loaded: " ++ showPpr dflags target)
-  | otherwise                 =
-    do mdl <- parseImportDecl expr
-       getContext >>= setContext . (IIDecl mdl :)
-       dflags <- getSessionDynFlags
-       return (showPpr dflags mdl)
-{-# INLINE evalLoadOrImport #-}
-
-evalVoid :: String -> Ghc String
-evalVoid expr =
-  do hvalue <- compileExpr expr
-     liftIO (do unsafeCoerce# hvalue :: IO ()
-                return "<<IO ()>>")
-{-# INLINE evalVoid #-}
-
-evalShow :: String -> Ghc String
-evalShow expr =
-  fmap unsafeCoerce# (compileExpr ("Prelude.show (" ++ expr ++ ")"))
-{-# INLINE evalShow #-}
-
-evalDec :: String -> Ghc String
-evalDec dec =
-  do names <- runDecls dec
-     dflags <- getSessionDynFlags
-     return (if null names
-                then "dec: no names bound."
-                else "dec: " ++ concatMap (showPpr dflags) names)
-{-# INLINE evalDec #-}
-
-evalStatement :: String -> Ghc String
-evalStatement stmt =
-  do res' <- runStmt stmt RunToCompletion
-     case res' of
-       RunOk names ->
-         do dflags <- getSessionDynFlags
-            return
-              (if null names
-                  then "stmt: no names bound."
-                  else "stmt: " ++ unwords (map (showPpr dflags) names))
-       RunException e ->
-         liftIO (do putStrLn ("RunException: " ++ show e)
-                    return (show e))
-       RunBreak {} ->
-         liftIO (do putStrLn "Got RunBreak"
-                    return "RunBreak")
-{-# INLINE evalStatement #-}
-
 
 -- --------------------------------------------------------------------------
 --
