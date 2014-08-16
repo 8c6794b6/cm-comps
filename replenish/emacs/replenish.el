@@ -16,7 +16,7 @@
 ;; along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 ;; Author: 8c6794b6 <8c6794b6@gmail.com>
-;; Version: 20140813.4
+;; Version: 20140816.1
 ;; Package-Requires: ((haskell-mode "20140805.942") (shm "20140714.341"))
 ;; Keywords: haskell repl
 
@@ -29,7 +29,7 @@
 (require 'shm)
 
 (defgroup replenish nil
-  "Major mode to interact with replenish server"
+  "Minor mode to interact with replenish server."
   :group 'haskell)
 
 (defcustom replenish-default-host "localhost"
@@ -54,6 +54,9 @@
 
 (defvar replenish-port-history nil
   "History of port used for connection.")
+
+(defvar replenish-input-history nil
+  "History for sent input.")
 
 (defun replenish-connect ()
   "Show prompt for connecting to server."
@@ -147,6 +150,13 @@
    replenish-con
    (s-replace "\n" "" (thing-at-point 'line))))
 
+(defun replenish-send-input ()
+  "Show prompt for input and send."
+  (interactive)
+  (process-send-string
+   replenish-con
+   (read-string "Eval: " nil 'replenish-input-history "" nil)))
+
 (defun replenish-info-at-point ()
   "Send for getting info with `thing-at-point'."
   (interactive)
@@ -160,31 +170,33 @@
     (define-key map (kbd "C-c M-k") 'replenish-disconnect)
     (define-key map (kbd "C-c C-c") 'replenish-send-line)
     (define-key map (kbd "C-M-x") 'replenish-send-block)
-    (define-key map (kbd "C-c C-l") nil)
-    (define-key map (kbd "C-c C-t") nil)
+    (define-key map (kbd "C-c :") 'replenish-send-input)
     (define-key map (kbd "C-c TAB") 'replenish-info-at-point)
+    (define-key map [?\C-c ?\C-l] 'replenish-info-at-point)
+    (define-key map [?\C-c ?\C-t] 'replenish-info-at-point)
+    (define-key map [?\C-c ?\C-b] 'replenish-info-at-point)
+    (define-key map [?\C-c ?\C-z] 'replenish-info-at-point)
     map)
   "Keymap for replenish mode.
 Most part of the keymaps are inherited from `haskell-mode'.")
 
-;; ;;;###autoload
-;; (define-minor-mode replenish-mode
-;;   "Minor mode to interact with replenish server."
-;;   :lighter " Replenish"
-;;   :keymap replenish-map)
-
 ;;;###autoload
-(define-derived-mode replenish-mode
-  haskell-mode "HsRepl"
+(define-minor-mode replenish-mode
+  "Minor mode to interact with replenish server.
 
-  "Derived major mode of `haskell-mode' to interact with replenish server.
-Invoke `replenish-connect' before sending messages to server.
+When interactivly turning on, alternative function `replenish'
+does toggling the minor mode and connecting to server.
 
 \\{replenish-mode-map}"
-  (set (make-local-variable 'indent-line-function) 'indent-relative))
+  :lighter " Replenish"
+  :keymap replenish-mode-map)
 
 ;;;###autoload
-(add-to-list 'auto-mode-alist '("\\.hsrepl\\'" . replenish-mode))
+(defun replenish ()
+  "Turn on `replenish-mode' and connect to server."
+  (interactive)
+  (replenish-mode 1)
+  (replenish-connect))
 
 (provide 'replenish)
 
