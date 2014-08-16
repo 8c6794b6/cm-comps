@@ -29,12 +29,12 @@ import           GHC.Paths                             (libdir)
 
 import           Control.Concurrent
 import           Control.Monad                         (filterM, forever,
-                                                        unless, void)
-import           Control.Monad.IO.Class                (liftIO)
+                                                        unless, void, when)
+-- import           Control.Monad.IO.Class                (liftIO)
 import           Data.ByteString                       (ByteString)
 import qualified Data.ByteString.Char8                 as BS
 import           Data.Char                             (isSpace)
-import           Data.IORef                            (readIORef)
+import           Data.IORef                            (atomicModifyIORef', readIORef)
 import           Data.List                             (intersperse, isPrefixOf,
                                                         nub)
 import           Distribution.PackageDescription       (BuildInfo (..),
@@ -52,18 +52,19 @@ import           System.Directory                      (doesFileExist,
 import           System.FilePath                       (takeBaseName, (<.>),
                                                         (</>))
 import           System.IO                             (BufferMode (..), Handle,
-                                                        hClose, hFlush,
+                                                        hFlush,
                                                         hSetBinaryMode,
                                                         hSetBuffering)
 
 import Sound.OSC
 
 import Data.Dynamic
-import Data.Maybe
+import GhcMonad
 import Var
-import Type
 import Linker
 import HscMain
+
+-- import Type
 
 -- --------------------------------------------------------------------------
 --
@@ -94,10 +95,10 @@ runServer port =
             output <- newChan
             putStrLn (unwords ["Client connected from"
                               , host ++ ":" ++ show clientPort])
-            let clientPort' = fromIntegral clientPort + 1
+            -- let clientPort' = fromIntegral clientPort + 1
             -- _ctid <- forkIO (callbackLoop clientPort' input output)
             _htid <- forkIO (handleLoop hdl host clientPort input output)
-            void (forkIO (ghcLoop clientPort' me input output)))))
+            void (forkIO (ghcLoop me input output)))))
 
 -- | Loop to get input and reply output with connected 'Handle'.
 handleLoop
@@ -137,8 +138,8 @@ handleLoop hdl host clientPort input output = go
 --                      void (readChan output)))
 
 -- | Loop to interpret Haskell codes with GHC.
-ghcLoop :: Int -> ThreadId -> Chan ByteString -> Chan ByteString -> IO ()
-ghcLoop port parentThread input output =
+ghcLoop :: ThreadId -> Chan ByteString -> Chan ByteString -> IO ()
+ghcLoop parentThread input output =
   defaultErrorHandler
     defaultFatalMessager
     defaultFlushOut
@@ -205,13 +206,11 @@ eval input output =
   liftIO (getChanContents input) >>=
   mapM_ (\x ->
            let x' = BS.unpack x
-           in (evalShow x'
-               `gcatch` \(SomeException _) -> evalStatement input output x'
-               `gcatch` \(SomeException _) -> evalVoid x'
-               `gcatch` \(SomeException _) -> evalLoadOrImport x'
-               `gcatch` \(SomeException _) -> evalDec x'
-               `gcatch` \(SomeException _) -> evalDump x'
-               `gcatch` \(SomeException e) -> return (show e))
+           in (evalStatement input output x'
+               `gcatch` \(SomeException _e1) -> evalLoadOrImport x'
+               `gcatch` \(SomeException _e3) -> evalDec x'
+               `gcatch` \(SomeException _e4) -> evalDump x'
+               `gcatch` \(SomeException e5) -> return (show e5))
                >>= liftIO . writeChan output . BS.pack)
 
 evalLoadOrImport :: String -> Ghc String
@@ -276,7 +275,7 @@ evalDec dec =
                 else "decs: " ++ concatMap (showPpr dflags) names)
 {-# INLINE evalDec #-}
 
-evalStatement :: Chan ByteString -> Chan ByteString -> String -> Ghc String
+evalStatement :: Chan ByteString -> Chan ByteString -> String -> Ghc [Char]
 evalStatement input output stmt =
   do res' <- runStmt stmt RunToCompletion
      case res' of
@@ -302,27 +301,60 @@ tryCallback input output names =
       do mbTyThing <- lookupName name
          case mbTyThing of
            Just (AnId x) | isId x ->
-             do hsc_env <- getSession
-                df <- getSessionDynFlags
-                let tyX = varType x
-                if "Language.Haskell.Replenish.Client.Callback" ==
-                   showPpr df tyX
-                   then do liftIO (forkCallback input output hsc_env name)
-                   else return ()
+             do df <- getSessionDynFlags
+                when
+                  (cbTyStr == showPpr df (varType x))
+                  (reifyGhc (forkCallback input output name))
            _  -> return ()
     _ -> return ()
+{-# INLINE tryCallback #-}
 
-forkCallback :: Chan ByteString -> Chan ByteString -> HscEnv -> Name -> IO ()
-forkCallback input output hsc_env name =
-  do hval <- getHValue hsc_env name
+-- XXX: Better to compare with other thing than String.
+cbTyStr :: String
+cbTyStr = "Language.Haskell.Replenish.Client.Callback"
+
+forkCallback
+  :: Chan ByteString -> Chan ByteString -> Name -> Session -> IO ()
+forkCallback input output name (Session session) =
+  do hsc_env <- readIORef session
+     hval <- getHValue hsc_env name
      case unsafeCoerce# hval of
+       -- cb@(Callback {}) -> void (forkIO (loopCallback cb))
        Callback t f args ->
          void
            (forkIO
               (do pauseThreadUntil t
                   writeChan input (BS.unwords (map BS.pack [f, args]))
                   void (readChan output)))
-       _ -> return ()
+       _  -> return ()
+  where
+    -- Unused. Get segfault after updating function with same name.
+    loopCallback :: Callback -> IO ()
+    loopCallback cb =
+      case cb of
+        Callback t f args ->
+          do pauseThreadUntil t
+             hsc_env <- readIORef session
+             r <- hscStmt hsc_env (unwords [f, args])
+             putStrLn ("Done hscStmt with: " ++ f ++ " " ++ args)
+             case r of
+                Just (is, hvals_io, fixity) ->
+                 do let up e = e {hsc_IC = (extendInteractiveContext
+                                             (hsc_IC e)
+                                             (map AnId is))
+                                             {ic_fix_env = fixity}}
+                    hvals <- hvals_io
+                    extendLinkEnv (zip (map getName is) hvals)
+                    atomicModifyIORef'
+                      session
+                      (\hsc_env' -> (up hsc_env', ()))
+                    putStrLn "Done hvals_io"
+                    case hvals of
+                      hval:_ -> loopCallback (unsafeCoerce# hval)
+                      _      -> return ()
+                _ -> return ()
+        End -> return ()
+{-# INLINE forkCallback #-}
 
 evalDump :: String -> Ghc String
 evalDump expr
