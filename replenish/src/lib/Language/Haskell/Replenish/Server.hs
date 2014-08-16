@@ -58,7 +58,6 @@ import           System.IO                             (BufferMode (..), Handle,
 
 import Sound.OSC
 
-import Data.Dynamic
 import GhcMonad
 import Var
 import Linker
@@ -95,8 +94,6 @@ runServer port =
             output <- newChan
             putStrLn (unwords ["Client connected from"
                               , host ++ ":" ++ show clientPort])
-            -- let clientPort' = fromIntegral clientPort + 1
-            -- _ctid <- forkIO (callbackLoop clientPort' input output)
             _htid <- forkIO (handleLoop hdl host clientPort input output)
             void (forkIO (ghcLoop me input output)))))
 
@@ -118,24 +115,6 @@ handleLoop hdl host clientPort input output = go
         (BS.concat
            (map BS.pack ["[", host, ":", show clientPort, "] "])
          `BS.append` bs)
-
--- -- | Loop to take care of callbacks.
--- callbackLoop :: Int -> Chan ByteString -> Chan ByteString -> IO ()
--- callbackLoop port input output =
---   bracket
---     (do s <- Network.listenOn (Network.PortNumber (fromIntegral port))
---         (hdl, _, _) <- Network.accept s
---         hSetBuffering hdl (BlockBuffering Nothing)
---         hSetBinaryMode hdl True
---         return (s, hdl))
---     (\(s, hdl) ->
---       do hClose hdl
---          close s)
---     (\(_, hdl) ->
---       do putStrLn "Callback loop ready."
---          forever (do chunk <- BS.hGetSome hdl 8192
---                      writeChan input chunk
---                      void (readChan output)))
 
 -- | Loop to interpret Haskell codes with GHC.
 ghcLoop :: ThreadId -> Chan ByteString -> Chan ByteString -> IO ()
@@ -175,8 +154,6 @@ ghcLoop parentThread input output =
                  _ <- load LoadAllTargets
                  inis <- mapM (fmap IIDecl . parseImportDecl) initialImports
                  setContext (IIModule (mkModuleName client) : inis))
-          -- void (evalStatement (getCallbackHandle_stmt port))
-          -- void (evalDec (callback_dec'))
           liftIO (putStrLn "GHC loop ready.")
           eval input output))
   `catch`
@@ -232,39 +209,6 @@ evalLoadOrImport expr
        dflags <- getSessionDynFlags
        return (showPpr dflags mdl)
 {-# INLINE evalLoadOrImport #-}
-
-evalShow :: String -> Ghc String
-evalShow expr =
-  fmap unsafeCoerce# (compileExpr ("Prelude.show (" ++ expr ++ ")"))
-{-# INLINE evalShow #-}
-
-evalVoid :: String -> Ghc String
-evalVoid expr =
-  do hvalue <- compileExpr expr
-     liftIO (do unsafeCoerce# hvalue :: IO ()
-                return "<<IO ()>>")
-{-# INLINE evalVoid #-}
-
-evalCallback :: Chan ByteString -> Chan ByteString -> String -> Ghc String
-evalCallback input output expr =
-  do let stmt = "Data.Dynamic.toDyn (" ++ expr ++ ")"
-     dyn <- fmap unsafeCoerce# (compileExpr stmt)
-     case fromDynamic dyn of
-       Just cb_io ->
-         do cb <- liftIO cb_io
-            case cb of
-              Callback t f args ->
-                do liftIO
-                     (void
-                        (forkIO
-                           (do pauseThreadUntil t
-                               writeChan input
-                                         (BS.unwords [BS.pack f, BS.pack args])
-                               void (readChan output))))
-                   return ("Called back " ++ f)
-              End -> return "Callback terminated."
-       Nothing -> error "Not a callback."
-{-# INLINE evalCallback #-}
 
 evalDec :: String -> Ghc String
 evalDec dec =
@@ -336,7 +280,6 @@ forkCallback input output name (Session session) =
           do pauseThreadUntil t
              hsc_env <- readIORef session
              r <- hscStmt hsc_env (unwords [f, args])
-             putStrLn ("Done hscStmt with: " ++ f ++ " " ++ args)
              case r of
                 Just (is, hvals_io, fixity) ->
                  do let up e = e {hsc_IC = (extendInteractiveContext
@@ -348,7 +291,6 @@ forkCallback input output name (Session session) =
                     atomicModifyIORef'
                       session
                       (\hsc_env' -> (up hsc_env', ()))
-                    putStrLn "Done hvals_io"
                     case hvals of
                       hval:_ -> loopCallback (unsafeCoerce# hval)
                       _      -> return ()
@@ -396,6 +338,7 @@ evalDump expr
                  mbInfo)
   | otherwise = error "Not a dump command."
 {-# INLINE evalDump #-}
+
 
 -- --------------------------------------------------------------------------
 --
