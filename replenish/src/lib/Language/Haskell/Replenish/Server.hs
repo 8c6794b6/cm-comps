@@ -1,4 +1,4 @@
-{-# LANGUAGE MagicHash         #-}
+{-# LANGUAGE MagicHash #-}
 {-|
 Copyright   : 8c6794b6, 2014
 License     : BSD3
@@ -24,17 +24,17 @@ import           Outputable                            (Outputable (..),
 import           PprTyThing                            (pprTyThingHdr)
 
 import           GHC.Exts                              (unsafeCoerce#)
+import           GHC.IO.Handle
 import           GHC.Paths                             (libdir)
-import GHC.IO.Handle
 
 import           Control.Concurrent
 import           Control.Monad                         (filterM, forever,
-                                                        unless, void, when)
--- import           Control.Monad.IO.Class                (liftIO)
+                                                        unless, void)
 import           Data.ByteString                       (ByteString)
 import qualified Data.ByteString.Char8                 as BS
 import           Data.Char                             (isSpace)
-import           Data.IORef                            (atomicModifyIORef', readIORef)
+import           Data.IORef                            (atomicModifyIORef',
+                                                        readIORef)
 import           Data.List                             (intersperse, isPrefixOf,
                                                         nub)
 import           Distribution.PackageDescription       (BuildInfo (..),
@@ -48,27 +48,20 @@ import           Distribution.Verbosity                (normal)
 import qualified Network                               as Network
 import           Network.Socket                        hiding (send)
 import           System.Directory                      (doesFileExist,
-                                                        getCurrentDirectory, getTemporaryDirectory)
+                                                        getCurrentDirectory)
 import           System.FilePath                       (takeBaseName, (<.>),
                                                         (</>))
 import           System.IO                             (BufferMode (..), Handle,
-                                                        openFile,
-                                                        stdout,
-                                                        IOMode (..),
-                                                        openTempFile,
-                                                        hFlush,
-
+                                                        IOMode (..), hFlush,
                                                         hSetBinaryMode,
-                                                        hSetBuffering)
+                                                        hSetBuffering, openFile,
+                                                        openTempFile, stdout)
+import           Sound.OSC (pauseThreadUntil)
 
-import Sound.OSC
-
-import GhcMonad
-import Var
-import Linker
-import HscMain
-
--- import Type
+import           GhcMonad
+import           HscMain
+import           Linker
+import           Var
 
 -- --------------------------------------------------------------------------
 --
@@ -110,7 +103,7 @@ handleLoop hdl host clientPort input output = forkIO outLoop >> inLoop
   where
     inLoop = forever (do chunk <- BS.hGetSome hdl 65536
                          unless (BS.all isSpace chunk)
-                                (do -- mapM_ showLine (BS.lines chunk)
+                                (do mapM_ showLine (BS.lines chunk)
                                     writeChan input chunk))
     outLoop = forever (do BS.hPutStr hdl =<< readChan output
                           hFlush hdl)
@@ -181,17 +174,8 @@ initialImports = ["import Prelude"]
 initialOptions :: String
 initialOptions = "-XTemplateHaskell"
 
-eval ::  Chan ByteString -> Chan ByteString -> Ghc ()
+eval :: Chan ByteString -> Chan ByteString -> Ghc ()
 eval input output =
-  -- liftIO (getChanContents input) >>=
-  -- mapM_ (\x ->
-  --          let x' = BS.unpack x
-  --          in (evalStatement input output path x'
-  --              `gcatch` \(SomeException _e1) -> evalLoadOrImport x'
-  --              `gcatch` \(SomeException _e3) -> evalDec x'
-  --              `gcatch` \(SomeException _e4) -> evalDump x'
-  --              `gcatch` \(SomeException e5) -> return (show e5))
-  --              >>= liftIO . writeChan output . BS.pack)
   forever
     (do expr <- liftIO (readChan input)
         let x = BS.unpack expr
@@ -226,43 +210,31 @@ evalDec :: String -> Ghc (Maybe String)
 evalDec dec =
   do names <- runDecls dec
      dflags <- getSessionDynFlags
-     return (Just (if null names
-                       then "decs: no names bound."
-                       else "decs: " ++ concatMap (showPpr dflags) names))
+     if null names
+        then return Nothing
+        else do decs <- mapM (showDec dflags) names
+                return (Just ("dec: " ++ unwords decs))
+  where
+    showDec :: (GhcMonad m) => DynFlags-> Name -> m String
+    showDec df name =
+      do Just (t, _, _, _) <- getInfo True name
+         return (unwords [showSDocUnqual df (pprTyThingHdr t)])
 {-# INLINE evalDec #-}
 
 evalStatement :: Chan ByteString -> String -> Ghc (Maybe String)
--- evalStatement input output path stmt =
---   do res' <- runStmt (interceptStmt path stmt) RunToCompletion
---      case res' of
---        RunOk names ->
---          do dflags <- getSessionDynFlags
---             tryCallback input output names
---             return
---               (if null names
---                   then "stmt: no names bound."
---                   else "stmt: " ++ unwords (map (showPpr dflags) names))
---        RunException e ->
---          liftIO (do putStrLn ("RunException: " ++ show e)
---                     return (show e))
---        RunBreak {} ->
---          liftIO (do putStrLn "Got RunBreak"
---                     return "RunBreak")
 evalStatement input stmt =
   do hsc_env <- getSession
-     r <- liftIO (hscStmt hsc_env stmt)
+     r <- runStmt stmt RunToCompletion
      case r of
-       Just (vars, hvals_io, fixty) ->
-         do updateFixityEnv hsc_env fixty
-            hvals <- liftIO hvals_io
-            case (vars, hvals) of
-              (var:_, hval:_) -> forkOrShow (hsc_dflags hsc_env) var hval
-              _               -> return (Just "ambiguous or not hvals.")
-       Nothing -> return (Just "not a statement.")
+       RunOk (name:_) ->
+         do Just (thing,_,_,_) <- getInfo False name
+            case thing of
+              AnId var -> do hval <- liftIO (getHValue hsc_env name)
+                             forkOrShow (hsc_dflags hsc_env) var hval
+              _        -> return Nothing
+       RunException e -> return (Just ("RunException: " ++ show e))
+       _              -> return (Just "stmt: unknown error.")
   where
-    updateFixityEnv hsc_env fix_env =
-      let ic = hsc_IC hsc_env
-      in  setSession $ hsc_env {hsc_IC = ic {ic_fix_env = fix_env}}
     forkOrShow df var hval
       | isId var && cbTyStr == tyStr =
         case unsafeCoerce# hval of
@@ -270,9 +242,11 @@ evalStatement input stmt =
                               return Nothing
           _             -> return (Just tyStr)
       | otherwise =
-       do let expr = "Prelude.show (" ++ showPpr df (getName var) ++ ")"
-          r <- fmap unsafeCoerce# (compileExpr expr)
-          return (Just (r ++ " :: " ++ tyStr))
+        do let expr' = "Prelude.show (" ++ showPpr df (getName var) ++ ")"
+           either_hval' <- gtry (compileExpr expr')
+           case either_hval' of
+             Right hval' -> return (Just (unsafeCoerce# hval'))
+             Left err    -> return (Just (show (err :: SomeException)))
       where
         tyStr = showPpr df (varType var)
     forkIt cb =
@@ -284,64 +258,35 @@ evalStatement input stmt =
         _ -> return ()
 {-# INLINE evalStatement #-}
 
-tryCallback :: Chan ByteString -> Chan ByteString -> [Name] -> Ghc ()
-tryCallback input output names =
-  case names of
-    name:_ ->
-      do mbTyThing <- lookupName name
-         case mbTyThing of
-           Just (AnId x) | isId x ->
-             do df <- getSessionDynFlags
-                when (cbTyStr == showPpr df (varType x))
-                     (reifyGhc (forkCallback input output name))
-           _  -> return ()
-    _ -> return ()
-{-# INLINE tryCallback #-}
-
--- XXX: Better to compare with other thing than String.
+-- Better to compare with other thing than String.
 cbTyStr :: String
 cbTyStr = "Language.Haskell.Replenish.Client.Callback"
 
-forkCallback
-  :: Chan ByteString -> Chan ByteString -> Name -> Session -> IO ()
-forkCallback input output name (Session session) =
-  do hsc_env <- readIORef session
-     hval <- getHValue hsc_env name
-     case unsafeCoerce# hval of
-       -- cb@(Callback {}) -> void (forkIO (loopCallback cb))
-       Callback t f args ->
-         void
-           (forkIO
-              (do pauseThreadUntil t
-                  writeChan input (BS.unwords (map BS.pack [f, args]))
-                  void (forkIO (void (readChan output)))))
-       _  -> return ()
-  where
-    -- Unused. Get segfault after updating function with same name.
-    loopCallback :: Callback -> IO ()
-    loopCallback cb =
-      case cb of
-        Callback t f args ->
-          do pauseThreadUntil t
-             hsc_env <- readIORef session
-             r <- hscStmt hsc_env (unwords [f, args])
-             case r of
-                Just (is, hvals_io, fixity) ->
-                 do let up e = e {hsc_IC = (extendInteractiveContext
-                                             (hsc_IC e)
-                                             (map AnId is))
-                                             {ic_fix_env = fixity}}
-                    hvals <- hvals_io
-                    extendLinkEnv (zip (map getName is) hvals)
-                    atomicModifyIORef'
-                      session
-                      (\hsc_env' -> (up hsc_env', ()))
-                    case hvals of
-                      hval:_ -> loopCallback (unsafeCoerce# hval)
-                      _      -> return ()
-                _ -> return ()
-        End -> return ()
-{-# INLINE forkCallback #-}
+-- Unused. Getting segfault after updating function with same name.
+loopCallback :: Callback -> Session -> IO ()
+loopCallback cb (Session session) =
+  case cb of
+    Callback t f args ->
+      do pauseThreadUntil t
+         hsc_env <- readIORef session
+         r <- hscStmt hsc_env (unwords [f, args])
+         case r of
+            Just (is, hvals_io, fixity) ->
+             do let up e = e {hsc_IC = (extendInteractiveContext
+                                         (hsc_IC e)
+                                         (map AnId is))
+                                         {ic_fix_env = fixity}}
+                hvals <- hvals_io
+                extendLinkEnv (zip (map getName is) hvals)
+                atomicModifyIORef'
+                  session
+                  (\hsc_env' -> (up hsc_env', ()))
+                case hvals of
+                  hval:_ -> loopCallback (unsafeCoerce# hval) (Session session)
+                  _      -> return ()
+            _ -> return ()
+    End -> return ()
+{-# INLINE loopCallback #-}
 
 evalDump :: String -> Ghc (Maybe String)
 evalDump expr
