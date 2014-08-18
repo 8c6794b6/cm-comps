@@ -22,3 +22,11 @@ data Callback = Callback {cbTime :: Double
 
 callback :: Show a => Double -> String -> a -> IO Callback
 callback scheduled f args = return (Callback scheduled f (show args))
+
+data RawString = RawString String
+
+instance Show RawString where
+  show (RawString str) = str
+
+readyMessage :: RawString
+readyMessage = RawString "GHC loop ready."

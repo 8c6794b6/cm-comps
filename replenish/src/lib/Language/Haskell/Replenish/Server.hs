@@ -22,12 +22,14 @@ import           HscTypes
 import           Outputable                            (Outputable (..),
                                                         showPpr, showSDocUnqual)
 import           PprTyThing                            (pprTyThingHdr)
+import           Var                                   (isId, varType)
 
 import           GHC.Exts                              (unsafeCoerce#)
-import           GHC.IO.Handle
 import           GHC.Paths                             (libdir)
 
-import           Control.Concurrent
+import           Control.Concurrent                    (Chan, ThreadId, forkIO,
+                                                        myThreadId, newChan,
+                                                        readChan, writeChan)
 import           Control.Monad                         (filterM, forever,
                                                         unless, void)
 import           Data.ByteString                       (ByteString)
@@ -47,21 +49,19 @@ import           Distribution.PackageDescription.Parse (readPackageDescription)
 import           Distribution.Verbosity                (normal)
 import qualified Network                               as Network
 import           Network.Socket                        hiding (send)
+import           Sound.OSC                             (pauseThreadUntil)
 import           System.Directory                      (doesFileExist,
                                                         getCurrentDirectory)
 import           System.FilePath                       (takeBaseName, (<.>),
                                                         (</>))
 import           System.IO                             (BufferMode (..), Handle,
-                                                        IOMode (..), hFlush,
-                                                        hSetBinaryMode,
-                                                        hSetBuffering, openFile,
-                                                        openTempFile, stdout)
-import           Sound.OSC (pauseThreadUntil)
+                                                        hFlush, hSetBinaryMode,
+                                                        hSetBuffering)
 
 import           GhcMonad
 import           HscMain
 import           Linker
-import           Var
+
 
 -- --------------------------------------------------------------------------
 --
@@ -151,7 +151,7 @@ ghcLoop parentThread input output =
                  _ <- load LoadAllTargets
                  inis <- mapM (fmap IIDecl . parseImportDecl) initialImports
                  setContext (IIModule (mkModuleName client) : inis))
-          liftIO (putStrLn "GHC loop ready.")
+          liftIO (writeChan input (BS.pack "readyMessage"))
           eval input output))
   `catch`
   \UserInterrupt ->
@@ -179,117 +179,12 @@ eval input output =
   forever
     (do expr <- liftIO (readChan input)
         let x = BS.unpack expr
-        result <- evalStatement input x `gcatch`
-                  \(SomeException _) -> evalLoadOrImport x `gcatch`
-                  \(SomeException _) -> evalDec x `gcatch`
-                  \(SomeException _) -> evalDump x `gcatch`
+        result <- evalDump input x `gcatch`
                   \(SomeException e) -> return (Just (show e))
         maybe (return ()) (liftIO . writeChan output . BS.pack) result)
 
-evalLoadOrImport :: String -> Ghc (Maybe String)
-evalLoadOrImport expr
-  | ":load " `isPrefixOf` expr =
-    do target <- guessTarget (drop 6 expr) Nothing
-       setTargets [target]
-       _ <- load LoadAllTargets
-       loaded <- getModuleGraph >>= filterM isLoaded . map ms_mod_name
-       setContext . map IIDecl =<<
-         mapM parseImportDecl
-              ("import Prelude" :
-               map (\m -> "import " ++ moduleNameString m) loaded)
-       dflags <- getSessionDynFlags
-       return (Just ("loaded: " ++ showPpr dflags target))
-  | otherwise                 =
-    do mdl <- parseImportDecl expr
-       getContext >>= setContext . (IIDecl mdl :)
-       dflags <- getSessionDynFlags
-       return (Just (showPpr dflags mdl))
-{-# INLINE evalLoadOrImport #-}
-
-evalDec :: String -> Ghc (Maybe String)
-evalDec dec =
-  do names <- runDecls dec
-     dflags <- getSessionDynFlags
-     if null names
-        then return Nothing
-        else do decs <- mapM (showDec dflags) names
-                return (Just ("dec: " ++ unwords decs))
-  where
-    showDec :: (GhcMonad m) => DynFlags-> Name -> m String
-    showDec df name =
-      do Just (t, _, _, _) <- getInfo True name
-         return (unwords [showSDocUnqual df (pprTyThingHdr t)])
-{-# INLINE evalDec #-}
-
-evalStatement :: Chan ByteString -> String -> Ghc (Maybe String)
-evalStatement input stmt =
-  do hsc_env <- getSession
-     r <- runStmt stmt RunToCompletion
-     case r of
-       RunOk (name:_) ->
-         do Just (thing,_,_,_) <- getInfo False name
-            case thing of
-              AnId var -> do hval <- liftIO (getHValue hsc_env name)
-                             forkOrShow (hsc_dflags hsc_env) var hval
-              _        -> return Nothing
-       RunException e -> return (Just ("RunException: " ++ show e))
-       _              -> return (Just "stmt: unknown error.")
-  where
-    forkOrShow df var hval
-      | isId var && cbTyStr == tyStr =
-        case unsafeCoerce# hval of
-          cb@Callback{} -> do liftIO (forkIt cb)
-                              return Nothing
-          _             -> return (Just tyStr)
-      | otherwise =
-        do let expr' = "Prelude.show (" ++ showPpr df (getName var) ++ ")"
-           either_hval' <- gtry (compileExpr expr')
-           case either_hval' of
-             Right hval' -> return (Just (unsafeCoerce# hval'))
-             Left err    -> return (Just (show (err :: SomeException)))
-      where
-        tyStr = showPpr df (varType var)
-    forkIt cb =
-      case cb of
-        Callback t f args ->
-          void (forkIO
-                  (do pauseThreadUntil t
-                      writeChan input (BS.unwords (map BS.pack [f, args]))))
-        _ -> return ()
-{-# INLINE evalStatement #-}
-
--- Better to compare with other thing than String.
-cbTyStr :: String
-cbTyStr = "Language.Haskell.Replenish.Client.Callback"
-
--- Unused. Getting segfault after updating function with same name.
-loopCallback :: Callback -> Session -> IO ()
-loopCallback cb (Session session) =
-  case cb of
-    Callback t f args ->
-      do pauseThreadUntil t
-         hsc_env <- readIORef session
-         r <- hscStmt hsc_env (unwords [f, args])
-         case r of
-            Just (is, hvals_io, fixity) ->
-             do let up e = e {hsc_IC = (extendInteractiveContext
-                                         (hsc_IC e)
-                                         (map AnId is))
-                                         {ic_fix_env = fixity}}
-                hvals <- hvals_io
-                extendLinkEnv (zip (map getName is) hvals)
-                atomicModifyIORef'
-                  session
-                  (\hsc_env' -> (up hsc_env', ()))
-                case hvals of
-                  hval:_ -> loopCallback (unsafeCoerce# hval) (Session session)
-                  _      -> return ()
-            _ -> return ()
-    End -> return ()
-{-# INLINE loopCallback #-}
-
-evalDump :: String -> Ghc (Maybe String)
-evalDump expr
+evalDump :: Chan ByteString -> String -> Ghc (Maybe String)
+evalDump input expr
   | ":dump_hsc_env" `isPrefixOf` expr =
     do hsc_env <- getSession
        liftIO
@@ -327,8 +222,128 @@ evalDump expr
                           is = t' : map pp cs
                       in  concat (intersperse "\n" is))
                     mbInfo))
-  | otherwise = error "Not a dump command."
+  | otherwise = evalLoadOrImport input expr
 {-# INLINE evalDump #-}
+
+evalLoadOrImport :: Chan ByteString -> String -> Ghc (Maybe String)
+evalLoadOrImport input expr
+  | ":load " `isPrefixOf` expr =
+    do target <- guessTarget (drop 6 expr) Nothing
+       setTargets [target]
+       _ <- load LoadAllTargets
+       loaded <- getModuleGraph >>= filterM isLoaded . map ms_mod_name
+       setContext . map IIDecl =<<
+         mapM parseImportDecl
+              ("import Prelude" :
+               map (\m -> "import " ++ moduleNameString m) loaded)
+       dflags <- getSessionDynFlags
+       return (Just ("loaded: " ++ showPpr dflags target))
+  | "import " `isPrefixOf` expr =
+    do mdl <- parseImportDecl expr
+       getContext >>= setContext . (IIDecl mdl :)
+       dflags <- getSessionDynFlags
+       return (Just (showPpr dflags mdl))
+  | otherwise = evalStatement input expr
+{-# INLINE evalLoadOrImport #-}
+
+evalStatement :: Chan ByteString -> String -> Ghc (Maybe String)
+evalStatement input stmt =
+  do hsc_env <- getSession
+     r <- gtry (runStmt stmt RunToCompletion)
+     case r of
+       Right (RunOk [])       -> return Nothing
+       Right (RunOk (name:_)) ->
+         do Just (thing,_,_,_) <- getInfo False name
+            case thing of
+              AnId var -> do hval <- liftIO (getHValue hsc_env name)
+                             forkOrShow (hsc_dflags hsc_env) var hval
+              _        -> return Nothing
+       Right (RunException e) -> return (Just ("RunException: " ++ show e))
+       Right (RunBreak{})     -> return (Just "RunBreak")
+       Left (SomeException e)
+         | looksLikeParseError (show e) -> evalDec stmt
+         | otherwise                    -> return (Just (show e))
+  where
+    forkOrShow df var hval
+      | isId var && cbTyStr == tyStr =
+        do liftIO (forkIt (unsafeCoerce# hval))
+           return Nothing
+      | isId var && cbsTyStr == tyStr =
+        do liftIO (mapM_ forkIt (unsafeCoerce# hval))
+           return Nothing
+      | otherwise =
+        do let expr' = "Prelude.show (" ++ showPpr df (getName var) ++ ")"
+           either_hval' <- gtry (compileExpr expr')
+           case either_hval' of
+             Right hval' -> return (Just (unsafeCoerce# hval'))
+             Left (SomeException err) -> return (Just (show err))
+      where
+        tyStr = showPpr df (varType var)
+
+    forkIt :: Callback -> IO ()
+    forkIt cb =
+      case cb of
+        Callback t f args ->
+          void (forkIO
+                  (do pauseThreadUntil t
+                      writeChan input (BS.unwords (map BS.pack [f, args]))))
+        _ -> return ()
+
+    -- Better to compare with other thing than String.
+    cbTyStr :: String
+    cbTyStr = "Language.Haskell.Replenish.Client.Callback"
+
+    cbsTyStr :: String
+    cbsTyStr = "[" ++ cbTyStr ++ "]"
+
+    looksLikeParseError :: String -> Bool
+    looksLikeParseError errString
+      | "parse error " `isPrefixOf` errString = True
+      | otherwise = False
+
+{-# INLINE evalStatement #-}
+
+-- Unused. Getting segfault after updating function with same name.
+loopCallback :: Callback -> Session -> IO ()
+loopCallback cb (Session session) =
+  case cb of
+    Callback t f args ->
+      do pauseThreadUntil t
+         hsc_env <- readIORef session
+         r <- hscStmt hsc_env (unwords [f, args])
+         case r of
+            Just (is, hvals_io, fixity) ->
+             do let up e = e {hsc_IC = (extendInteractiveContext
+                                         (hsc_IC e)
+                                         (map AnId is))
+                                         {ic_fix_env = fixity}}
+                hvals <- hvals_io
+                extendLinkEnv (zip (map getName is) hvals)
+                atomicModifyIORef'
+                  session
+                  (\hsc_env' -> (up hsc_env', ()))
+                case hvals of
+                  hval:_ -> loopCallback (unsafeCoerce# hval) (Session session)
+                  _      -> return ()
+            _ -> return ()
+    End -> return ()
+{-# INLINE loopCallback #-}
+
+-- | Evaluate declarations.
+evalDec :: String -> Ghc (Maybe String)
+evalDec dec =
+  do names <- runDecls dec
+     dflags <- getSessionDynFlags
+     if null names
+        then return Nothing
+        else do decs <- mapM (showDec dflags) names
+                return (Just ("dec: " ++ unwords decs))
+  where
+    showDec :: GhcMonad m => DynFlags-> Name -> m String
+    showDec df name =
+      do Just (t, _, _, _) <- getInfo True name
+         return (unwords [showSDocUnqual df (pprTyThingHdr t)])
+{-# INLINE evalDec #-}
 
 
 -- --------------------------------------------------------------------------
