@@ -1,4 +1,5 @@
 {-# LANGUAGE MagicHash #-}
+{-# LANGUAGE ViewPatterns #-}
 {-|
 Copyright   : 8c6794b6, 2014
 License     : BSD3
@@ -7,7 +8,7 @@ Maintainer  : 8c6794b6@gmail.com
 Stability   : experimental
 Portability : non-portable (GHC only)
 
-Simple REPL server, implemented with GHC. Supports defining (and redefining)
+A small REPL server implemented with GHC. Supports defining (and redefining)
 top-level functions without @let@ and function callback by name.
 
 -}
@@ -31,7 +32,7 @@ import           Control.Concurrent                    (Chan, ThreadId, forkIO,
                                                         myThreadId, newChan,
                                                         readChan, writeChan)
 import           Control.Monad                         (filterM, forever,
-                                                        unless, void)
+                                                        unless, void, when)
 import           Data.ByteString                       (ByteString)
 import qualified Data.ByteString.Char8                 as BS
 import           Data.Char                             (isSpace)
@@ -51,16 +52,23 @@ import qualified Network                               as Network
 import           Network.Socket                        hiding (send)
 import           Sound.OSC                             (pauseThreadUntil)
 import           System.Directory                      (doesFileExist,
-                                                        getCurrentDirectory)
+                                                        removeFile,
+                                                        getCurrentDirectory,
+                                                        getTemporaryDirectory)
 import           System.FilePath                       (takeBaseName, (<.>),
                                                         (</>))
 import           System.IO                             (BufferMode (..), Handle,
+                                                        openFile, hIsEOF, hClose, IOMode (..),
                                                         hFlush, hSetBinaryMode,
-                                                        hSetBuffering)
+                                                        hSetBuffering, openTempFile,
+                                                        withFile)
 
 import           GhcMonad
 import           HscMain
 import           Linker
+
+import System.Posix.IO
+import System.Posix.Files
 
 
 -- --------------------------------------------------------------------------
@@ -86,14 +94,38 @@ runServer port =
      (\(s, me) ->
        forever
         (do (hdl, host, clientPort) <- Network.accept s
+            putStrLn (unwords ["Client connected from"
+                              , host ++ ":" ++ show clientPort])
             hSetBuffering hdl (BlockBuffering Nothing)
             hSetBinaryMode hdl True
             input <- newChan
             output <- newChan
-            putStrLn (unwords ["Client connected from"
-                              , host ++ ":" ++ show clientPort])
-            _htid <- forkIO (handleLoop hdl host clientPort input output)
-            void (forkIO (ghcLoop me input output)))))
+            tmpd <- getTemporaryDirectory
+            let opath = tmpd ++ "/replenish.out." ++
+                        show (fromIntegral clientPort :: Int)
+            createNamedPipe opath stdFileMode
+            putStrLn ("Opened " ++ show opath ++ " for output")
+            ohdl <- openFile opath ReadMode
+            hSetBuffering ohdl NoBuffering
+            hSetBinaryMode ohdl True
+            _ptid <- forkIO (printLoop ohdl output)
+            _gtid <- forkIO (ghcLoop opath me input output)
+            void (forkIO (handleLoop hdl host clientPort input output)))))
+
+printLoop :: Handle -> Chan ByteString -> IO ()
+printLoop readHdl output =
+  forever (do chunk <- BS.hGetSome readHdl 8192
+              writeChan output chunk)
+  -- do eof <- hIsEOF readHdl
+  --    if eof
+  --       then do hClose readHdl
+  --               readHdl' <- openFile readPath ReadMode
+  --               hSetBuffering readHdl' NoBuffering
+  --               hSetBinaryMode readHdl' True
+  --               printLoop readPath readHdl' output
+  --       else do ln <- BS.hGetLine readHdl
+  --               writeChan output ln
+  --               printLoop readPath readHdl output
 
 -- | Loop to get input and reply output with connected 'Handle'.
 handleLoop
@@ -101,10 +133,15 @@ handleLoop
   -> Chan ByteString -> Chan ByteString -> IO ()
 handleLoop hdl host clientPort input output = forkIO outLoop >> inLoop
   where
-    inLoop = forever (do chunk <- BS.hGetSome hdl 65536
-                         unless (BS.all isSpace chunk)
-                                (do mapM_ showLine (BS.lines chunk)
-                                    writeChan input chunk))
+    inLoop =
+      do eof <- hIsEOF hdl
+         if eof
+           then showLine (BS.pack "disconnected")
+           else do chunk <- BS.hGetSome hdl 65536
+                   unless (BS.all isSpace chunk)
+                          (do mapM_ showLine (BS.lines chunk)
+                              writeChan input chunk)
+                   inLoop
     outLoop = forever (do BS.hPutStr hdl =<< readChan output
                           hFlush hdl)
     showLine bs =
@@ -114,8 +151,9 @@ handleLoop hdl host clientPort input output = forkIO outLoop >> inLoop
          `BS.append` bs)
 
 -- | Loop to interpret Haskell codes with GHC.
-ghcLoop :: ThreadId -> Chan ByteString -> Chan ByteString -> IO ()
-ghcLoop parentThread input output =
+ghcLoop ::
+  FilePath -> ThreadId -> Chan ByteString -> Chan ByteString -> IO ()
+ghcLoop path parentThread input output =
   defaultErrorHandler
     defaultFatalMessager
     defaultFlushOut
@@ -139,19 +177,14 @@ ghcLoop parentThread input output =
                           ,hscTarget = HscInterpreted
                           ,ghcLink = LinkInMemory
                           ,importPaths = srcPaths})
-          let client = "Language.Haskell.Replenish.Client"
-          (setContext =<< mapM (fmap IIDecl . parseImportDecl)
-                               (("import " ++ client) : initialImports))
-            `gcatch`
-            (\(SomeException e) ->
-              do liftIO (do putStrLn ("Caught exception: " ++ show e)
-                            putStrLn ("Loading " ++ client ++ " as target."))
-                 target <- guessTarget client Nothing
-                 setTargets [target]
-                 _ <- load LoadAllTargets
-                 inis <- mapM (fmap IIDecl . parseImportDecl) initialImports
-                 setContext (IIModule (mkModuleName client) : inis))
-          liftIO (writeChan input (BS.pack "readyMessage"))
+          setContext =<< mapM (fmap IIDecl . parseImportDecl) initialImports
+          let getHdl = "__hdl__ <- __getHdl " ++ show path
+              bindIP = "_interactivePrint :: Show a => a -> IO ()\n\
+                            \_interactivePrint = __interactivePrint __hdl__"
+              setIP  = ":set_print _interactivePrint"
+          liftIO (do writeChan input (BS.pack getHdl)
+                     writeChan input (BS.pack bindIP)
+                     writeChan input (BS.pack setIP))
           eval input output))
   `catch`
   \UserInterrupt ->
@@ -161,6 +194,14 @@ ghcLoop parentThread input output =
   \(SomeException e) ->
     putStrLn ("ghcLoop: " ++ show e)
 
+modifyInteractivePrint :: GhcMonad m => String -> m ()
+modifyInteractivePrint func =
+  do (name:_) <- parseName func
+     modifySession
+       (\hsc_env ->
+          let ic = hsc_IC hsc_env
+          in  hsc_env {hsc_IC = setInteractivePrintName ic name})
+
 showPkgConfRef :: PkgConfRef -> String
 showPkgConfRef ref =
   case ref of
@@ -169,7 +210,9 @@ showPkgConfRef ref =
     PkgConfFile path -> "PkgConfFile \"" ++ path  ++ "\""
 
 initialImports :: [String]
-initialImports = ["import Prelude"]
+initialImports =
+  ["import Prelude"
+  ,"import Language.Haskell.Replenish.Client"]
 
 initialOptions :: String
 initialOptions = "-XTemplateHaskell"
@@ -222,6 +265,10 @@ evalDump input expr
                           is = t' : map pp cs
                       in  concat (intersperse "\n" is))
                     mbInfo))
+  | ":set_print" `isPrefixOf` expr =
+    do let _:name:_ = words expr
+       modifyInteractivePrint name
+       return Nothing
   | otherwise = evalLoadOrImport input expr
 {-# INLINE evalDump #-}
 
@@ -263,22 +310,43 @@ evalStatement input stmt =
        Left (SomeException e)
          | looksLikeParseError (show e) -> evalDec stmt
          | otherwise                    -> return (Just (show e))
+
+     -- r <- gtry (liftIO (hscStmt hsc_env stmt))
+     -- case r of
+     --   Right (Just ([],    _,        _)) -> return Nothing
+     --   Right (Just (var:_, hvals_io, _)) ->
+     --    do hval:_ <- liftIO hvals_io
+     --       forkOrShow (hsc_dflags hsc_env) var hval
+     --   Right Nothing -> return Nothing
+     --   Left (SomeException (show -> e))
+     --     | looksLikeParseError e -> evalDec stmt
+     --     | otherwise             -> return (Just e)
   where
-    forkOrShow df var hval
-      | isId var && cbTyStr == tyStr =
-        do liftIO (forkIt (unsafeCoerce# hval))
-           return Nothing
-      | isId var && cbsTyStr == tyStr =
-        do liftIO (mapM_ forkIt (unsafeCoerce# hval))
-           return Nothing
-      | otherwise =
-        do let expr' = "Prelude.show (" ++ showPpr df (getName var) ++ ")"
-           either_hval' <- gtry (compileExpr expr')
-           case either_hval' of
-             Right hval' -> return (Just (unsafeCoerce# hval'))
-             Left (SomeException err) -> return (Just (show err))
-      where
-        tyStr = showPpr df (varType var)
+    forkOrShow :: DynFlags -> Id -> HValue -> Ghc (Maybe String)
+    -- forkOrShow df var hval
+    --   | isId var && cbTyStr == tyStr =
+    --     do liftIO (forkIt (unsafeCoerce# hval))
+    --        return Nothing
+    --   | isId var && cbsTyStr == tyStr =
+    --     do liftIO (mapM_ forkIt (unsafeCoerce# hval))
+    --        return Nothing
+    --   | otherwise =
+    --     do let expr' = "Prelude.show (" ++ showPpr df (getName var) ++ ")"
+    --        either_hval' <- gtry (compileExpr expr')
+    --        case either_hval' of
+    --          Right hval' -> return (Just (unsafeCoerce# hval'))
+    --          Left (SomeException err) -> return (Just (show err))
+    --   where
+    --     tyStr = showPpr df (varType var)
+    forkOrShow df var hval =
+      do let tyStr = showPpr df (varType var)
+             isCallback = isId var && tyStr == cbTyStr
+             isCallbacks = isId var && tyStr == cbsTyStr
+         case () of
+           _ | isCallback  -> liftIO (forkIt (unsafeCoerce# hval))
+             | isCallbacks -> liftIO (mapM_ forkIt (unsafeCoerce# hval))
+             | otherwise   -> return ()
+         return Nothing
 
     forkIt :: Callback -> IO ()
     forkIt cb =
