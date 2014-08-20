@@ -35,7 +35,6 @@ import           Control.Concurrent                    (Chan, ThreadId, forkIO,
                                                         readMVar, writeChan)
 import           Control.Monad                         (filterM, forever,
                                                         unless, void, when)
-import           Control.Monad.IO.Class                (MonadIO (..))
 import           Data.ByteString                       (ByteString)
 import qualified Data.ByteString.Char8                 as BS
 import           Data.Char                             (isSpace)
@@ -126,10 +125,7 @@ runServer port =
                     return (ptid,  gtid))
                 (\(ptid, gtid) ->
                    mapM_ (\tid -> throwTo tid ExitSuccess) [ptid, gtid])
-                (\_ -> handleLoop me hdl host clientPort input output)))
-        `catch`
-     (\(SomeException e) ->
-        putStrLn ("runServer: Got " ++ show e))))
+                (\_ -> handleLoop me hdl host clientPort input output)))))
 
 -- | Loop to return output to client.
 printLoop :: Handle -> Chan ByteString -> IO ()
@@ -374,9 +370,6 @@ looksLikeParseError :: String -> Bool
 looksLikeParseError errString
   | "parse error " `isPrefixOf` errString = True
   | otherwise = False
-
-liftFork :: (MonadIO m, Functor m) => IO a -> m ()
-liftFork a = void (liftIO (forkIO (void a)))
 
 loopCallback :: Session -> Callback -> IO ()
 loopCallback s@(Session session) cb =
