@@ -35,11 +35,11 @@ import           Control.Concurrent                    (Chan, ThreadId, forkIO,
                                                         writeChan, newMVar, readMVar, modifyMVar_)
 import           Control.Monad                         (filterM, forever,
                                                         unless, void, when)
+import Control.Monad.IO.Class (MonadIO(..))
 import           Data.ByteString                       (ByteString)
 import qualified Data.ByteString.Char8                 as BS
 import           Data.Char                             (isSpace)
-import           Data.IORef                            (atomicModifyIORef',
-                                                        readIORef)
+import           Data.IORef                            (readIORef)
 import           Data.List                             (intersperse, isPrefixOf,
                                                         nub)
 import           Distribution.PackageDescription       (BuildInfo (..),
@@ -71,7 +71,6 @@ import           System.Posix.Files                    (createNamedPipe,
 import           GhcMonad
 import           HscMain
 import           Linker
-
 
 
 -- --------------------------------------------------------------------------
@@ -201,7 +200,7 @@ ghcLoop path parentThread input output =
           setContext =<< mapM (fmap IIDecl . parseImportDecl) initialImports
           let getHdl = "__hdl__ <- __getHdl " ++ show path
               bindIP = "_interactivePrint :: Show a => a -> IO ()\n\
-                            \_interactivePrint = __interactivePrint __hdl__"
+                       \_interactivePrint = __interactivePrint __hdl__"
               setIP  = ":set_print _interactivePrint"
           liftIO (mapM_ (writeChan input . BS.pack )
                         [getHdl, bindIP, setIP, "readyMessage"])
@@ -349,8 +348,14 @@ evalStatement input stmt =
              isCallback = isId var && tyStr == cbTyStr
              isCallbacks = isId var && tyStr == cbsTyStr
          case () of
-           _ | isCallback  -> liftIO (forkIt (unsafeCoerce# hval))
-             | isCallbacks -> liftIO (mapM_ forkIt (unsafeCoerce# hval))
+           _ | isCallback ->
+               do session <- getSessionRef
+                  liftIO (void (forkIO (loopCallback
+                                          session (unsafeCoerce# hval))))
+             | isCallbacks ->
+               do session <- getSessionRef
+                  liftIO (mapM_ (forkIO . loopCallback session)
+                                (unsafeCoerce# hval))
              | otherwise   -> return ()
          return Nothing
 
@@ -362,53 +367,52 @@ evalStatement input stmt =
            (hsc_env {hsc_IC = extendInteractiveContext
                                 (hsc_IC hsc_env) (map AnId vars)})
 
-    forkIt :: Callback -> IO ()
-    forkIt cb =
-      case cb of
-        Callback t f args ->
-          void (forkIO
-                  (do pauseThreadUntil t
-                      writeChan input (BS.unwords (map BS.pack [f, args]))))
-        _ -> return ()
+    getSessionRef :: Ghc Session
+    getSessionRef = Ghc return
 
-    -- Better to compare with other thing than String.
-    cbTyStr :: String
-    cbTyStr = "Language.Haskell.Replenish.Client.Callback"
+    -- forkIt :: Callback -> IO ()
+    -- forkIt cb =
+    --   case cb of
+    --     Callback t f args ->
+    --       void (forkIO
+    --               (do pauseThreadUntil t
+    --                   writeChan input (BS.unwords (map BS.pack [f, args]))))
+    --     _ -> return ()
 
-    cbsTyStr :: String
-    cbsTyStr = "[" ++ cbTyStr ++ "]"
-
-    looksLikeParseError :: String -> Bool
-    looksLikeParseError errString
-      | "parse error " `isPrefixOf` errString = True
-      | otherwise = False
 {-# INLINE evalStatement #-}
 
--- Unused. Getting segfault after updating function with same name.
--- Looking for a way to fork inside GhcMonad.
-loopCallback :: Callback -> Session -> IO ()
-loopCallback cb (Session session) =
+-- Better to compare with other thing than String.
+cbTyStr :: String
+cbTyStr = "Language.Haskell.Replenish.Client.Callback"
+
+cbsTyStr :: String
+cbsTyStr = "[" ++ cbTyStr ++ "]"
+
+looksLikeParseError :: String -> Bool
+looksLikeParseError errString
+  | "parse error " `isPrefixOf` errString = True
+  | otherwise = False
+
+liftFork :: (MonadIO m, Functor m) => IO a -> m ()
+liftFork a = void (liftIO (forkIO (void a)))
+
+loopCallback :: Session -> Callback -> IO ()
+loopCallback s@(Session session) cb =
   case cb of
     Callback t f args ->
-      do pauseThreadUntil t
-         hsc_env <- readIORef session
+      do hsc_env <- readIORef session
          r <- hscStmt hsc_env (unwords [f, args])
          case r of
-            Just (is, hvals_io, fixity) ->
-             do let up e = e {hsc_IC = (extendInteractiveContext
-                                         (hsc_IC e)
-                                         (map AnId is))
-                                         {ic_fix_env = fixity}}
+           Just (var:_, hvals_io, _) ->
+             do pauseThreadUntil t
+                let varTyStr = showPpr (hsc_dflags hsc_env) (varType var)
                 hvals <- hvals_io
-                extendLinkEnv (zip (map getName is) hvals)
-                atomicModifyIORef'
-                  session
-                  (\hsc_env' -> (up hsc_env', ()))
                 case hvals of
-                  hval:_ -> loopCallback (unsafeCoerce# hval) (Session session)
+                  hval:_ -> when (varTyStr == cbTyStr)
+                                 (loopCallback s (unsafeCoerce# hval))
                   _      -> return ()
-            _ -> return ()
-    End -> return ()
+           _ -> return ()
+    End               -> return ()
 {-# INLINE loopCallback #-}
 
 -- | Evaluate declarations.
