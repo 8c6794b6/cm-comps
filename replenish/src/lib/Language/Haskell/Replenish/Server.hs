@@ -239,12 +239,12 @@ eval :: Chan ByteString -> Chan ByteString -> Ghc ()
 eval input output =
   do expr <- liftIO (readChan input)
      let x = BS.unpack expr
-     result <- evalDump input x `gcatch`
+     result <- evalDump x `gcatch`
                \(SomeException e) -> return (Just (show e))
      maybe (return ()) (liftIO . writeChan output . BS.pack) result
 
-evalDump :: Chan ByteString -> String -> Ghc (Maybe String)
-evalDump input expr
+evalDump :: String -> Ghc (Maybe String)
+evalDump expr
   | ":dump_hsc_env" `isPrefixOf` expr =
     do hsc_env <- getSession
        liftIO
@@ -286,11 +286,11 @@ evalDump input expr
     do let _:name:_ = words expr
        modifyInteractivePrint name
        return Nothing
-  | otherwise = evalLoadOrImport input expr
+  | otherwise = evalLoadOrImport expr
 {-# INLINE evalDump #-}
 
-evalLoadOrImport :: Chan ByteString -> String -> Ghc (Maybe String)
-evalLoadOrImport input expr
+evalLoadOrImport :: String -> Ghc (Maybe String)
+evalLoadOrImport expr
   | ":load " `isPrefixOf` expr =
     do target <- guessTarget (drop 6 expr) Nothing
        setTargets [target]
@@ -307,26 +307,12 @@ evalLoadOrImport input expr
        getContext >>= setContext . (IIDecl mdl :)
        dflags <- getSessionDynFlags
        return (Just (showPpr dflags mdl))
-  | otherwise = evalStatement input expr
+  | otherwise = evalStatement expr
 {-# INLINE evalLoadOrImport #-}
 
-evalStatement :: Chan ByteString -> String -> Ghc (Maybe String)
-evalStatement input stmt =
+evalStatement :: String -> Ghc (Maybe String)
+evalStatement stmt =
   do hsc_env <- getSession
-     -- r <- gtry (runStmt stmt RunToCompletion)
-     -- case r of
-     --   Right (RunOk [])       -> return Nothing
-     --   Right (RunOk (name:_)) ->
-     --     do Just (thing,_,_,_) <- getInfo False name
-     --        case thing of
-     --          AnId var -> do hval <- liftIO (getHValue hsc_env name)
-     --                         callbackOrVoid (hsc_dflags hsc_env) var hval
-     --          _        -> return Nothing
-     --   Right (RunException e) -> return (Just ("RunException: " ++ show e))
-     --   Right (RunBreak{})     -> return (Just "RunBreak")
-     --   Left (SomeException e)
-     --     | looksLikeParseError (show e) -> evalDec stmt
-     --     | otherwise                    -> return (Just (show e))
      r <- gtry (liftIO (hscStmt hsc_env stmt))
      let dflags = hsc_dflags hsc_env
      case r of
@@ -369,19 +355,8 @@ evalStatement input stmt =
 
     getSessionRef :: Ghc Session
     getSessionRef = Ghc return
-
-    -- forkIt :: Callback -> IO ()
-    -- forkIt cb =
-    --   case cb of
-    --     Callback t f args ->
-    --       void (forkIO
-    --               (do pauseThreadUntil t
-    --                   writeChan input (BS.unwords (map BS.pack [f, args]))))
-    --     _ -> return ()
-
 {-# INLINE evalStatement #-}
 
--- Better to compare with other thing than String.
 cbTyStr :: String
 cbTyStr = "Language.Haskell.Replenish.Client.Callback"
 
