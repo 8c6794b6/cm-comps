@@ -16,19 +16,29 @@ import Data.Data (Data, Typeable)
 import qualified Data.ByteString.Char8 as BS
 import System.IO (Handle, IOMode(..), openFile, hFlush)
 
+-- | Data type for callback.
+--
+-- When an action had type: @IO Callback@, the server will re-run the function
+-- specified by the returned callback value.
+--
+data Callback
+  = -- | Holds information to run next function.
+    Callback
+      {cbTime :: {-# UNPACK #-} !Double
+       -- ^ Scheduled time for next run.
+      ,cbFunc :: String
+       -- ^ Name of function.
+      ,cbArgs :: String
+       -- ^ Haskell source code string for argument.
+      }
+  | -- | Finish the callback.
+    End
+  deriving (Eq, Data, Typeable)
+
 newtype RawString = RawString String
 
 instance Show RawString where
   show (RawString str) = str
-
-readyMessage :: RawString
-readyMessage = RawString "Server ready."
-
-data Callback = Callback {cbTime :: {-# UNPACK #-} !Double
-                         ,cbFunc :: String
-                         ,cbArgs :: String}
-              | End
-              deriving (Eq, Data, Typeable)
 
 callback :: Show a => Double -> String -> a -> IO Callback
 callback scheduled f args = return (Callback scheduled f (show args))
@@ -40,3 +50,6 @@ __interactivePrint :: Show a => Handle -> a -> IO ()
 __interactivePrint hdl str =
   do BS.hPutStr hdl (BS.pack (show str))
      hFlush hdl
+
+readyMessage :: RawString
+readyMessage = RawString "Server ready."
