@@ -34,7 +34,7 @@ import           Control.Concurrent                    (Chan, ThreadId, forkIO,
                                                         newChan, readChan,
                                                         writeChan, newMVar, readMVar, modifyMVar_)
 import           Control.Monad                         (filterM, forever,
-                                                        unless, void, forM_)
+                                                        unless, void, when)
 import           Data.ByteString                       (ByteString)
 import qualified Data.ByteString.Char8                 as BS
 import           Data.Char                             (isSpace)
@@ -92,17 +92,13 @@ runServer port =
          fileVar <- newMVar []
          return (s, me, fileVar))
      (\(s, _, fileVar) ->
-        do putStr "Server killed, closing socket ... "
+        do putStr "Server killed, cleaning up resources  ... "
            close s
-           putStrLn "done."
-           putStr "Cleaning up ..."
-           files <- readMVar fileVar
-           forM_ files
-                 (\(tids, hdl, path) ->
+           mapM_ (\(tids, hdl, path) ->
                     do mapM_ killThread tids
                        hClose hdl
                        putStrLn ("Removing " ++ path)
-                       removeFile path)
+                       removeFile path) =<< readMVar fileVar
            putStrLn "done.")
      (\(s, me, fileVar) ->
        forever
@@ -126,16 +122,17 @@ runServer port =
                     ptid <- forkIO (printLoop ohdl output)
                     gtid <- forkIO (ghcLoop opath me input output)
                     htid <- myThreadId
-                    let tids = [ ptid, gtid, htid]
+                    let tids = [ptid, gtid, htid]
                     modifyMVar_ fileVar (return . ((tids,ohdl,opath):))
-                    return ( ptid,  gtid))
-                (\( ptid, gtid) ->
-                   mapM_ (\tid -> throwTo tid ExitSuccess) [ ptid,  gtid])
+                    return (ptid,  gtid))
+                (\(ptid, gtid) ->
+                   mapM_ (\tid -> throwTo tid ExitSuccess) [ptid, gtid])
                 (\_ -> handleLoop me hdl host clientPort input output)))
         `catch`
      (\(SomeException e) ->
         putStrLn ("runServer: Got " ++ show e))))
 
+-- | Loop to return output to client.
 printLoop :: Handle -> Chan ByteString -> IO ()
 printLoop hdl output =
   forever (BS.hGetSome hdl 8192 >>= writeChan output)
@@ -317,34 +314,34 @@ evalLoadOrImport input expr
 evalStatement :: Chan ByteString -> String -> Ghc (Maybe String)
 evalStatement input stmt =
   do hsc_env <- getSession
-     r <- gtry (runStmt stmt RunToCompletion)
+     -- r <- gtry (runStmt stmt RunToCompletion)
+     -- case r of
+     --   Right (RunOk [])       -> return Nothing
+     --   Right (RunOk (name:_)) ->
+     --     do Just (thing,_,_,_) <- getInfo False name
+     --        case thing of
+     --          AnId var -> do hval <- liftIO (getHValue hsc_env name)
+     --                         callbackOrVoid (hsc_dflags hsc_env) var hval
+     --          _        -> return Nothing
+     --   Right (RunException e) -> return (Just ("RunException: " ++ show e))
+     --   Right (RunBreak{})     -> return (Just "RunBreak")
+     --   Left (SomeException e)
+     --     | looksLikeParseError (show e) -> evalDec stmt
+     --     | otherwise                    -> return (Just (show e))
+     r <- gtry (liftIO (hscStmt hsc_env stmt))
+     let dflags = hsc_dflags hsc_env
      case r of
-       Right (RunOk [])       -> return Nothing
-       Right (RunOk (name:_)) ->
-         do Just (thing,_,_,_) <- getInfo False name
-            case thing of
-              AnId var -> do hval <- liftIO (getHValue hsc_env name)
-                             callbackOrVoid (hsc_dflags hsc_env) var hval
-              _        -> return Nothing
-       Right (RunException e) -> return (Just ("RunException: " ++ show e))
-       Right (RunBreak{})     -> return (Just "RunBreak")
+       Right (Just ([],           _,        _)) -> return Nothing
+       Right (Just (vars@(var:_), hvals_io, _)) ->
+        do let nameStr = showPpr dflags (getName var)
+           hvals@(hval:_) <- liftIO hvals_io
+           when (nameStr /= "it")
+                (bindNames hsc_env vars hvals)
+           callbackOrVoid dflags var hval
+       Right Nothing                            -> return Nothing
        Left (SomeException e)
          | looksLikeParseError (show e) -> evalDec stmt
          | otherwise                    -> return (Just (show e))
-
-     -- XXX: Memory efficient way, but does not extend interactive context after
-     -- the evaluation, new name won't get bind.
-
-     -- r <- gtry (liftIO (hscStmt hsc_env stmt))
-     -- case r of
-     --   Right (Just ([],    _,        _)) -> return Nothing
-     --   Right (Just (var:_, hvals_io, _)) ->
-     --    do hval:_ <- liftIO hvals_io
-     --       callbackOrVoid (hsc_dflags hsc_env) var hval
-     --   Right Nothing -> return Nothing
-     --   Left (SomeException e)
-     --     | looksLikeParseError (show e) -> evalDec stmt
-     --     | otherwise                    -> return e
   where
     callbackOrVoid :: DynFlags -> Id -> HValue -> Ghc (Maybe String)
     callbackOrVoid df var hval =
@@ -356,6 +353,14 @@ evalStatement input stmt =
              | isCallbacks -> liftIO (mapM_ forkIt (unsafeCoerce# hval))
              | otherwise   -> return ()
          return Nothing
+
+    bindNames :: GhcMonad m => HscEnv -> [Id] -> [HValue] -> m ()
+    bindNames hsc_env vars hvals =
+      do liftIO
+           (extendLinkEnv (zipWith (\v h -> (getName v, h)) vars hvals))
+         setSession
+           (hsc_env {hsc_IC = extendInteractiveContext
+                                (hsc_IC hsc_env) (map AnId vars)})
 
     forkIt :: Callback -> IO ()
     forkIt cb =
