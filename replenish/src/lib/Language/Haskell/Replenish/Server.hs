@@ -286,6 +286,13 @@ evalDump expr
     do let _:name:_ = words expr
        modifyInteractivePrint name
        return Nothing
+  | ":set " `isPrefixOf` expr =
+    do let _:body = words expr
+           loc = map (mkGeneralLocated "set") body
+       dflags <- getSessionDynFlags
+       (dflags',_, warns) <- parseDynamicFlags dflags loc
+       void (setSessionDynFlags dflags')
+       return (Just (concatMap (showPpr dflags') warns))
   | otherwise = evalLoadOrImport expr
 {-# INLINE evalDump #-}
 
