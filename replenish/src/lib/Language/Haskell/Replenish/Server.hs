@@ -1,6 +1,5 @@
-{-# LANGUAGE MagicHash #-}
+{-# LANGUAGE MagicHash           #-}
 {-# LANGUAGE ScopedTypeVariables #-}
-{-# LANGUAGE ViewPatterns #-}
 {-|
 Copyright   : 8c6794b6, 2014
 License     : BSD3
@@ -30,12 +29,13 @@ import           GHC.Exts                              (unsafeCoerce#)
 import           GHC.Paths                             (libdir)
 
 import           Control.Concurrent                    (Chan, ThreadId, forkIO,
-                                                        killThread, myThreadId,
-                                                        newChan, readChan,
-                                                        writeChan, newMVar, readMVar, modifyMVar_)
+                                                        killThread, modifyMVar_,
+                                                        myThreadId, newChan,
+                                                        newMVar, readChan,
+                                                        readMVar, writeChan)
 import           Control.Monad                         (filterM, forever,
                                                         unless, void, when)
-import Control.Monad.IO.Class (MonadIO(..))
+import           Control.Monad.IO.Class                (MonadIO (..))
 import           Data.ByteString                       (ByteString)
 import qualified Data.ByteString.Char8                 as BS
 import           Data.Char                             (isSpace)
@@ -57,9 +57,9 @@ import           System.Directory                      (doesFileExist,
                                                         getCurrentDirectory,
                                                         getTemporaryDirectory,
                                                         removeFile)
+import           System.Exit
 import           System.FilePath                       (takeBaseName, (<.>),
                                                         (</>))
-import           System.Exit
 import           System.IO                             (BufferMode (..), Handle,
                                                         IOMode (..), hClose,
                                                         hFlush, hIsEOF,
