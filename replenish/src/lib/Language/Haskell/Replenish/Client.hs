@@ -14,7 +14,6 @@ module Language.Haskell.Replenish.Client where
 
 import Data.Data (Data, Typeable)
 import qualified Data.ByteString.Char8 as BS
-
 import System.IO (Handle, IOMode(..), openFile, hFlush)
 
 newtype RawString = RawString String
@@ -25,7 +24,7 @@ instance Show RawString where
 readyMessage :: RawString
 readyMessage = RawString "Server ready."
 
-data Callback = Callback {cbTime :: Double
+data Callback = Callback {cbTime :: {-# UNPACK #-} !Double
                          ,cbFunc :: String
                          ,cbArgs :: String}
               | End
