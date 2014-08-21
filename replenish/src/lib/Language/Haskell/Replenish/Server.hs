@@ -1,5 +1,4 @@
-{-# LANGUAGE MagicHash           #-}
-{-# LANGUAGE ScopedTypeVariables #-}
+{-# LANGUAGE MagicHash #-}
 {-|
 Copyright   : 8c6794b6, 2014
 License     : BSD3
@@ -66,10 +65,18 @@ import           System.IO                             (BufferMode (..), Handle,
                                                         hSetBuffering, openFile)
 import           System.Posix.Files                    (createNamedPipe,
                                                         stdFileMode)
-
+-- evalStatement
 import           GhcMonad
-import           HscMain
-import           Linker
+import           HscMain (hscStmt)
+import           Linker (extendLinkEnv)
+
+-- load
+import           DriverPipeline                        (preprocess)
+import           Finder                                (addHomeModuleToFinder,
+                                                        mkHomeModLocation)
+import           HeaderInfo                            (getImports)
+import           StringBuffer                          (hGetStringBuffer)
+import           Util                                  (getModificationUTCTime)
 
 
 -- --------------------------------------------------------------------------
@@ -81,16 +88,17 @@ import           Linker
 -- | Start a server.
 runServer
   :: Int -- ^ Port number to receive fragment of valid Haskell codes.
-   -> IO ()
+  -> IO ()
 runServer port =
   Network.withSocketsDo
     (bracket
      (do s <- Network.listenOn (Network.PortNumber (fromIntegral port))
          me <- myThreadId
          fileVar <- newMVar []
-         return (s, me, fileVar))
-     (\(s, _, fileVar) ->
-        do putStr "Server killed, cleaning up resources  ... "
+         tmpd <- getTemporaryDirectory
+         return (s, me, tmpd, fileVar))
+     (\(s, _, _, fileVar) ->
+        do putStrLn "Server killed, cleaning up resources  ... "
            close s
            mapM_ (\(tids, hdl, path) ->
                     do mapM_ killThread tids
@@ -98,7 +106,7 @@ runServer port =
                        putStrLn ("Removing " ++ path)
                        removeFile path) =<< readMVar fileVar
            putStrLn "done.")
-     (\(s, me, fileVar) ->
+     (\(s, serverTid, tmpd, fileVar) ->
        forever
         (do (hdl, host, clientPort) <- Network.accept s
             putStrLn (unwords ["Client connected from"
@@ -107,25 +115,24 @@ runServer port =
             hSetBinaryMode hdl True
             input <- newChan
             output <- newChan
-            tmpd <- getTemporaryDirectory
             let clientPort' = show (fromIntegral clientPort :: Int)
                 opath = tmpd </> "replenish.out." ++ clientPort'
             forkIO
               (bracket
                 (do createNamedPipe opath stdFileMode
                     ohdl <- openFile opath ReadMode
-                    hSetBuffering ohdl NoBuffering
+                    hSetBuffering ohdl (BlockBuffering Nothing)
                     hSetBinaryMode ohdl True
                     putStrLn ("Opened " ++ show opath ++ " for output")
                     ptid <- forkIO (printLoop ohdl output)
-                    gtid <- forkIO (ghcLoop opath me input output)
+                    gtid <- forkIO (ghcLoop opath serverTid input output)
                     htid <- myThreadId
                     let tids = [ptid, gtid, htid]
                     modifyMVar_ fileVar (return . ((tids,ohdl,opath):))
                     return (ptid,  gtid))
                 (\(ptid, gtid) ->
                    mapM_ (\tid -> throwTo tid ExitSuccess) [ptid, gtid])
-                (\_ -> handleLoop me hdl host clientPort input output)))))
+                (\_ -> handleLoop hdl host clientPort input output)))))
 
 -- | Loop to return output to client.
 printLoop :: Handle -> Chan ByteString -> IO ()
@@ -134,30 +141,24 @@ printLoop hdl output =
 
 -- | Loop to get input and reply output with connected 'Handle'.
 handleLoop
-  :: ThreadId -> Handle -> HostName -> PortNumber
+  :: Handle -> HostName -> PortNumber
   -> Chan ByteString -> Chan ByteString -> IO ()
-handleLoop parentThread hdl host clientPort input output =
-  (forkIO outLoop >>= inLoop)
-  `catch`
-  (\(e :: AsyncException) ->
-    case e of
-      UserInterrupt ->
-        do putStrLn "Got user interrupt, killing the server"
-           throwTo parentThread UserInterrupt
-      ThreadKilled  -> putStrLn "handleLoop: ThreadKilled"
-      _             -> putStrLn "handleLoop: AsyncException")
+handleLoop hdl host clientPort input output = forkIO outLoop >>= inLoop
   where
     inLoop tid =
-      do eof <- hIsEOF hdl
-         if eof
-           then do showLine (BS.pack "disconnected")
-                   killThread tid
-           else do chunk <- BS.hGetSome hdl 65536
-                   unless (BS.all isSpace chunk)
-                          (do mapM_ showLine (BS.lines chunk)
-                              writeChan input chunk)
-                   inLoop tid
-
+      (do eof <- hIsEOF hdl
+          if eof
+            then do showLine (BS.pack "disconnected")
+                    killThread tid
+            else do chunk <- BS.hGetSome hdl 65536
+                    unless (BS.all isSpace chunk)
+                           (do mapM_ showLine (BS.lines chunk)
+                               writeChan input chunk)
+                    inLoop tid)
+      `catch`
+      (\(SomeException e) ->
+        do putStrLn ("handleLoop: Caught " ++ show e)
+           killThread tid)
     outLoop = forever (do BS.hPutStr hdl =<< readChan output
                           hFlush hdl)
     showLine bs =
@@ -192,7 +193,7 @@ ghcLoop path parentThread input output =
                           ,extraPkgConfs = const pkgDbs
                           ,hscTarget = HscInterpreted
                           ,ghcLink = LinkInMemory
-                          ,importPaths = srcPaths})
+                          ,importPaths = "/tmp/object" : srcPaths})
           setContext =<< mapM (fmap IIDecl . parseImportDecl) initialImports
           let getHdl = "__hdl__ <- __getHdl " ++ show path
               bindIP = "_interactivePrint :: Show a => a -> IO ()\n\
@@ -213,8 +214,7 @@ modifyInteractivePrint func =
   do (name:_) <- parseName func
      modifySession
        (\hsc_env ->
-          let ic = hsc_IC hsc_env
-          in  hsc_env {hsc_IC = setInteractivePrintName ic name})
+          hsc_env {hsc_IC = setInteractivePrintName (hsc_IC hsc_env) name})
 
 showPkgConfRef :: PkgConfRef -> String
 showPkgConfRef ref =
@@ -235,12 +235,13 @@ eval :: Chan ByteString -> Chan ByteString -> Ghc ()
 eval input output =
   do expr <- liftIO (readChan input)
      let x = BS.unpack expr
-     result <- evalDump x `gcatch`
+     result <- evalSpecial x `gcatch`
                \(SomeException e) -> return (Just (show e))
      maybe (return ()) (liftIO . writeChan output . BS.pack) result
+{-# INLINE eval #-}
 
-evalDump :: String -> Ghc (Maybe String)
-evalDump expr
+evalSpecial :: String -> Ghc (Maybe String)
+evalSpecial expr
   | ":dump_hsc_env" `isPrefixOf` expr =
     do hsc_env <- getSession
        liftIO
@@ -263,7 +264,7 @@ evalDump expr
        dflags <- getSessionDynFlags
        liftIO (mapM_ (putStrLn . showPpr dflags) names)
        return (Just "dumped names.")
-  | ":dump_info" `isPrefixOf` expr =
+  | ":dump_info " `isPrefixOf` expr =
     do df <- getSessionDynFlags
        let expr' = dropWhile isSpace (drop 10 expr)
            pp :: Outputable o => o -> String
@@ -278,7 +279,7 @@ evalDump expr
                           is = t' : map pp cs
                       in  concat (intersperse "\n" is))
                     mbInfo))
-  | ":set_print" `isPrefixOf` expr =
+  | ":set_print " `isPrefixOf` expr =
     do let _:name:_ = words expr
        modifyInteractivePrint name
        return Nothing
@@ -289,29 +290,53 @@ evalDump expr
        (dflags',_, warns) <- parseDynamicFlags dflags loc
        void (setSessionDynFlags dflags')
        return (Just (concatMap (showPpr dflags') warns))
-  | otherwise = evalLoadOrImport expr
-{-# INLINE evalDump #-}
-
-evalLoadOrImport :: String -> Ghc (Maybe String)
-evalLoadOrImport expr
-  | ":load " `isPrefixOf` expr =
-    do target <- guessTarget (drop 6 expr) Nothing
-       setTargets [target]
-       _ <- load LoadAllTargets
-       loaded <- getModuleGraph >>= filterM isLoaded . map ms_mod_name
-       setContext . map IIDecl =<<
-         mapM parseImportDecl
-              ("import Prelude" :
-               map (\m -> "import " ++ moduleNameString m) loaded)
-       dflags <- getSessionDynFlags
-       return (Just ("loaded: " ++ showPpr dflags target))
+  | ":load " `isPrefixOf` expr = loadSource (drop 6 expr)
   | "import " `isPrefixOf` expr =
     do mdl <- parseImportDecl expr
        getContext >>= setContext . (IIDecl mdl :)
        dflags <- getSessionDynFlags
        return (Just (showPpr dflags mdl))
   | otherwise = evalStatement expr
-{-# INLINE evalLoadOrImport #-}
+{-# INLINE evalSpecial #-}
+
+-- | Manually loading module source file, since
+-- 'Linker.Persistentlinkerstate' is globally shared.
+--
+-- Loading same source multiple times does not work.
+--
+loadSource :: FilePath -> Ghc (Maybe String)
+loadSource path =
+  do hsc_env <- getSession
+     let dflags = hsc_dflags hsc_env
+     (dflags', hspp_file, buf) <- liftIO (preprocessFile hsc_env path)
+     (simps, timps, L _ mod_name) <- liftIO (getImports dflags' buf hspp_file path)
+     location <- liftIO (mkHomeModLocation dflags mod_name path)
+     mdl <- liftIO (addHomeModuleToFinder hsc_env mod_name location)
+     timestamp <- liftIO (getModificationUTCTime path)
+     let ms = ModSummary {ms_mod = mdl
+                         ,ms_hsc_src = HsSrcFile
+                         ,ms_location = location
+                         ,ms_hspp_file = hspp_file
+                         ,ms_hspp_opts = dflags'
+                         ,ms_hspp_buf = Just buf
+                         ,ms_srcimps = simps
+                         ,ms_textual_imps = timps
+                         ,ms_hs_date = timestamp
+                         ,ms_obj_date = Nothing}
+     is_loaded <- isLoaded mod_name
+     dm <- parseModule ms >>= typecheckModule >>= desugarModule
+     if is_loaded
+         then do liftIO (putStrLn "Module already loaded.")
+         else void (loadModule dm)
+     getContext >>= setContext . (IIModule (moduleName mdl) :)
+     let str = showPpr dflags (mg_module (dm_core_module dm))
+     return (Just ("loaded: " ++ str))
+  where
+    preprocessFile hsc_env sfn =
+      do (dflags', hspp_fn) <- preprocess hsc_env (sfn, Nothing)
+         buf <- hGetStringBuffer hspp_fn
+         return (dflags', hspp_fn, buf)
+{-# INLINE loadSource #-}
 
 evalStatement :: String -> Ghc (Maybe String)
 evalStatement stmt =
@@ -395,10 +420,10 @@ evalDec :: String -> Ghc (Maybe String)
 evalDec dec =
   do names <- runDecls dec
      dflags <- getSessionDynFlags
-     if null names
-        then return Nothing
-        else do decs <- mapM (showDec dflags) names
-                return (Just ("dec: " ++ unwords decs))
+     case names of
+       [] -> return Nothing
+       _  -> fmap (Just . ("dec: " ++) . unwords)
+                  (mapM (showDec dflags) names)
   where
     showDec :: GhcMonad m => DynFlags-> Name -> m String
     showDec df name =

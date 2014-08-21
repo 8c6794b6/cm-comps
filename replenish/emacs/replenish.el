@@ -16,7 +16,7 @@
 ;; along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 ;; Author: 8c6794b6 <8c6794b6@gmail.com>
-;; Version: 20140816.1
+;; Version: 20140821.1
 ;; Package-Requires: ((haskell-mode "20140805.942") (shm "20140714.341"))
 ;; Keywords: haskell repl
 
@@ -164,6 +164,13 @@
    replenish-con
    (concat ":dump_info " (thing-at-point 'symbol))))
 
+(defun replenish-load-file ()
+  "Load given file."
+  (interactive)
+  (process-send-string
+   replenish-con
+   (concat ":load " (read-file-name "Load: "))))
+
 (defvar replenish-mode-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "C-c M-j") 'replenish-connect)
@@ -172,10 +179,11 @@
     (define-key map (kbd "C-M-x") 'replenish-send-block)
     (define-key map (kbd "C-c :") 'replenish-send-input)
     (define-key map (kbd "C-c TAB") 'replenish-info-at-point)
-    (define-key map [?\C-c ?\C-l] 'replenish-info-at-point)
-    (define-key map [?\C-c ?\C-t] 'replenish-info-at-point)
-    (define-key map [?\C-c ?\C-b] 'replenish-info-at-point)
-    (define-key map [?\C-c ?\C-z] 'replenish-info-at-point)
+    ;;
+    (define-key map (kbd "C-c C-l") 'replenish-load-file)
+    (define-key map (kbd "C-c C-t") 'replenish-info-at-point)
+    (define-key map (kbd "C-c C-b") 'replenish-info-at-point)
+    (define-key map (kbd "C-c C-z") 'replenish-info-at-point)
     map)
   "Keymap for replenish mode.
 Most part of the keymaps are inherited from `haskell-mode'.")
