@@ -63,6 +63,7 @@ library
                    -- , hsc3-lang
                    , hsc3-orphan
                    , hsc3-parser
+                   , hsc3-patch
                    , hsc3-supply
                    , hsc3-th
                    , hsc3-tree
