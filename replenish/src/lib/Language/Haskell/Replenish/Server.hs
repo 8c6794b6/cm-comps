@@ -7,14 +7,21 @@ Maintainer  : 8c6794b6@gmail.com
 Stability   : experimental
 Portability : non-portable (GHC only)
 
-A small REPL server implemented with GHC. Supports defining (and redefining)
-top-level functions without @let@ and function callback by name.
+A small REPL server implemented with GHC.
+
+Supports defining (and redefining) top-level functions without @let@ and
+function callback by name.
+
+Server executable will use cabal package database in sandbox when the server was
+started from cabal package directory containing @cabal.sandbox.config@ file, and
+add source paths listed in cabal configuration file if found.
 
 -}
 module Language.Haskell.Replenish.Server where
 
 import           Language.Haskell.Replenish.Client
 
+-- ghcLoop
 import           DynFlags
 import           Exception
 import           GHC
@@ -25,6 +32,25 @@ import           Outputable                            (Outputable (..),
                                                         showSDocUnqual)
 import           PprTyThing                            (pprTyThingHdr)
 import           Var                                   (isId, varType)
+
+-- evalStatement
+import           GhcMonad
+import           HscMain                               (hscStmt)
+import           Linker                                (deleteFromLinkEnv,
+                                                        extendLinkEnv)
+
+-- load
+import           DriverPipeline                        (preprocess)
+import           Finder                                (addHomeModuleToFinder,
+                                                        mkHomeModLocation)
+import           HeaderInfo                            (getImports)
+import           ObjLink                               (loadObj, unloadObj)
+import           RdrName                               (pprGlobalRdrEnv)
+import           StringBuffer                          (hGetStringBuffer)
+import           UniqFM
+import           Util                                  (getModificationUTCTime,
+                                                        modificationTimeIfExists)
+
 
 import           GHC.Exts                              (unsafeCoerce#)
 import           GHC.Paths                             (libdir)
@@ -68,23 +94,7 @@ import           System.IO                             (BufferMode (..), Handle,
                                                         hSetBuffering, openFile)
 import           System.Posix.Files                    (createNamedPipe,
                                                         stdFileMode)
--- evalStatement
-import           GhcMonad
-import           HscMain                               (hscStmt)
-import           Linker                                (deleteFromLinkEnv,
-                                                        extendLinkEnv)
 
--- load
-import           DriverPipeline                        (preprocess)
-import           Finder                                (addHomeModuleToFinder,
-                                                        mkHomeModLocation)
-import           HeaderInfo                            (getImports)
-import           ObjLink                               (loadObj, unloadObj)
-import           RdrName                               (pprGlobalRdrEnv)
-import           StringBuffer                          (hGetStringBuffer)
-import           UniqFM
-import           Util                                  (getModificationUTCTime,
-                                                        modificationTimeIfExists)
 
 
 -- --------------------------------------------------------------------------
@@ -200,11 +210,6 @@ ghcLoop path dir parentThread input output =
       (do srcPaths <- liftIO getCabalSourcePaths
           pkgDbs <- liftIO getCabalPackageConf
           dflags <- getSessionDynFlags
-          -- liftIO
-          --   (do putStr ("src:\n" ++
-          --               unlines (map ("  " ++) srcPaths))
-          --       putStr ("package-dbs:\n" ++
-          --               unlines (map (("  " ++ ) . showPkgConfRef) pkgDbs)))
           (dflags',_, _) <- parseDynamicFlags
                               dflags
                               [mkGeneralLocated "flag" initialOptions]
@@ -218,7 +223,7 @@ ghcLoop path dir parentThread input output =
                           ,objectDir = Just dir
                           ,hiDir = Just dir})
           setContext =<< mapM (fmap IIDecl . parseImportDecl) initialImports
-          liftIO (initClientPrinter path input)
+          liftIO initClientPrinter
           forever (eval input output)))
   `catch`
   \exception ->
@@ -226,36 +231,22 @@ ghcLoop path dir parentThread input output =
        case fromException exception of
          Just UserInterrupt -> throwTo parentThread UserInterrupt
          _                  -> ghcLoop path dir parentThread input output
+  where
+    initialImports :: [String]
+    initialImports =
+      ["import Prelude"
+      ,"import Language.Haskell.Replenish.Client"]
 
-initClientPrinter :: FilePath -> Chan ByteString -> IO ()
-initClientPrinter path input =
-  mapM_ (writeChan input . BS.pack)
-        ["__hdl__ <- __getHdl " ++ show path
-        ,"_interactivePrint :: Show a => a -> IO ()\n\
-         \_interactivePrint = __interactivePrint __hdl__"
-        ,":set_print _interactivePrint"]
+    initialOptions :: String
+    initialOptions = "-XTemplateHaskell"
 
-modifyInteractivePrint :: GhcMonad m => String -> m ()
-modifyInteractivePrint func =
-  do (name:_) <- parseName func
-     modifySession
-       (\hsc_env ->
-          hsc_env {hsc_IC = setInteractivePrintName (hsc_IC hsc_env) name})
-
-showPkgConfRef :: PkgConfRef -> String
-showPkgConfRef ref =
-  case ref of
-    GlobalPkgConf    -> "GlobalPkgConf"
-    UserPkgConf      -> "UserPkgConf"
-    PkgConfFile path -> "PkgConfFile \"" ++ path  ++ "\""
-
-initialImports :: [String]
-initialImports =
-  ["import Prelude"
-  ,"import Language.Haskell.Replenish.Client"]
-
-initialOptions :: String
-initialOptions = "-XTemplateHaskell"
+    initClientPrinter :: IO ()
+    initClientPrinter =
+      mapM_ (writeChan input . BS.pack)
+            ["__hdl__ <- __getHdl " ++ show path
+            ,"_interactivePrint :: Show a => a -> IO ()\n\
+             \_interactivePrint = __interactivePrint __hdl__"
+            ,":set_print _interactivePrint"]
 
 -- | Get input from 'Chan', evaluate, write result to ouput 'Chan'.
 eval :: Chan ByteString -> Chan ByteString -> Ghc ()
@@ -328,8 +319,19 @@ evalSpecial expr
   | otherwise = evalStatement expr
 {-# INLINE evalSpecial #-}
 
+-- | Modify interactive printer, for writing to named pipe file.
+modifyInteractivePrint :: GhcMonad m => String -> m ()
+modifyInteractivePrint func =
+  do (name:_) <- parseName func
+     modifySession
+       (\hsc_env ->
+          hsc_env {hsc_IC = setInteractivePrintName (hsc_IC hsc_env) name})
+
 -- | Load module source file, compile to object code, and add to home package
 -- table.  Module defined in given file could be imported after this.
+--
+-- Unlike GHCi, this will keep the interactively evaluated declarations in GHC
+-- session.
 loadSource :: FilePath -> Ghc (Maybe String)
 loadSource path =
   do modifySession
@@ -348,7 +350,7 @@ loadSource path =
      -- `Linker.PersistentLinkerState.obj_loaded', out of sync with loaded
      -- object. Fields in `Linker.PersistentLinkerState' are not exported by
      -- 'Linker' module.
-
+     --
      mapM_ unloadModule last_hmis
      void
        (parseModule ms >>= typecheckModule >>= desugarModule >>= loadModule)
@@ -356,7 +358,6 @@ loadSource path =
 
      modifySession
        (\e -> e {hsc_dflags = (hsc_dflags e) {hscTarget = HscInterpreted}})
-
      return (Just (if not (null last_hmis)
                       then "reloaded: " ++ path
                       else "loaded: " ++ path))
@@ -368,8 +369,8 @@ loadSource path =
          (simps, timps, L _ mod_name) <- getImports dflags' buf hspp_file src
          location <- mkHomeModLocation dflags' mod_name path
          mdl <- addHomeModuleToFinder hsc_env mod_name location
-         timestamp <- getModificationUTCTime path
-         obj_tstamp <- modificationTimeIfExists (ml_obj_file location)
+         hs_date <- getModificationUTCTime path
+         obj_date <- modificationTimeIfExists (ml_obj_file location)
          return ModSummary {ms_mod = mdl
                            ,ms_hsc_src = HsSrcFile
                            ,ms_location = location
@@ -378,8 +379,8 @@ loadSource path =
                            ,ms_hspp_buf = Just buf
                            ,ms_srcimps = simps
                            ,ms_textual_imps = timps
-                           ,ms_hs_date = timestamp
-                           ,ms_obj_date = obj_tstamp}
+                           ,ms_hs_date = hs_date
+                           ,ms_obj_date = obj_date}
 
     unloadModule :: GhcMonad m => HomeModInfo -> m ()
     unloadModule hmi =
@@ -457,37 +458,37 @@ evalStatement stmt =
 
     getSessionRef :: Ghc Session
     getSessionRef = Ghc return
+
+    cbTyStr :: String
+    cbTyStr = "Language.Haskell.Replenish.Client.Callback"
+
+    cbsTyStr :: String
+    cbsTyStr = "[" ++ cbTyStr ++ "]"
+
+    looksLikeParseError :: String -> Bool
+    looksLikeParseError errString
+      | "parse error " `isPrefixOf` errString = True
+      | otherwise = False
+
+    loopCallback :: Session -> Callback -> IO ()
+    loopCallback s@(Session session) cb =
+      case cb of
+        Callback t f args ->
+          do hsc_env <- readIORef session
+             r <- hscStmt hsc_env (unwords [f, args])
+             case r of
+               Just (var:_, hvals_io, _) ->
+                 do pauseThreadUntil t
+                    let varTyStr = showPpr (hsc_dflags hsc_env) (varType var)
+                    hvals <- hvals_io
+                    case hvals of
+                      hval:_ -> when (varTyStr == cbTyStr)
+                                     (loopCallback s (unsafeCoerce# hval))
+                      _      -> return ()
+               _ -> return ()
+        End               -> return ()
+    {-# INLINE loopCallback #-}
 {-# INLINE evalStatement #-}
-
-cbTyStr :: String
-cbTyStr = "Language.Haskell.Replenish.Client.Callback"
-
-cbsTyStr :: String
-cbsTyStr = "[" ++ cbTyStr ++ "]"
-
-looksLikeParseError :: String -> Bool
-looksLikeParseError errString
-  | "parse error " `isPrefixOf` errString = True
-  | otherwise = False
-
-loopCallback :: Session -> Callback -> IO ()
-loopCallback s@(Session session) cb =
-  case cb of
-    Callback t f args ->
-      do hsc_env <- readIORef session
-         r <- hscStmt hsc_env (unwords [f, args])
-         case r of
-           Just (var:_, hvals_io, _) ->
-             do pauseThreadUntil t
-                let varTyStr = showPpr (hsc_dflags hsc_env) (varType var)
-                hvals <- hvals_io
-                case hvals of
-                  hval:_ -> when (varTyStr == cbTyStr)
-                                 (loopCallback s (unsafeCoerce# hval))
-                  _      -> return ()
-           _ -> return ()
-    End               -> return ()
-{-# INLINE loopCallback #-}
 
 -- | Evaluate declarations:
 --

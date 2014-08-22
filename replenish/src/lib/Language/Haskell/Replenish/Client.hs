@@ -18,8 +18,8 @@ import System.IO (Handle, IOMode(..), openFile, hFlush)
 
 -- | Data type for callback.
 --
--- When an action had type: @IO Callback@, the server will re-run the function
--- specified by the returned callback value.
+-- When an action has type: @IO Callback@, server will re-run the function
+-- specified by returned callback value.
 --
 data Callback
   = -- | Holds information to run next function.
@@ -27,9 +27,9 @@ data Callback
       {cbTime :: {-# UNPACK #-} !Double
        -- ^ Scheduled time for next run.
       ,cbFunc :: String
-       -- ^ Name of function.
+       -- ^ Name of the function to run.
       ,cbArgs :: String
-       -- ^ Haskell source code string for argument.
+       -- ^ Argument string. Need to be valid haskell expression.
       }
   | -- | Finish the callback.
     End
@@ -40,6 +40,7 @@ newtype RawString = RawString String
 instance Show RawString where
   show (RawString str) = str
 
+-- | Returns 'Callback' with function named and arguments.
 callback :: Show a => Double -> String -> a -> IO Callback
 callback scheduled f args = return (Callback scheduled f (show args))
 
