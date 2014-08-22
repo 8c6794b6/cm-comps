@@ -20,7 +20,9 @@ import           Exception
 import           GHC
 import           HscTypes
 import           Outputable                            (Outputable (..),
-                                                        showPpr, showSDocForUser, showSDocUnqual, alwaysQualify)
+                                                        showPpr,
+                                                        showSDocForUser,
+                                                        showSDocUnqual)
 import           PprTyThing                            (pprTyThingHdr)
 import           Var                                   (isId, varType)
 
@@ -67,18 +69,22 @@ import           System.Posix.Files                    (createNamedPipe,
                                                         stdFileMode)
 -- evalStatement
 import           GhcMonad
-import           HscMain (hscStmt)
-import           Linker (extendLinkEnv, showLinkerState, unload, linkModule)
+import           HscMain                               (hscStmt)
+import           Linker                                (deleteFromLinkEnv,
+                                                        extendLinkEnv,
+                                                        showLinkerState)
 
 -- load
 import           DriverPipeline                        (preprocess)
 import           Finder                                (addHomeModuleToFinder,
                                                         mkHomeModLocation)
 import           HeaderInfo                            (getImports)
-import RdrName (pprGlobalRdrEnv)
+import           ObjLink                               (loadObj, unloadObj)
+import           RdrName                               (pprGlobalRdrEnv)
 import           StringBuffer                          (hGetStringBuffer)
-import           Util                                  (getModificationUTCTime, modificationTimeIfExists)
-import UniqFM
+import           UniqFM
+import           Util                                  (getModificationUTCTime,
+                                                        modificationTimeIfExists)
 
 -- --------------------------------------------------------------------------
 --
@@ -135,6 +141,13 @@ runServer port =
                    mapM_ (\tid -> throwTo tid ExitSuccess) [ptid, gtid])
                 (\_ -> handleLoop hdl host clientPort input output)))))
 
+
+-- --------------------------------------------------------------------------
+--
+-- Read/Print loops
+--
+-- --------------------------------------------------------------------------
+
 -- | Loop to return output to client.
 printLoop :: Handle -> Chan ByteString -> IO ()
 printLoop hdl output =
@@ -168,6 +181,12 @@ handleLoop hdl host clientPort input output = forkIO outLoop >>= inLoop
            (map BS.pack ["[", host, ":", show clientPort, "] "])
          `BS.append` bs)
 
+-- --------------------------------------------------------------------------
+--
+-- Eval loop
+--
+-- --------------------------------------------------------------------------
+
 -- | Loop to interpret Haskell codes with GHC.
 ghcLoop ::
   FilePath -> FilePath -> ThreadId -> Chan ByteString -> Chan ByteString -> IO ()
@@ -194,11 +213,12 @@ ghcLoop path dir parentThread input output =
                           ,extraPkgConfs = const pkgDbs
                           ,hscTarget = HscInterpreted
                           ,ghcLink = LinkInMemory
-                          ,importPaths = "/tmp/object" : srcPaths
-                          ,objectDir = Just dir})
+                          ,importPaths = dir : srcPaths
+                          ,objectDir = Just dir
+                          ,hiDir = Just dir})
           setContext =<< mapM (fmap IIDecl . parseImportDecl) initialImports
           liftIO (initClientPrinter path input)
-          forever (eval path input output)))
+          forever (eval input output)))
   `catch`
   \exception ->
     do putStrLn ("ghcLoop: Got " ++ show exception)
@@ -236,17 +256,19 @@ initialImports =
 initialOptions :: String
 initialOptions = "-XTemplateHaskell"
 
-eval :: FilePath -> Chan ByteString -> Chan ByteString -> Ghc ()
-eval path input output =
+-- | Get input from 'Chan', evaluate, write result to ouput 'Chan'.
+eval :: Chan ByteString -> Chan ByteString -> Ghc ()
+eval input output =
   do expr <- liftIO (readChan input)
      let x = BS.unpack expr
-     result <- evalSpecial path x `gcatch`
+     result <- evalSpecial x `gcatch`
                \(SomeException e) -> return (Just (show e))
      maybe (return ()) (liftIO . writeChan output . BS.pack) result
 {-# INLINE eval #-}
 
-evalSpecial :: FilePath -> String -> Ghc (Maybe String)
-evalSpecial path expr
+-- | Evaluate special cases, e.g; /:info/, /:set/, ... etc.
+evalSpecial :: String -> Ghc (Maybe String)
+evalSpecial expr
   | ":dump_hsc_env" `isPrefixOf` expr =
     do hsc_env <- getSession
        liftIO
@@ -270,6 +292,8 @@ evalSpecial path expr
                          df
                          alwaysQualify
                          (pprGlobalRdrEnv True (ic_rn_gbl_env ic)))
+             putStrLn "hsc_IC . ic_imports:"
+             mapM_ (putStrLn . showPpr df) (ic_imports ic)
              putStrLn "hsc_HPT:"
              putStrLn (showSDocForUser df alwaysQualify
                                           (pprHPT (hsc_HPT hsc_env)))
@@ -307,12 +331,7 @@ evalSpecial path expr
        (dflags',_, warns) <- parseDynamicFlags dflags loc
        void (setSessionDynFlags dflags')
        return (Just (concatMap (showPpr dflags') warns))
-  | ":load " `isPrefixOf` expr =
-    do -- res <- loadTarget (drop 6 expr)
-       res <- loadSource (drop 6 expr)
-       -- liftIO (initClientPrinter path input)
-       return res
-    -- loadSource (drop 6 expr)
+  | ":load " `isPrefixOf` expr = loadSource (drop 6 expr)
   | "import " `isPrefixOf` expr =
     do mdl <- parseImportDecl expr
        getContext >>= setContext . (IIDecl mdl :)
@@ -323,24 +342,22 @@ evalSpecial path expr
 
 -- XXX: 'GhcMake.load' is discarding all local bindings, it affects sessions for
 -- other client connections.
-loadTarget :: String -> Ghc (Maybe String)
-loadTarget targetString =
-  do target <- guessTarget targetString Nothing
-     setTargets [target]
-     result <- load LoadAllTargets
-     loaded <- getModuleGraph >>= filterM isLoaded . map ms_mod_name
-     mapM (fmap (IIDecl) . parseImportDecl)
-          (initialImports
-            ++ map (\m -> "import " ++ moduleNameString m) loaded)
-          >>= setContext
-     dflags <- getSessionDynFlags
-     return (Just (showPpr dflags result))
+--
+-- loadTarget :: String -> Ghc (Maybe String)
+-- loadTarget targetString =
+--   do target <- guessTarget targetString Nothing
+--      setTargets [target]
+--      result <- load LoadAllTargets
+--      loaded <- getModuleGraph >>= filterM isLoaded . map ms_mod_name
+--      mapM (fmap (IIDecl) . parseImportDecl)
+--           (initialImports
+--             ++ map (\m -> "import " ++ moduleNameString m) loaded)
+--           >>= setContext
+--      dflags <- getSessionDynFlags
+--      return (Just (showPpr dflags result))
 
--- | Manually loading module source file, since
--- 'Linker.Persistentlinkerstate' is globally shared.
---
--- Loading same source multiple times does not work.
---
+-- | Load module source file, compile to object code, and add to home package
+-- table.  Added module could be imported after this.
 loadSource :: FilePath -> Ghc (Maybe String)
 loadSource path =
   do hsc_env_orig <- getSession
@@ -369,28 +386,59 @@ loadSource path =
                          ,ms_obj_date = obj_tstamp}
      is_loaded <- isLoaded mod_name
      dm <- parseModule ms >>= typecheckModule >>= desugarModule
+
      when is_loaded
           (liftIO (putStrLn (unwords ["Module"
                                      ,showPpr dflags mod_name
                                      ,"already loaded."])))
 
-     -- Trying to unload:
-     -- let keeps = [keep | hmi <- eltsUFM (hsc_HPT hsc_env)
-     --                   , let Just keep = hm_linkable hmi
-     --                   , mdl /= mi_module (hm_iface hmi)]
-     -- when (not (null keeps) && is_loaded)
-     --      (liftIO (do putStrLn "Unloading with keeping:"
-     --                  mapM_ (putStrLn . showPpr dflags) keeps))
-     -- liftIO (unload dflags keeps)
+     let last_hmis = [hmi |hmi <- eltsUFM (hsc_HPT hsc_env)
+                          ,mdl == mi_module (hm_iface hmi)]
+         doUnloadObj (LM _ _ us) = mapM_ doReloadOne us
+           where
+             doReloadOne (DotO o) = unloadObj o
+             doReloadOne _        = return ()
 
-     loadModule dm
-     liftIO (linkModule hsc_env mdl)
+         unloadModule :: GhcMonad m => HomeModInfo -> m ()
+         unloadModule hmi =
+           do mb_mi <- getModuleInfo (mi_module (hm_iface hmi))
+              case mb_mi of
+                Nothing -> return ()
+                Just mi -> liftIO (deleteFromLinkEnv (modInfoExports mi))
+              case hm_linkable hmi of
+                Nothing  -> return ()
+                Just obj -> liftIO (doUnloadObj obj)
+
+         doLoadObj hmi =
+           case hm_linkable hmi of
+             Nothing  -> return ()
+             Just lnk ->
+               mapM_ (\o -> case o of
+                              DotO p -> loadObj p
+                              _      -> return ()) (linkableUnlinked lnk)
+
+     -- [Note about reloading modules]
+     -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+     --
+     -- Manually doing `ObjLink.loadObj' and `ObjLink.unloadObj' when load
+     -- request with same module happens. This sequence of operations will make
+     -- `Linker.PersistentLinkerState.obj_loaded' out of sync with loaded
+     -- object.
+     --
+     when is_loaded
+          (do liftIO (putStrLn "Unloading ...")
+              mapM_ unloadModule last_hmis)
+     _dm <- loadModule dm
+     when is_loaded
+          (liftIO (mapM_ doLoadObj last_hmis))
+
      let str = showPpr dflags (mg_module (dm_core_module dm))
-     -- setSession hsc_env_orig
      modifySession
        (\e -> e {hsc_dflags = (hsc_dflags e) {hscTarget = HscInterpreted}})
-     -- getContext >>= setContext . (IIModule (moduleName mdl) :)
-     return (Just ("loaded: " ++ str))
+
+     return (Just (if is_loaded
+                      then "reloaded: " ++ str
+                      else "loaded: " ++ str))
   where
     preprocessFile hsc_env sfn =
       do (dflags', hspp_fn) <- preprocess hsc_env (sfn, Nothing)
@@ -398,6 +446,11 @@ loadSource path =
          return (dflags', hspp_fn, buf)
 {-# INLINE loadSource #-}
 
+-- | Evaluate statements:
+--
+-- > foldr (+) 0 [1..10]
+-- > print True
+--
 evalStatement :: String -> Ghc (Maybe String)
 evalStatement stmt =
   do hsc_env <- getSession
@@ -475,8 +528,12 @@ loopCallback s@(Session session) cb =
     End               -> return ()
 {-# INLINE loopCallback #-}
 
--- | Evaluate declarations.
-evalDec :: String -> Ghc (Maybe String)
+-- | Evaluate declarations:
+--
+-- > f x = x + 1
+-- > data Foo a = Foo a Int | Bar a a
+--
+evalDec :: GhcMonad m => String -> m (Maybe String)
 evalDec dec =
   do names <- runDecls dec
      dflags <- getSessionDynFlags
