@@ -34,8 +34,8 @@ import           Control.Concurrent                    (Chan, ThreadId, forkIO,
                                                         myThreadId, newChan,
                                                         newMVar, readChan,
                                                         readMVar, writeChan)
-import           Control.Monad                         (filterM, forever,
-                                                        unless, void, when)
+import           Control.Monad                         (forever, unless, void,
+                                                        when)
 import           Data.ByteString                       (ByteString)
 import qualified Data.ByteString.Char8                 as BS
 import           Data.Char                             (isSpace)
@@ -56,7 +56,8 @@ import           Sound.OSC                             (pauseThreadUntil)
 import           System.Directory                      (doesFileExist,
                                                         getCurrentDirectory,
                                                         getTemporaryDirectory,
-                                                        removeFile)
+                                                        removeDirectoryRecursive,
+                                                        createDirectoryIfMissing)
 import           System.Exit
 import           System.FilePath                       (takeBaseName, (<.>),
                                                         (</>))
@@ -71,8 +72,7 @@ import           System.Posix.Files                    (createNamedPipe,
 import           GhcMonad
 import           HscMain                               (hscStmt)
 import           Linker                                (deleteFromLinkEnv,
-                                                        extendLinkEnv,
-                                                        showLinkerState)
+                                                        extendLinkEnv)
 
 -- load
 import           DriverPipeline                        (preprocess)
@@ -85,6 +85,7 @@ import           StringBuffer                          (hGetStringBuffer)
 import           UniqFM
 import           Util                                  (getModificationUTCTime,
                                                         modificationTimeIfExists)
+
 
 -- --------------------------------------------------------------------------
 --
@@ -102,16 +103,16 @@ runServer port =
      (do s <- Network.listenOn (Network.PortNumber (fromIntegral port))
          me <- myThreadId
          fileVar <- newMVar []
-         tmpd <- getTemporaryDirectory
+         tmpd <- fmap (\d -> d </> "replenish" <.> show port)
+                      getTemporaryDirectory
+         createDirectoryIfMissing True tmpd
          return (s, me, tmpd, fileVar))
-     (\(s, _, _, fileVar) ->
+     (\(s, _, tmpd, fileVar) ->
         do putStrLn "Server killed, cleaning up resources  ... "
            close s
-           mapM_ (\(tids, hdl, path) ->
-                    do mapM_ killThread tids
-                       hClose hdl
-                       putStrLn ("Removing " ++ path)
-                       removeFile path) =<< readMVar fileVar
+           mapM_ (\(tids, hdl) -> do mapM_ killThread tids
+                                     hClose hdl) =<< readMVar fileVar
+           removeDirectoryRecursive tmpd
            putStrLn "done.")
      (\(s, serverTid, tmpd, fileVar) ->
        forever
@@ -123,7 +124,7 @@ runServer port =
             input <- newChan
             output <- newChan
             let clientPort' = show (fromIntegral clientPort :: Int)
-                opath = tmpd </> "replenish.out." ++ clientPort'
+                opath = tmpd </> "out" <.> clientPort'
             forkIO
               (bracket
                 (do createNamedPipe opath stdFileMode
@@ -135,11 +136,11 @@ runServer port =
                     gtid <- forkIO (ghcLoop opath tmpd serverTid input output)
                     htid <- myThreadId
                     let tids = [ptid, gtid, htid]
-                    modifyMVar_ fileVar (return . ((tids,ohdl,opath):))
+                    modifyMVar_ fileVar (return . ((tids,ohdl):))
                     return (ptid,  gtid))
                 (\(ptid, gtid) ->
                    mapM_ (\tid -> throwTo tid ExitSuccess) [ptid, gtid])
-                (\_ -> handleLoop hdl host clientPort input output)))))
+                (\_ -> readLoop hdl host clientPort input output)))))
 
 
 -- --------------------------------------------------------------------------
@@ -154,10 +155,10 @@ printLoop hdl output =
   forever (BS.hGetSome hdl 8192 >>= writeChan output)
 
 -- | Loop to get input and reply output with connected 'Handle'.
-handleLoop
+readLoop
   :: Handle -> HostName -> PortNumber
   -> Chan ByteString -> Chan ByteString -> IO ()
-handleLoop hdl host clientPort input output = forkIO outLoop >>= inLoop
+readLoop hdl host clientPort input output = forkIO outLoop >>= inLoop
   where
     inLoop tid =
       (do eof <- hIsEOF hdl
@@ -276,29 +277,16 @@ evalSpecial expr
                  pp = showPpr df
                  df = hsc_dflags hsc_env
                  ic = hsc_IC hsc_env
-             putStrLn "hsc_mod_graph:"
-             mapM_ (putStrLn . pp) (hsc_mod_graph hsc_env)
-             putStrLn "hsc_targets:"
-             mapM_ (putStrLn . pp) (hsc_targets hsc_env)
-             case hsc_type_env_var hsc_env of
-               Nothing          -> return ()
-               Just (mdl,teRef) ->
-                 do putStrLn "hsc_type_env_var:"
-                    putStrLn (pp mdl)
-                    te <- readIORef teRef
-                    putStrLn (pp te)
              putStrLn "hsc_IC . ic_rn_gbl_env:"
              putStrLn (showSDocForUser
                          df
                          alwaysQualify
                          (pprGlobalRdrEnv True (ic_rn_gbl_env ic)))
              putStrLn "hsc_IC . ic_imports:"
-             mapM_ (putStrLn . showPpr df) (ic_imports ic)
+             mapM_ (putStrLn . pp) (ic_imports ic)
              putStrLn "hsc_HPT:"
              putStrLn (showSDocForUser df alwaysQualify
-                                          (pprHPT (hsc_HPT hsc_env)))
-             putStrLn "linker:"
-             showLinkerState df)
+                                          (pprHPT (hsc_HPT hsc_env))))
        return (Just "dumped hsc_env.")
   | ":dump_names" `isPrefixOf` expr =
     do names <- getNamesInScope
@@ -340,110 +328,83 @@ evalSpecial expr
   | otherwise = evalStatement expr
 {-# INLINE evalSpecial #-}
 
--- XXX: 'GhcMake.load' is discarding all local bindings, it affects sessions for
--- other client connections.
---
--- loadTarget :: String -> Ghc (Maybe String)
--- loadTarget targetString =
---   do target <- guessTarget targetString Nothing
---      setTargets [target]
---      result <- load LoadAllTargets
---      loaded <- getModuleGraph >>= filterM isLoaded . map ms_mod_name
---      mapM (fmap (IIDecl) . parseImportDecl)
---           (initialImports
---             ++ map (\m -> "import " ++ moduleNameString m) loaded)
---           >>= setContext
---      dflags <- getSessionDynFlags
---      return (Just (showPpr dflags result))
-
 -- | Load module source file, compile to object code, and add to home package
--- table.  Added module could be imported after this.
+-- table.  Module defined in given file could be imported after this.
 loadSource :: FilePath -> Ghc (Maybe String)
 loadSource path =
-  do hsc_env_orig <- getSession
-     let dflags_orig = hsc_dflags hsc_env_orig
-         dflags = dflags_orig {hscTarget = HscAsm}
-         hsc_env = hsc_env_orig {hsc_dflags = dflags}
-     setSession hsc_env
-     (dflags', hspp_file, buf) <- liftIO (preprocessFile hsc_env path)
-     (simps, timps, L _ mod_name) <- liftIO
-                                       (getImports dflags' buf hspp_file path)
-     location <- liftIO (mkHomeModLocation dflags mod_name path)
-     mdl <- liftIO (addHomeModuleToFinder hsc_env mod_name location)
-
-     timestamp <- liftIO (getModificationUTCTime path)
-     obj_tstamp <- liftIO (modificationTimeIfExists
-                             (ml_obj_file location))
-     let ms = ModSummary {ms_mod = mdl
-                         ,ms_hsc_src = HsSrcFile
-                         ,ms_location = location
-                         ,ms_hspp_file = hspp_file
-                         ,ms_hspp_opts = dflags'
-                         ,ms_hspp_buf = Just buf
-                         ,ms_srcimps = simps
-                         ,ms_textual_imps = timps
-                         ,ms_hs_date = timestamp
-                         ,ms_obj_date = obj_tstamp}
-     is_loaded <- isLoaded mod_name
-     dm <- parseModule ms >>= typecheckModule >>= desugarModule
-
-     when is_loaded
-          (liftIO (putStrLn (unwords ["Module"
-                                     ,showPpr dflags mod_name
-                                     ,"already loaded."])))
-
-     let last_hmis = [hmi |hmi <- eltsUFM (hsc_HPT hsc_env)
+  do modifySession
+       (\e -> e {hsc_dflags = (hsc_dflags e) {hscTarget = HscAsm}})
+     hsc_env <- getSession
+     ms <- liftIO (summariseSource hsc_env path)
+     let mdl = ms_mod ms
+         last_hmis = [hmi |hmi <- eltsUFM (hsc_HPT hsc_env)
                           ,mdl == mi_module (hm_iface hmi)]
-         doUnloadObj (LM _ _ us) = mapM_ doReloadOne us
-           where
-             doReloadOne (DotO o) = unloadObj o
-             doReloadOne _        = return ()
-
-         unloadModule :: GhcMonad m => HomeModInfo -> m ()
-         unloadModule hmi =
-           do mb_mi <- getModuleInfo (mi_module (hm_iface hmi))
-              case mb_mi of
-                Nothing -> return ()
-                Just mi -> liftIO (deleteFromLinkEnv (modInfoExports mi))
-              case hm_linkable hmi of
-                Nothing  -> return ()
-                Just obj -> liftIO (doUnloadObj obj)
-
-         doLoadObj hmi =
-           case hm_linkable hmi of
-             Nothing  -> return ()
-             Just lnk ->
-               mapM_ (\o -> case o of
-                              DotO p -> loadObj p
-                              _      -> return ()) (linkableUnlinked lnk)
 
      -- [Note about reloading modules]
      -- ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
      --
      -- Manually doing `ObjLink.loadObj' and `ObjLink.unloadObj' when load
      -- request with same module happens. This sequence of operations will make
-     -- `Linker.PersistentLinkerState.obj_loaded' out of sync with loaded
-     -- object.
-     --
-     when is_loaded
-          (do liftIO (putStrLn "Unloading ...")
-              mapM_ unloadModule last_hmis)
-     _dm <- loadModule dm
-     when is_loaded
-          (liftIO (mapM_ doLoadObj last_hmis))
+     -- `Linker.PersistentLinkerState.obj_loaded', out of sync with loaded
+     -- object. Fields in `Linker.PersistentLinkerState' are not exported by
+     -- 'Linker' module.
 
-     let str = showPpr dflags (mg_module (dm_core_module dm))
+     mapM_ unloadModule last_hmis
+     void
+       (parseModule ms >>= typecheckModule >>= desugarModule >>= loadModule)
+     mapM_ doLoadObj last_hmis
+
      modifySession
        (\e -> e {hsc_dflags = (hsc_dflags e) {hscTarget = HscInterpreted}})
 
-     return (Just (if is_loaded
-                      then "reloaded: " ++ str
-                      else "loaded: " ++ str))
+     return (Just (if not (null last_hmis)
+                      then "reloaded: " ++ path
+                      else "loaded: " ++ path))
   where
-    preprocessFile hsc_env sfn =
-      do (dflags', hspp_fn) <- preprocess hsc_env (sfn, Nothing)
-         buf <- hGetStringBuffer hspp_fn
-         return (dflags', hspp_fn, buf)
+    summariseSource :: HscEnv -> FilePath -> IO ModSummary
+    summariseSource hsc_env src =
+      do (dflags', hspp_file) <- preprocess hsc_env (src, Nothing)
+         buf <- hGetStringBuffer hspp_file
+         (simps, timps, L _ mod_name) <- getImports dflags' buf hspp_file src
+         location <- mkHomeModLocation dflags' mod_name path
+         mdl <- addHomeModuleToFinder hsc_env mod_name location
+         timestamp <- getModificationUTCTime path
+         obj_tstamp <- modificationTimeIfExists (ml_obj_file location)
+         return ModSummary {ms_mod = mdl
+                           ,ms_hsc_src = HsSrcFile
+                           ,ms_location = location
+                           ,ms_hspp_file = hspp_file
+                           ,ms_hspp_opts = dflags'
+                           ,ms_hspp_buf = Just buf
+                           ,ms_srcimps = simps
+                           ,ms_textual_imps = timps
+                           ,ms_hs_date = timestamp
+                           ,ms_obj_date = obj_tstamp}
+
+    unloadModule :: GhcMonad m => HomeModInfo -> m ()
+    unloadModule hmi =
+      do mb_mi <- getModuleInfo (mi_module (hm_iface hmi))
+         case mb_mi of
+           Nothing -> return ()
+           Just mi -> liftIO (deleteFromLinkEnv (modInfoExports mi))
+         case hm_linkable hmi of
+           Nothing  -> return ()
+           Just lnk -> doUnloadObj lnk
+
+    doUnloadObj :: GhcMonad m => Linkable -> m ()
+    doUnloadObj (LM _ _ us) = mapM_ doReloadOne us
+      where
+        doReloadOne (DotO o) = liftIO (unloadObj o)
+        doReloadOne _        = return ()
+
+    doLoadObj :: GhcMonad m => HomeModInfo -> m ()
+    doLoadObj hmi =
+      case hm_linkable hmi of
+        Nothing  -> return ()
+        Just lnk ->
+          mapM_ (\o -> case o of
+                         DotO p -> liftIO (loadObj p)
+                         _      -> return ()) (linkableUnlinked lnk)
 {-# INLINE loadSource #-}
 
 -- | Evaluate statements:
