@@ -47,7 +47,7 @@ import           HeaderInfo                            (getImports)
 import           ObjLink                               (loadObj, unloadObj)
 import           RdrName                               (pprGlobalRdrEnv)
 import           StringBuffer                          (hGetStringBuffer)
-import           UniqFM
+import           UniqFM                                (eltsUFM)
 import           Util                                  (getModificationUTCTime,
                                                         modificationTimeIfExists)
 
@@ -110,31 +110,31 @@ runServer
 runServer port =
   Network.withSocketsDo
     (bracket
-     (do s <- Network.listenOn (Network.PortNumber (fromIntegral port))
+     (do sock <- Network.listenOn (Network.PortNumber (fromIntegral port))
          me <- myThreadId
          fileVar <- newMVar []
          tmpd <- fmap (\d -> d </> "replenish" <.> show port)
                       getTemporaryDirectory
          createDirectoryIfMissing True tmpd
-         return (s, me, tmpd, fileVar))
-     (\(s, _, tmpd, fileVar) ->
+         return (sock, me, tmpd, fileVar))
+     (\(sock, _, tmpd, fileVar) ->
         do putStrLn "Server killed, cleaning up resources  ... "
-           close s
+           close sock
            mapM_ (\(tids, hdl) -> do mapM_ killThread tids
                                      hClose hdl) =<< readMVar fileVar
            removeDirectoryRecursive tmpd
            putStrLn "done.")
-     (\(s, serverTid, tmpd, fileVar) ->
+     (\(sock, serverTid, tmpd, fileVar) ->
        forever
-        (do (hdl, host, clientPort) <- Network.accept s
+        (do (hdl, host, clientPort) <- Network.accept sock
             putStrLn (unwords ["Client connected from"
                               , host ++ ":" ++ show clientPort])
             hSetBuffering hdl (BlockBuffering Nothing)
             hSetBinaryMode hdl True
             input <- newChan
             output <- newChan
-            let clientPort' = show (fromIntegral clientPort :: Int)
-                opath = tmpd </> "out" <.> clientPort'
+            let opath =
+                  tmpd </> "out" <.> (show (fromIntegral clientPort :: Int))
             forkIO
               (bracket
                 (do createNamedPipe opath stdFileMode
@@ -145,9 +145,8 @@ runServer port =
                     ptid <- forkIO (printLoop ohdl output)
                     gtid <- forkIO (ghcLoop opath tmpd serverTid input output)
                     htid <- myThreadId
-                    let tids = [ptid, gtid, htid]
-                    modifyMVar_ fileVar (return . ((tids,ohdl):))
-                    return (ptid,  gtid))
+                    modifyMVar_ fileVar (return . (([ptid,gtid,htid],ohdl):))
+                    return (ptid, gtid))
                 (\(ptid, gtid) ->
                    mapM_ (\tid -> throwTo tid ExitSuccess) [ptid, gtid])
                 (\_ -> readLoop hdl host clientPort input output)))))
@@ -161,8 +160,7 @@ runServer port =
 
 -- | Loop to return output to client.
 printLoop :: Handle -> Chan ByteString -> IO ()
-printLoop hdl output =
-  forever (BS.hGetSome hdl 8192 >>= writeChan output)
+printLoop hdl output = forever (BS.hGetSome hdl 8192 >>= writeChan output)
 
 -- | Loop to get input and reply output with connected 'Handle'.
 readLoop
@@ -192,6 +190,7 @@ readLoop hdl host clientPort input output = forkIO outLoop >>= inLoop
            (map BS.pack ["[", host, ":", show clientPort, "] "])
          `BS.append` bs)
 
+
 -- --------------------------------------------------------------------------
 --
 -- Eval loop
@@ -199,8 +198,9 @@ readLoop hdl host clientPort input output = forkIO outLoop >>= inLoop
 -- --------------------------------------------------------------------------
 
 -- | Loop to interpret Haskell codes with GHC.
-ghcLoop ::
-  FilePath -> FilePath -> ThreadId -> Chan ByteString -> Chan ByteString -> IO ()
+ghcLoop
+  :: FilePath -> FilePath -> ThreadId
+  -> Chan ByteString -> Chan ByteString -> IO ()
 ghcLoop path dir parentThread input output =
   defaultErrorHandler
     defaultFatalMessager
@@ -210,9 +210,9 @@ ghcLoop path dir parentThread input output =
       (do srcPaths <- liftIO getCabalSourcePaths
           pkgDbs <- liftIO getCabalPackageConf
           dflags <- getSessionDynFlags
-          (dflags',_, _) <- parseDynamicFlags
-                              dflags
-                              [mkGeneralLocated "flag" initialOptions]
+          (dflags', _, _) <- parseDynamicFlags
+                               dflags
+                               [mkGeneralLocated "flag" initialOptions]
           void (setSessionDynFlags
                   dflags' {verbosity = 0
                           ,packageFlags = [ExposePackage "ghc"]
@@ -251,11 +251,10 @@ ghcLoop path dir parentThread input output =
 -- | Get input from 'Chan', evaluate, write result to ouput 'Chan'.
 eval :: Chan ByteString -> Chan ByteString -> Ghc ()
 eval input output =
-  do expr <- liftIO (readChan input)
-     let x = BS.unpack expr
-     result <- evalSpecial x `gcatch`
-               \(SomeException e) -> return (Just (show e))
-     maybe (return ()) (liftIO . writeChan output . BS.pack) result
+  maybe (return ())
+        (liftIO . writeChan output . BS.pack) =<<
+  ((evalSpecial . BS.unpack =<< liftIO (readChan input))
+    `gcatch` (\(SomeException e) -> return (Just (show e))))
 {-# INLINE eval #-}
 
 -- | Evaluate special cases, e.g; /:info/, /:set/, ... etc.
@@ -280,25 +279,23 @@ evalSpecial expr
                                           (pprHPT (hsc_HPT hsc_env))))
        return (Just "dumped hsc_env.")
   | ":dump_names" `isPrefixOf` expr =
-    do names <- getNamesInScope
-       dflags <- getSessionDynFlags
-       liftIO (mapM_ (putStrLn . showPpr dflags) names)
+    do dflags <- getSessionDynFlags
+       mapM_ (liftIO . putStrLn .
+              showSDocForUser dflags alwaysQualify . ppr) =<< getNamesInScope
        return (Just "dumped names.")
   | ":dump_info " `isPrefixOf` expr =
     do df <- getSessionDynFlags
        let expr' = dropWhile isSpace (drop 10 expr)
-           pp :: Outputable o => o -> String
-           pp   = showPpr df
        names <- parseName expr'
        mbInfo:_ <- mapM (getInfo True) names
        return
-         (return
-            (maybe ("not in scope: " ++ expr')
-                   (\(t,_f,cs,_fs) ->
-                      let t' = showSDocUnqual df (pprTyThingHdr t)
-                          is = t' : map pp cs
-                      in  concat (intersperse "\n" is))
-                    mbInfo))
+         (Just (maybe ("not in scope: " ++ expr')
+                      (\(t,_f,cs,_fs) ->
+                         concat (intersperse
+                                   "\n"
+                                   (showSDocUnqual df (pprTyThingHdr t) :
+                                    map (showPpr df) cs)))
+                       mbInfo))
   | ":set_print " `isPrefixOf` expr =
     do let _:name:_ = words expr
        modifyInteractivePrint name
@@ -419,14 +416,12 @@ evalStatement stmt =
      r <- gtry (liftIO (hscStmt hsc_env stmt))
      let dflags = hsc_dflags hsc_env
      case r of
-       Right (Just ([],           _,        _)) -> return Nothing
        Right (Just (vars@(var:_), hvals_io, _)) ->
-        do let nameStr = showPpr dflags (getName var)
-           hvals@(hval:_) <- liftIO hvals_io
-           when (nameStr /= "it")
+        do hvals@(hval:_) <- liftIO hvals_io
+           when (showPpr dflags (getName var) /= "it")
                 (bindNames hsc_env vars hvals)
            callbackOrVoid dflags var hval
-       Right Nothing                            -> return Nothing
+       Right _                                  -> return Nothing
        Left (SomeException e)
          | looksLikeParseError (show e) -> evalDec stmt
          | otherwise                    -> return (Just (show e))
@@ -434,14 +429,13 @@ evalStatement stmt =
     callbackOrVoid :: DynFlags -> Id -> HValue -> Ghc (Maybe String)
     callbackOrVoid df var hval =
       do let tyStr = showPpr df (varType var)
-             isCallback = isId var && tyStr == cbTyStr
-             isCallbacks = isId var && tyStr == cbsTyStr
+             isVar = isId var
          case () of
-           _ | isCallback ->
+           _ | isVar && tyStr == cbTyStr ->
                do session <- getSessionRef
                   liftIO (void (forkIO (loopCallback
                                           session (unsafeCoerce# hval))))
-             | isCallbacks ->
+             | isVar && tyStr == cbsTyStr ->
                do session <- getSessionRef
                   liftIO (mapM_ (forkIO . loopCallback session)
                                 (unsafeCoerce# hval))
