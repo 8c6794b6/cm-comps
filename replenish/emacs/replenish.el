@@ -171,6 +171,11 @@
    replenish-con
    (concat ":load " (read-file-name "Load: "))))
 
+(defun replenish-dump-env ()
+  "Dump server environment."
+  (interactive)
+  (process-send-string replenish-con ":dump_hsc_env"))
+
 (defvar replenish-mode-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "C-c M-j") 'replenish-connect)
@@ -179,10 +184,9 @@
     (define-key map (kbd "C-M-x") 'replenish-send-block)
     (define-key map (kbd "C-c :") 'replenish-send-input)
     (define-key map (kbd "C-c TAB") 'replenish-info-at-point)
-    ;;
-    (define-key map (kbd "C-c C-l") 'replenish-load-file)
     (define-key map (kbd "C-c C-t") 'replenish-info-at-point)
-    (define-key map (kbd "C-c C-b") 'replenish-info-at-point)
+    (define-key map (kbd "C-c C-l") 'replenish-load-file)
+    (define-key map (kbd "C-c C-b") 'replenish-dump-env)
     (define-key map (kbd "C-c C-z") 'replenish-info-at-point)
     map)
   "Keymap for replenish mode.
