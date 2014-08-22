@@ -20,7 +20,7 @@ import           Exception
 import           GHC
 import           HscTypes
 import           Outputable                            (Outputable (..),
-                                                        showPpr, showSDocUnqual)
+                                                        showPpr, showSDocForUser, showSDocUnqual, alwaysQualify)
 import           PprTyThing                            (pprTyThingHdr)
 import           Var                                   (isId, varType)
 
@@ -68,16 +68,17 @@ import           System.Posix.Files                    (createNamedPipe,
 -- evalStatement
 import           GhcMonad
 import           HscMain (hscStmt)
-import           Linker (extendLinkEnv)
+import           Linker (extendLinkEnv, showLinkerState, unload, linkModule)
 
 -- load
 import           DriverPipeline                        (preprocess)
 import           Finder                                (addHomeModuleToFinder,
                                                         mkHomeModLocation)
 import           HeaderInfo                            (getImports)
+import RdrName (pprGlobalRdrEnv)
 import           StringBuffer                          (hGetStringBuffer)
-import           Util                                  (getModificationUTCTime)
-
+import           Util                                  (getModificationUTCTime, modificationTimeIfExists)
+import UniqFM
 
 -- --------------------------------------------------------------------------
 --
@@ -125,7 +126,7 @@ runServer port =
                     hSetBinaryMode ohdl True
                     putStrLn ("Opened " ++ show opath ++ " for output")
                     ptid <- forkIO (printLoop ohdl output)
-                    gtid <- forkIO (ghcLoop opath serverTid input output)
+                    gtid <- forkIO (ghcLoop opath tmpd serverTid input output)
                     htid <- myThreadId
                     let tids = [ptid, gtid, htid]
                     modifyMVar_ fileVar (return . ((tids,ohdl,opath):))
@@ -169,8 +170,8 @@ handleLoop hdl host clientPort input output = forkIO outLoop >>= inLoop
 
 -- | Loop to interpret Haskell codes with GHC.
 ghcLoop ::
-  FilePath -> ThreadId -> Chan ByteString -> Chan ByteString -> IO ()
-ghcLoop path parentThread input output =
+  FilePath -> FilePath -> ThreadId -> Chan ByteString -> Chan ByteString -> IO ()
+ghcLoop path dir parentThread input output =
   defaultErrorHandler
     defaultFatalMessager
     defaultFlushOut
@@ -193,21 +194,25 @@ ghcLoop path parentThread input output =
                           ,extraPkgConfs = const pkgDbs
                           ,hscTarget = HscInterpreted
                           ,ghcLink = LinkInMemory
-                          ,importPaths = "/tmp/object" : srcPaths})
+                          ,importPaths = "/tmp/object" : srcPaths
+                          ,objectDir = Just dir})
           setContext =<< mapM (fmap IIDecl . parseImportDecl) initialImports
-          let getHdl = "__hdl__ <- __getHdl " ++ show path
-              bindIP = "_interactivePrint :: Show a => a -> IO ()\n\
-                       \_interactivePrint = __interactivePrint __hdl__"
-              setIP  = ":set_print _interactivePrint"
-          liftIO (mapM_ (writeChan input . BS.pack )
-                        [getHdl, bindIP, setIP, "readyMessage"])
-          forever (eval input output)))
+          liftIO (initClientPrinter path input)
+          forever (eval path input output)))
   `catch`
   \exception ->
     do putStrLn ("ghcLoop: Got " ++ show exception)
        case fromException exception of
          Just UserInterrupt -> throwTo parentThread UserInterrupt
-         _                  -> ghcLoop path parentThread input output
+         _                  -> ghcLoop path dir parentThread input output
+
+initClientPrinter :: FilePath -> Chan ByteString -> IO ()
+initClientPrinter path input =
+  mapM_ (writeChan input . BS.pack)
+        ["__hdl__ <- __getHdl " ++ show path
+        ,"_interactivePrint :: Show a => a -> IO ()\n\
+         \_interactivePrint = __interactivePrint __hdl__"
+        ,":set_print _interactivePrint"]
 
 modifyInteractivePrint :: GhcMonad m => String -> m ()
 modifyInteractivePrint func =
@@ -231,22 +236,24 @@ initialImports =
 initialOptions :: String
 initialOptions = "-XTemplateHaskell"
 
-eval :: Chan ByteString -> Chan ByteString -> Ghc ()
-eval input output =
+eval :: FilePath -> Chan ByteString -> Chan ByteString -> Ghc ()
+eval path input output =
   do expr <- liftIO (readChan input)
      let x = BS.unpack expr
-     result <- evalSpecial x `gcatch`
+     result <- evalSpecial path x `gcatch`
                \(SomeException e) -> return (Just (show e))
      maybe (return ()) (liftIO . writeChan output . BS.pack) result
 {-# INLINE eval #-}
 
-evalSpecial :: String -> Ghc (Maybe String)
-evalSpecial expr
+evalSpecial :: FilePath -> String -> Ghc (Maybe String)
+evalSpecial path expr
   | ":dump_hsc_env" `isPrefixOf` expr =
     do hsc_env <- getSession
        liftIO
          (do let pp :: Outputable a => a -> String
-                 pp = showPpr (hsc_dflags hsc_env)
+                 pp = showPpr df
+                 df = hsc_dflags hsc_env
+                 ic = hsc_IC hsc_env
              putStrLn "hsc_mod_graph:"
              mapM_ (putStrLn . pp) (hsc_mod_graph hsc_env)
              putStrLn "hsc_targets:"
@@ -257,7 +264,17 @@ evalSpecial expr
                  do putStrLn "hsc_type_env_var:"
                     putStrLn (pp mdl)
                     te <- readIORef teRef
-                    putStrLn (pp te))
+                    putStrLn (pp te)
+             putStrLn "hsc_IC . ic_rn_gbl_env:"
+             putStrLn (showSDocForUser
+                         df
+                         alwaysQualify
+                         (pprGlobalRdrEnv True (ic_rn_gbl_env ic)))
+             putStrLn "hsc_HPT:"
+             putStrLn (showSDocForUser df alwaysQualify
+                                          (pprHPT (hsc_HPT hsc_env)))
+             putStrLn "linker:"
+             showLinkerState df)
        return (Just "dumped hsc_env.")
   | ":dump_names" `isPrefixOf` expr =
     do names <- getNamesInScope
@@ -290,7 +307,12 @@ evalSpecial expr
        (dflags',_, warns) <- parseDynamicFlags dflags loc
        void (setSessionDynFlags dflags')
        return (Just (concatMap (showPpr dflags') warns))
-  | ":load " `isPrefixOf` expr = loadSource (drop 6 expr)
+  | ":load " `isPrefixOf` expr =
+    do -- res <- loadTarget (drop 6 expr)
+       res <- loadSource (drop 6 expr)
+       -- liftIO (initClientPrinter path input)
+       return res
+    -- loadSource (drop 6 expr)
   | "import " `isPrefixOf` expr =
     do mdl <- parseImportDecl expr
        getContext >>= setContext . (IIDecl mdl :)
@@ -299,6 +321,21 @@ evalSpecial expr
   | otherwise = evalStatement expr
 {-# INLINE evalSpecial #-}
 
+-- XXX: 'GhcMake.load' is discarding all local bindings, it affects sessions for
+-- other client connections.
+loadTarget :: String -> Ghc (Maybe String)
+loadTarget targetString =
+  do target <- guessTarget targetString Nothing
+     setTargets [target]
+     result <- load LoadAllTargets
+     loaded <- getModuleGraph >>= filterM isLoaded . map ms_mod_name
+     mapM (fmap (IIDecl) . parseImportDecl)
+          (initialImports
+            ++ map (\m -> "import " ++ moduleNameString m) loaded)
+          >>= setContext
+     dflags <- getSessionDynFlags
+     return (Just (showPpr dflags result))
+
 -- | Manually loading module source file, since
 -- 'Linker.Persistentlinkerstate' is globally shared.
 --
@@ -306,13 +343,20 @@ evalSpecial expr
 --
 loadSource :: FilePath -> Ghc (Maybe String)
 loadSource path =
-  do hsc_env <- getSession
-     let dflags = hsc_dflags hsc_env
+  do hsc_env_orig <- getSession
+     let dflags_orig = hsc_dflags hsc_env_orig
+         dflags = dflags_orig {hscTarget = HscAsm}
+         hsc_env = hsc_env_orig {hsc_dflags = dflags}
+     setSession hsc_env
      (dflags', hspp_file, buf) <- liftIO (preprocessFile hsc_env path)
-     (simps, timps, L _ mod_name) <- liftIO (getImports dflags' buf hspp_file path)
+     (simps, timps, L _ mod_name) <- liftIO
+                                       (getImports dflags' buf hspp_file path)
      location <- liftIO (mkHomeModLocation dflags mod_name path)
      mdl <- liftIO (addHomeModuleToFinder hsc_env mod_name location)
+
      timestamp <- liftIO (getModificationUTCTime path)
+     obj_tstamp <- liftIO (modificationTimeIfExists
+                             (ml_obj_file location))
      let ms = ModSummary {ms_mod = mdl
                          ,ms_hsc_src = HsSrcFile
                          ,ms_location = location
@@ -322,14 +366,30 @@ loadSource path =
                          ,ms_srcimps = simps
                          ,ms_textual_imps = timps
                          ,ms_hs_date = timestamp
-                         ,ms_obj_date = Nothing}
+                         ,ms_obj_date = obj_tstamp}
      is_loaded <- isLoaded mod_name
      dm <- parseModule ms >>= typecheckModule >>= desugarModule
-     if is_loaded
-         then do liftIO (putStrLn "Module already loaded.")
-         else void (loadModule dm)
-     getContext >>= setContext . (IIModule (moduleName mdl) :)
+     when is_loaded
+          (liftIO (putStrLn (unwords ["Module"
+                                     ,showPpr dflags mod_name
+                                     ,"already loaded."])))
+
+     -- Trying to unload:
+     -- let keeps = [keep | hmi <- eltsUFM (hsc_HPT hsc_env)
+     --                   , let Just keep = hm_linkable hmi
+     --                   , mdl /= mi_module (hm_iface hmi)]
+     -- when (not (null keeps) && is_loaded)
+     --      (liftIO (do putStrLn "Unloading with keeping:"
+     --                  mapM_ (putStrLn . showPpr dflags) keeps))
+     -- liftIO (unload dflags keeps)
+
+     loadModule dm
+     liftIO (linkModule hsc_env mdl)
      let str = showPpr dflags (mg_module (dm_core_module dm))
+     -- setSession hsc_env_orig
+     modifySession
+       (\e -> e {hsc_dflags = (hsc_dflags e) {hscTarget = HscInterpreted}})
+     -- getContext >>= setContext . (IIModule (moduleName mdl) :)
      return (Just ("loaded: " ++ str))
   where
     preprocessFile hsc_env sfn =
