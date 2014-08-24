@@ -419,6 +419,9 @@ evalStatement stmt =
      case r of
        Right (Just (vars@(var:_), hvals_io, _)) ->
         do hvals@(hval:_) <- liftIO hvals_io
+           -- Binding the result every time will increase memory usage when
+           -- running callback function. Only biniding result when the statment
+           -- had explicit name.
            when (showPpr dflags (getName var) /= "it")
                 (bindNames hsc_env vars hvals)
            callbackOrVoid dflags var hval
