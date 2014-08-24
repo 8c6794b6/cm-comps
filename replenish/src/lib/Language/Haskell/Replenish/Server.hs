@@ -251,10 +251,10 @@ ghcLoop path dir parentThread input output =
 -- | Get input from 'Chan', evaluate, write result to ouput 'Chan'.
 eval :: Chan ByteString -> Chan ByteString -> Ghc ()
 eval input output =
-  maybe (return ())
-        (liftIO . writeChan output . BS.pack) =<<
-  ((evalSpecial . BS.unpack =<< liftIO (readChan input))
-    `gcatch` (\(SomeException e) -> return (Just (show e))))
+  do expr <- liftIO (readChan input)
+     r <- evalSpecial (BS.unpack expr)
+          `gcatch` (\(SomeException e) -> return (Just (show e)))
+     maybe (return ()) (liftIO . writeChan output . BS.pack) r
 {-# INLINE eval #-}
 
 -- | Evaluate special cases, e.g; /:info/, /:set/, ... etc.
@@ -323,6 +323,7 @@ modifyInteractivePrint func =
      modifySession
        (\hsc_env ->
           hsc_env {hsc_IC = setInteractivePrintName (hsc_IC hsc_env) name})
+{-# INLINE modifyInteractivePrint #-}
 
 -- | Load module source file, compile to object code, and add to home package
 -- table.  Module defined in given file could be imported after this.
